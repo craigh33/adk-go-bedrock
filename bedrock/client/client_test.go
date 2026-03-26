@@ -12,7 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
-	"github.com/craig-hutcheon/adk-go-bedrock/bedrock/client"
+	"github.com/craigh33/adk-go-bedrock/bedrock/client"
 )
 
 func TestNewFromClient_Converse(t *testing.T) {

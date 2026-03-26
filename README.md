@@ -16,7 +16,7 @@
 ## Install
 
 ```bash
-go get github.com/craig-hutcheon/adk-go-bedrock
+go get github.com/craigh33/adk-go-bedrock
 ```
 
 Replace the module path with your fork or published path if you rename the module in `go.mod`.

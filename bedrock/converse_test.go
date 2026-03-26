@@ -10,7 +10,7 @@ import (
 	"google.golang.org/adk/model"
 	"google.golang.org/genai"
 
-	"github.com/craig-hutcheon/adk-go-bedrock/bedrock/client"
+	"github.com/craigh33/adk-go-bedrock/bedrock/client"
 )
 
 type fakeAPI struct {

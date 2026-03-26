@@ -21,8 +21,8 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 
-	"github.com/craig-hutcheon/adk-go-bedrock/bedrock"
-	"github.com/craig-hutcheon/adk-go-bedrock/bedrock/client"
+	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/client"
 )
 
 func main() {

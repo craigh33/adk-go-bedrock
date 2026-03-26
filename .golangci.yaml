@@ -36,7 +36,7 @@ formatters:
       # with the given prefixes are grouped after 3rd-party packages.
       # Default: []
       local-prefixes:
-        - github.com/craig-hutcheon/adk-go-bedrock
+        - github.com/craigh33/adk-go-bedrock
 
     golines:
       # Target maximum line length.
