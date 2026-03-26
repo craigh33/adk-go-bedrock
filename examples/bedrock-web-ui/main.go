@@ -1,28 +1,27 @@
 package main
 
 import (
-    "context"
-    "log"
-    "os"
-    "strings"
+	"context"
+	"log"
+	"os"
+	"strings"
 
-    "github.com/aws/aws-sdk-go-v2/config"
-    "github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
-    "google.golang.org/adk/agent"
-    "google.golang.org/adk/agent/llmagent"
-    "google.golang.org/adk/cmd/launcher"
-    "google.golang.org/adk/cmd/launcher/full"
-    "google.golang.org/genai"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"google.golang.org/adk/agent"
+	"google.golang.org/adk/agent/llmagent"
+	"google.golang.org/adk/cmd/launcher"
+	"google.golang.org/adk/cmd/launcher/full"
+	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock"
 	"github.com/craigh33/adk-go-bedrock/bedrock/client"
 )
 
-
 func main() {
 	ctx := context.Background()
-	
-    // Default AWS authentication: same resolution order as the AWS CLI — env vars
+
+	// Default AWS authentication: same resolution order as the AWS CLI — env vars
 	// (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN), shared credentials
 	// file, config file (including profile and region), SSO token provider, IMDS on EC2, etc.
 	var loadOpts []func(*config.LoadOptions) error
@@ -62,12 +61,12 @@ func main() {
 		log.Fatalf("agent: %v", err)
 	}
 
-    config := &launcher.Config{
-        AgentLoader: agent.NewSingleLoader(a),
-    }
+	launcherCfg := &launcher.Config{
+		AgentLoader: agent.NewSingleLoader(a),
+	}
 
-    l := full.NewLauncher()
-    if err = l.Execute(ctx, config, os.Args[1:]); err != nil {
-        log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())
-    }
+	l := full.NewLauncher()
+	if err = l.Execute(ctx, launcherCfg, os.Args[1:]); err != nil {
+		log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())
+	}
 }

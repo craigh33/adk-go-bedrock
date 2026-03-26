@@ -29,6 +29,39 @@ Replace the module path with your fork or published path if you rename the modul
 | `make test` | Run unit tests |
 | `make build` | Compile all packages |
 | `make lint` | Run `golangci-lint run ./...` |
+| `make pre-commit-install` | Install pre-commit hooks |
+
+## Contributing / Development
+
+### Pre-commit hooks
+
+This project uses [pre-commit](https://pre-commit.com) to enforce code quality and commit hygiene. The following tools must be available on your `PATH` before installing the hooks:
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| [pre-commit](https://pre-commit.com) | Hook framework | `brew install pre-commit` |
+| [golangci-lint](https://golangci-lint.run/welcome/install/) | Go linter (runs `make lint`) | `brew install golangci-lint` |
+| [gitleaks](https://github.com/gitleaks/gitleaks) | Secret / credential scanner | `brew install gitleaks` |
+
+Once the tools are installed, wire the hooks into your local clone:
+
+```bash
+make pre-commit-install
+```
+
+This installs hooks for both the `pre-commit` stage and the `commit-msg` stage.
+
+#### What the hooks do
+
+| Hook | Stage | Description |
+|------|-------|-------------|
+| `trailing-whitespace` | pre-commit | Strips trailing whitespace |
+| `end-of-file-fixer` | pre-commit | Ensures files end with a newline |
+| `check-yaml` | pre-commit | Validates YAML syntax |
+| `no-commit-to-branch` | pre-commit | Prevents direct commits to `main` |
+| `conventional-pre-commit` | commit-msg | Enforces [Conventional Commits](https://www.conventionalcommits.org/) message format (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`) |
+| `golangci-lint` | pre-commit | Runs `make lint` against all Go files |
+| `gitleaks` | pre-commit | Scans staged diff for secrets/credentials |
 
 ## Usage
 

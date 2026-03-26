@@ -1,0 +1,32 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]
+      - id: no-commit-to-branch
+        args: [--branch, main]
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.2.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert]
+
+  - repo: local
+    hooks:
+      - id: lint
+        name: golangci-lint
+        entry: make lint
+        language: system
+        pass_filenames: false
+        files: ^/*
+
+      - id: gitleaks
+        name: gitleaks (staged diff scan)
+        entry: gitleaks git . --staged --redact
+        language: system
+        pass_filenames: false

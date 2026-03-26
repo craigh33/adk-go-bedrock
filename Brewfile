@@ -1,0 +1,5 @@
+brew "make"
+brew "go"
+brew "pre-commit"
+brew "gitleaks"
+brew "golangci-lint"
