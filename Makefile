@@ -4,6 +4,10 @@
 dev:
 	go run ./examples/bedrock-chat
 
+# Run the bedrock-web-ui example (set BEDROCK_MODEL_ID and AWS auth as in README).
+dev-ui:
+ 	go run ./examples/bedrock-web-ui/main.go web api webui
+
 # Run unit tests for all packages.
 test:
 	go test ./... -count=1
