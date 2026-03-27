@@ -6,7 +6,7 @@ To keep the example simple, it starts an **in-memory MCP server** inside the pro
 
 ## Prerequisites
 
-- `BEDROCK_MODEL_ID` set to a Bedrock model ID or inference profile ARN (must support tool use)
+- Optional: `BEDROCK_MODEL_ID` to override the default Bedrock model ID or inference profile ARN (must support tool use). If unset, this example uses the default configured in `main.go`.
 - AWS credentials configured via the default chain
 - AWS region configured (for example `AWS_REGION=us-east-1`)
 

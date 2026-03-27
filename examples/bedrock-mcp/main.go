@@ -92,7 +92,7 @@ func main() {
 
 	modelID := os.Getenv("BEDROCK_MODEL_ID")
 	if modelID == "" {
-		log.Println("BEDROCK_MODEL_ID is required (e.g. eu.amazon.nova-2-lite-v1:0) using default model")
+		log.Println("BEDROCK_MODEL_ID not set; defaulting to eu.amazon.nova-2-lite-v1:0")
 		modelID = "eu.amazon.nova-2-lite-v1:0"
 	}
 
