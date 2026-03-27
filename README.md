@@ -25,7 +25,6 @@ Replace the module path with your fork or published path if you rename the modul
 
 | Target | Description |
 |--------|-------------|
-| `make dev` | Run the example (`go run ./examples/bedrock-chat`) |
 | `make test` | Run unit tests |
 | `make build` | Compile all packages |
 | `make lint` | Run `golangci-lint run ./...` |
@@ -84,22 +83,29 @@ agent, err := llmagent.New(llmagent.Config{
 
 `bedrock.New` accepts a **model ID** or **inference profile ARN** as documented by AWS. [`LLMRequest.Model`](https://pkg.go.dev/google.golang.org/adk/model#LLMRequest) can override the model ID at runtime (e.g. from ADK callbacks).
 
-The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conversions (requests, responses, tools, usage). Import it if you need the same mappings outside the default [`bedrock`](bedrock/) package. [`bedrock/client`](bedrock/client/) defines the Bedrock Runtime API surface ([`client.RuntimeAPI`](bedrock/client/client.go)) used by [`converse.go`](bedrock/converse.go).
+The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conversions (requests, responses, tools, usage). Import it if you need the same mappings outside the default [`bedrock`](bedrock/) package. The Bedrock Runtime API abstraction used by [`converse.go`](bedrock/converse.go) is exported from [`bedrock`](bedrock/) (`RuntimeAPI`, `StreamReader`, and `NewRuntimeAPI`).
 
-## Example
+## Examples
 
-The [example](examples/bedrock-chat/main.go) loads AWS configuration with [`config.LoadDefaultConfig`](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/config#LoadDefaultConfig) (environment variables, `~/.aws/credentials`, `~/.aws/config`, `AWS_PROFILE` / SSO, instance/task role, etc.), then builds the Bedrock Runtime client. Set **`BEDROCK_MODEL_ID`**. Set **`AWS_REGION`** or configure a `region` on your AWS profile so the resolved region is non-empty.
+Each example has its own `README.md` and `Makefile`:
+
+- [`examples/bedrock-chat`](examples/bedrock-chat): runner-based chat example.
+- [`examples/bedrock-tool-calling`](examples/bedrock-tool-calling): tool-calling agent example with function declarations.
+- [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
+- [`examples/bedrock-web-ui`](examples/bedrock-web-ui): ADK local web UI launcher.
+
+All examples load AWS configuration with [`config.LoadDefaultConfig`](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/config#LoadDefaultConfig) and require **`BEDROCK_MODEL_ID`** plus region configuration (`AWS_REGION` or profile region).
 
 ```bash
 export BEDROCK_MODEL_ID=us.anthropic.claude-3-5-sonnet-20241022-v2:0
 export AWS_REGION=us-east-1   # optional if your profile already defines region
-go run ./examples/bedrock-chat
+make -C examples/bedrock-chat run
 ```
 
-Optional: pass a prompt as arguments:
+Run streaming example:
 
 ```bash
-go run ./examples/bedrock-chat "Summarize the benefits of static typing in one sentence."
+make -C examples/bedrock-stream run
 ```
 
 ## How it maps to Bedrock

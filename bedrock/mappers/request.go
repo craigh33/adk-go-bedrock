@@ -14,17 +14,23 @@ import (
 	"google.golang.org/genai"
 )
 
+const (
+	genaiRoleUser   = "user"
+	genaiRoleModel  = "model"
+	genaiRoleSystem = "system"
+)
+
 // MaybeAppendUserContent mirrors the Gemini provider behavior so empty histories or
 // assistant-terminated turns still receive a valid user message.
 func MaybeAppendUserContent(contents []*genai.Content) []*genai.Content {
 	if len(contents) == 0 {
 		return append(contents, genai.NewContentFromText(
-			"Handle the requests as specified in the System Instruction.", "user"))
+			"Handle the requests as specified in the System Instruction.", genaiRoleUser))
 	}
-	if last := contents[len(contents)-1]; last != nil && last.Role != "user" {
+	if last := contents[len(contents)-1]; last != nil && last.Role != genaiRoleUser {
 		return append(contents, genai.NewContentFromText(
 			"Continue processing previous requests as instructed. Exit or provide a summary if no more outputs are needed.",
-			"user",
+			genaiRoleUser,
 		))
 	}
 	return contents
@@ -120,7 +126,7 @@ func splitContents(contents []*genai.Content) ([]types.SystemContentBlock, []*ge
 		if c == nil {
 			continue
 		}
-		if c.Role == "system" {
+		if c.Role == genaiRoleSystem {
 			system = append(system, contentToSystemBlocks(c)...)
 			continue
 		}
@@ -144,9 +150,9 @@ func contentToSystemBlocks(c *genai.Content) []types.SystemContentBlock {
 
 func mapConversationRole(genaiRole string) (types.ConversationRole, error) {
 	switch genaiRole {
-	case "user":
+	case genaiRoleUser:
 		return types.ConversationRoleUser, nil
-	case "model":
+	case genaiRoleModel:
 		return types.ConversationRoleAssistant, nil
 	default:
 		return "", fmt.Errorf("unsupported content role for Bedrock Converse: %q (expected user or model)", genaiRole)
