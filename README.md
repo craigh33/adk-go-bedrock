@@ -89,6 +89,7 @@ The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conver
 
 Each example has its own `README.md` and `Makefile`:
 
+- [`examples/bedrock-a2a`](examples/bedrock-a2a): A2A remote-agent example backed by Bedrock.
 - [`examples/bedrock-chat`](examples/bedrock-chat): runner-based chat example.
 - [`examples/bedrock-tool-calling`](examples/bedrock-tool-calling): tool-calling agent example with function declarations.
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
