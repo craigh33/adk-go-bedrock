@@ -15,7 +15,6 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock"
-	"github.com/craigh33/adk-go-bedrock/bedrock/client"
 )
 
 func main() {
@@ -43,7 +42,7 @@ func main() {
 	}
 
 	br := bedrockruntime.NewFromConfig(awsCfg)
-	llm, err := bedrock.NewWithAPI(modelID, client.NewFromClient(br))
+	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br))
 	if err != nil {
 		log.Fatalf("bedrock model: %v", err)
 	}
