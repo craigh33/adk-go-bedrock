@@ -91,6 +91,7 @@ Each example has its own `README.md` and `Makefile`:
 
 - [`examples/bedrock-a2a`](examples/bedrock-a2a): A2A remote-agent example backed by Bedrock.
 - [`examples/bedrock-chat`](examples/bedrock-chat): runner-based chat example.
+- [`examples/bedrock-mcp`](examples/bedrock-mcp): runner-based MCP example using ADK's `mcptoolset` with an in-memory MCP server.
 - [`examples/bedrock-tool-calling`](examples/bedrock-tool-calling): tool-calling agent example with function declarations.
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
 - [`examples/bedrock-web-ui`](examples/bedrock-web-ui): ADK local web UI launcher.
@@ -113,12 +114,12 @@ make -C examples/bedrock-stream run
 
 - **Messages**: `genai` roles `user` and `model` map to Bedrock `user` and `assistant`. Optional `system` role entries in the conversation are mapped to Bedrock `system` blocks.
 - **System instruction**: `GenerateContentConfig.SystemInstruction` is sent as Bedrock system content.
-- **Tools**: `GenerateContentConfig.Tools` with `FunctionDeclarations` are converted to Bedrock tool specifications. Other `genai.Tool` variants (Google Search, code execution, etc.) are not supported here.
+- **Tools**: `GenerateContentConfig.Tools` with `FunctionDeclarations` are converted to Bedrock tool specifications. MCP works through ADK toolsets such as `mcptoolset`, which expose MCP tools to the model as function declarations before they reach this provider. Other `genai.Tool` variants (Google Search, code execution, etc.) are not supported here.
 - **Streaming**: When ADK uses SSE streaming, the provider calls `ConverseStream`, emits partial text responses, then a final response with `TurnComplete` set.
 
 ## Limitations
 
-- **Non–function-calling tools**: Only function declarations are mapped; retrieval, Google Search, MCP, and similar tool types are ignored.
+- **Non–function-calling tools**: Only function declarations are mapped at the provider boundary; retrieval, Google Search, and similar non-function `genai.Tool` variants are ignored. MCP is supported when ADK exposes MCP tools as function declarations via `mcptoolset`.
 - **Multimodal**: Inline images are supported for **user** turns with supported MIME types (`image/jpeg`, `image/png`, `image/gif`, `image/webp`). Other modalities may not round-trip.
 - **Streaming tool calls**: Tool input is accumulated as JSON text; streamed tool use is best-effort compared to non-streaming `Converse`.
 - **Safety / guardrails**: Genai safety settings are not mapped to Bedrock guardrails (you can extend the request builders if needed).
