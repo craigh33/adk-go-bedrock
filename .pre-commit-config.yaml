@@ -16,15 +16,30 @@ repos:
         stages: [commit-msg]
         args: [feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert]
 
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.10.1
+    hooks:
+      - id: golangci-lint
+        name: Lint
+        args:
+          - '--config=.golangci.yaml'
+          - '--new'
+          - '--verbose'
+        exclude: |
+          (?x)^(
+                api/.*|
+                build/.*|
+                deployments/.*|
+                docs/.*|
+                mocks/.*|
+                scripts/.*
+            )$
+        types:
+          - go
+        stages: [ pre-commit ]
+
   - repo: local
     hooks:
-      - id: lint
-        name: golangci-lint
-        entry: make lint
-        language: system
-        pass_filenames: false
-        files: ^/*
-
       - id: gitleaks
         name: gitleaks (staged diff scan)
         entry: gitleaks git . --staged --redact

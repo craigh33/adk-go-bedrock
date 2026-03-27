@@ -1,0 +1,18 @@
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - skip: true
+
+source:
+  enabled: true
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
