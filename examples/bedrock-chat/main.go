@@ -15,6 +15,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"go.opentelemetry.io/otel"
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/runner"
@@ -50,7 +51,8 @@ func main() {
 	}
 
 	br := bedrockruntime.NewFromConfig(awsCfg)
-	llm, err := bedrock.NewWithAPI(modelID, client.NewFromClient(br))
+	tr := otel.Tracer("github.com/craigh33/adk-go-bedrock/examples/bedrock-chat")
+	llm, err := bedrock.NewWithAPI(modelID, client.NewFromClient(br, client.WithTracer(tr)))
 	if err != nil {
 		log.Fatalf("bedrock model: %v", err)
 	}
