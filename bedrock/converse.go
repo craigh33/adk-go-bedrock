@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"maps"
+	"slices"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -213,10 +214,14 @@ type streamState struct {
 	textBuf        strings.Builder
 	lastYieldedLen int
 	toolsBySlot    map[int32]*streamToolCall
-	toolOrder      []int32
+	imagesBySlot   map[int32]*streamImageBlock
+	reasonBySlot   map[int32]*streamReasoningBlock
+	slotOrder      []int32
 
-	lastUsage  *genai.GenerateContentResponseUsageMetadata
-	stopReason types.StopReason
+	lastUsage      *genai.GenerateContentResponseUsageMetadata
+	customMetadata map[string]any
+	guardrailTrace *types.GuardrailTraceAssessment
+	stopReason     types.StopReason
 }
 
 type streamToolCall struct {
@@ -226,8 +231,22 @@ type streamToolCall struct {
 	input strings.Builder
 }
 
+type streamImageBlock struct {
+	Format types.ImageFormat
+	Data   []byte
+}
+
+type streamReasoningBlock struct {
+	Text      strings.Builder
+	Signature string
+}
+
 func newStreamState() *streamState {
-	return &streamState{toolsBySlot: make(map[int32]*streamToolCall)}
+	return &streamState{
+		toolsBySlot:  make(map[int32]*streamToolCall),
+		imagesBySlot: make(map[int32]*streamImageBlock),
+		reasonBySlot: make(map[int32]*streamReasoningBlock),
+	}
 }
 
 func (s *streamState) consumeEvent(ev types.ConverseStreamOutput) (*model.LLMResponse, error) {
@@ -240,6 +259,10 @@ func (s *streamState) consumeEvent(ev types.ConverseStreamOutput) (*model.LLMRes
 		s.stopReason = v.Value.StopReason
 	case *types.ConverseStreamOutputMemberMetadata:
 		s.lastUsage = mappers.StreamMetadataToUsage(&v.Value)
+		s.mergeCustomMetadata(mappers.StreamMetadataToCustomMetadata(&v.Value))
+		if v.Value.Trace != nil {
+			s.guardrailTrace = v.Value.Trace.Guardrail
+		}
 	default:
 	}
 	return nil, nil //nolint:nilnil // Stream event type does not emit an intermediate response.
@@ -249,26 +272,31 @@ func (s *streamState) onContentBlockStart(ev *types.ContentBlockStartEvent) {
 	if ev == nil || ev.ContentBlockIndex == nil {
 		return
 	}
-	st, ok := ev.Start.(*types.ContentBlockStartMemberToolUse)
-	if !ok {
-		return
-	}
 	idx := *ev.ContentBlockIndex
-	call := s.ensureToolCall(idx)
-	if st.Value.ToolUseId != nil {
-		call.ID = *st.Value.ToolUseId
-	}
-	if st.Value.Name != nil {
-		call.Name = *st.Value.Name
+	s.rememberSlot(idx)
+	switch st := ev.Start.(type) {
+	case *types.ContentBlockStartMemberToolUse:
+		call := s.ensureToolCall(idx)
+		if st.Value.ToolUseId != nil {
+			call.ID = *st.Value.ToolUseId
+		}
+		if st.Value.Name != nil {
+			call.Name = *st.Value.Name
+		}
+	case *types.ContentBlockStartMemberImage:
+		img := s.ensureImageBlock(idx)
+		img.Format = st.Value.Format
 	}
 }
 
+//nolint:gocognit // Streaming unions require branching per delta type.
 func (s *streamState) onContentBlockDelta(ev *types.ContentBlockDeltaEvent) (*model.LLMResponse, error) {
 	if ev == nil || ev.ContentBlockIndex == nil {
 		return nil, nil //nolint:nilnil // Missing delta index means nothing to emit.
 	}
 	switch d := ev.Delta.(type) {
 	case *types.ContentBlockDeltaMemberText:
+		s.rememberSlot(*ev.ContentBlockIndex)
 		if d.Value == "" {
 			return nil, nil //nolint:nilnil // Empty text delta does not produce output.
 		}
@@ -287,6 +315,26 @@ func (s *streamState) onContentBlockDelta(ev *types.ContentBlockDeltaEvent) (*mo
 			},
 			Partial: true,
 		}, nil
+	case *types.ContentBlockDeltaMemberImage:
+		img := s.ensureImageBlock(*ev.ContentBlockIndex)
+		if d.Value.Source == nil {
+			return nil, nil //nolint:nilnil // Empty image delta does not produce output.
+		}
+		if src, ok := d.Value.Source.(*types.ImageSourceMemberBytes); ok {
+			img.Data = append(img.Data, src.Value...)
+		}
+		return nil, nil //nolint:nilnil // Image deltas are buffered until final response.
+	case *types.ContentBlockDeltaMemberReasoningContent:
+		reason := s.ensureReasoningBlock(*ev.ContentBlockIndex)
+		switch delta := d.Value.(type) {
+		case *types.ReasoningContentBlockDeltaMemberText:
+			if _, err := reason.Text.WriteString(delta.Value); err != nil {
+				return nil, err
+			}
+		case *types.ReasoningContentBlockDeltaMemberSignature:
+			reason.Signature = delta.Value
+		}
+		return nil, nil //nolint:nilnil // Reasoning deltas are buffered until final response.
 	case *types.ContentBlockDeltaMemberToolUse:
 		call := s.ensureToolCall(*ev.ContentBlockIndex)
 		if d.Value.Input != nil {
@@ -301,13 +349,50 @@ func (s *streamState) onContentBlockDelta(ev *types.ContentBlockDeltaEvent) (*mo
 }
 
 func (s *streamState) ensureToolCall(idx int32) *streamToolCall {
+	s.rememberSlot(idx)
 	if call, ok := s.toolsBySlot[idx]; ok {
 		return call
 	}
 	call := &streamToolCall{}
 	s.toolsBySlot[idx] = call
-	s.toolOrder = append(s.toolOrder, idx)
 	return call
+}
+
+func (s *streamState) ensureImageBlock(idx int32) *streamImageBlock {
+	s.rememberSlot(idx)
+	if img, ok := s.imagesBySlot[idx]; ok {
+		return img
+	}
+	img := &streamImageBlock{}
+	s.imagesBySlot[idx] = img
+	return img
+}
+
+func (s *streamState) ensureReasoningBlock(idx int32) *streamReasoningBlock {
+	s.rememberSlot(idx)
+	if reason, ok := s.reasonBySlot[idx]; ok {
+		return reason
+	}
+	reason := &streamReasoningBlock{}
+	s.reasonBySlot[idx] = reason
+	return reason
+}
+
+func (s *streamState) rememberSlot(idx int32) {
+	if slices.Contains(s.slotOrder, idx) {
+		return
+	}
+	s.slotOrder = append(s.slotOrder, idx)
+}
+
+func (s *streamState) mergeCustomMetadata(md map[string]any) {
+	if len(md) == 0 {
+		return
+	}
+	if s.customMetadata == nil {
+		s.customMetadata = map[string]any{}
+	}
+	maps.Copy(s.customMetadata, md)
 }
 
 func (s *streamState) finalResponse() *model.LLMResponse {
@@ -316,45 +401,56 @@ func (s *streamState) finalResponse() *model.LLMResponse {
 		parts = []*genai.Part{{Text: ""}}
 	}
 	return &model.LLMResponse{
-		Content:       &genai.Content{Role: "model", Parts: parts},
-		FinishReason:  mappers.StopReasonToFinishReason(s.stopReason),
-		UsageMetadata: s.lastUsage,
-		TurnComplete:  true,
+		Content:        &genai.Content{Role: "model", Parts: parts},
+		FinishReason:   mappers.FinishReasonFromStopReasonAndTrace(s.stopReason, s.guardrailTrace),
+		UsageMetadata:  s.lastUsage,
+		CustomMetadata: s.customMetadata,
+		TurnComplete:   true,
 	}
 }
 
-func (s *streamState) finalParts() []*genai.Part {
-	parts := make([]*genai.Part, 0, 1+len(s.toolOrder))
+func (s *streamState) finalParts() []*genai.Part { //nolint:gocognit
+	parts := make([]*genai.Part, 0, 1+len(s.slotOrder))
 	if s.textBuf.Len() > 0 {
 		parts = append(parts, &genai.Part{Text: s.textBuf.String()})
 	}
-	for _, idx := range s.sortedToolOrder() {
-		call := s.toolsBySlot[idx]
-		if call == nil {
-			continue
+	for _, idx := range s.sortedSlotOrder() {
+		if reason := s.reasonBySlot[idx]; reason != nil && reason.Text.Len() > 0 {
+			part := &genai.Part{Text: reason.Text.String(), Thought: true}
+			if reason.Signature != "" {
+				part.ThoughtSignature = []byte(reason.Signature)
+			}
+			parts = append(parts, part)
 		}
-		id := call.ID
-		if id == "" {
-			id = fmt.Sprintf("tool_%d", idx)
+		if img := s.imagesBySlot[idx]; img != nil && len(img.Data) > 0 {
+			if mime, err := streamImageMIMEFromFormat(img.Format); err == nil {
+				parts = append(parts, &genai.Part{InlineData: &genai.Blob{Data: img.Data, MIMEType: mime}})
+			}
 		}
-		name := call.Name
-		if name == "" {
-			name = id
+		if call := s.toolsBySlot[idx]; call != nil {
+			id := call.ID
+			if id == "" {
+				id = fmt.Sprintf("tool_%d", idx)
+			}
+			name := call.Name
+			if name == "" {
+				name = id
+			}
+			parts = append(parts, &genai.Part{FunctionCall: &genai.FunctionCall{
+				ID:   id,
+				Name: name,
+				Args: functionArgsFromRawJSON(call.input.String()),
+			}})
 		}
-		parts = append(parts, &genai.Part{FunctionCall: &genai.FunctionCall{
-			ID:   id,
-			Name: name,
-			Args: functionArgsFromRawJSON(call.input.String()),
-		}})
 	}
 	return parts
 }
 
-func (s *streamState) sortedToolOrder() []int32 {
-	if len(s.toolOrder) < 2 {
-		return s.toolOrder
+func (s *streamState) sortedSlotOrder() []int32 {
+	if len(s.slotOrder) < 2 {
+		return s.slotOrder
 	}
-	order := append([]int32(nil), s.toolOrder...)
+	order := append([]int32(nil), s.slotOrder...)
 	for i := len(order) - 1; i > 0; i-- {
 		for j := range i {
 			if order[j] > order[j+1] {
@@ -363,6 +459,21 @@ func (s *streamState) sortedToolOrder() []int32 {
 		}
 	}
 	return order
+}
+
+func streamImageMIMEFromFormat(f types.ImageFormat) (string, error) {
+	switch f {
+	case types.ImageFormatJpeg:
+		return "image/jpeg", nil
+	case types.ImageFormatPng:
+		return "image/png", nil
+	case types.ImageFormatGif:
+		return "image/gif", nil
+	case types.ImageFormatWebp:
+		return "image/webp", nil
+	default:
+		return "", fmt.Errorf("unsupported Bedrock stream image format: %q", f)
+	}
 }
 
 func functionArgsFromRawJSON(raw string) map[string]any {
