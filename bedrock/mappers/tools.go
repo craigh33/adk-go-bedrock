@@ -19,9 +19,6 @@ func toolConfigurationFromGenai(cfg *genai.GenerateContentConfig) (*types.ToolCo
 		if t == nil {
 			continue
 		}
-		if len(t.FunctionDeclarations) == 0 {
-			continue
-		}
 		for _, fd := range t.FunctionDeclarations {
 			if fd == nil || fd.Name == "" {
 				continue
@@ -38,11 +35,57 @@ func toolConfigurationFromGenai(cfg *genai.GenerateContentConfig) (*types.ToolCo
 				},
 			})
 		}
+		// Map supported non-function tool variants to system tools.
+		toolVariantSpecs := toolVariantsToSystemTools(t)
+		specs = append(specs, toolVariantSpecs...)
 	}
 	if len(specs) == 0 {
 		return nil, nil //nolint:nilnil // optional ToolConfiguration: nil means no tools
 	}
 	return &types.ToolConfiguration{Tools: specs}, nil
+}
+
+func toolVariantsToSystemTools(t *genai.Tool) []types.Tool {
+	if t == nil {
+		return nil
+	}
+
+	// Define tool variants and their mapped system tool names.
+	variants := []struct {
+		field any
+		name  string
+	}{
+		{t.Retrieval, "retrieval"},
+		{t.ComputerUse, "computer_use"},
+		{t.FileSearch, "file_search"},
+		{t.GoogleSearch, "google_search"},
+		{t.GoogleMaps, "google_maps"},
+		{t.CodeExecution, "code_execution"},
+		{t.EnterpriseWebSearch, "enterprise_web_search"},
+		{t.GoogleSearchRetrieval, "google_search_retrieval"},
+		{t.ParallelAISearch, "parallel_ai_search"},
+		{t.URLContext, "url_context"},
+	}
+
+	var specs []types.Tool
+
+	// Map each variant to a system tool.
+	for _, v := range variants {
+		if v.field != nil {
+			specs = append(specs, &types.ToolMemberSystemTool{Value: types.SystemTool{Name: aws.String(v.name)}})
+		}
+	}
+
+	// Handle MCP servers: each server becomes a system tool with its name.
+	if len(t.MCPServers) > 0 {
+		for _, mcp := range t.MCPServers {
+			if mcp != nil && mcp.Name != "" {
+				specs = append(specs, &types.ToolMemberSystemTool{Value: types.SystemTool{Name: aws.String(mcp.Name)}})
+			}
+		}
+	}
+
+	return specs
 }
 
 func functionParametersToToolInputSchema(fd *genai.FunctionDeclaration) (types.ToolInputSchema, error) {
