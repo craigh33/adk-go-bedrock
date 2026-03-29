@@ -128,7 +128,7 @@ make -C examples/bedrock-stream run
 ## Limitations
 
 - **Bedrock role restrictions**: Rich media input still follows Bedrock Converse constraints (for example, user turns are the interoperable place for images/documents/audio/video, while model turns are reserved for text/tool use/reasoning).
-- **Request-side generic guardrails**: ADK `SafetySettings` / `ModelArmorConfig` do not contain the Bedrock guardrail identifier+version needed by `Converse`, so the request builder returns an explicit error instead of silently dropping them. Pre-configured Bedrock guardrails are passed through `CustomMetadata` to the request.
+- **Request-side generic guardrails**: ADK `SafetySettings` / `ModelArmorConfig` are not currently supported for Bedrock Converse. Because they do not contain the Bedrock guardrail identifier + version required by `Converse`, the request builder returns an explicit error instead of silently dropping them, and there is currently no supported way to provide `GuardrailIdentifier` / `GuardrailVersion` through this provider.
 - **Provider surface mismatch**: Bedrock-specific features that require pre-provisioned AWS resources or have no generic ADK equivalent are exposed back through ADK-friendly `CustomMetadata`, but cannot always be reconstructed into first-class `genai` request fields.
 - **Unsupported tool types**: Tool variants not supported by Bedrock or the target model cause a request-time error with details about which variants are unsupported.
 
