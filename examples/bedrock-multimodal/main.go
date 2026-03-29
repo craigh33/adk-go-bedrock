@@ -57,14 +57,26 @@ func analyzeImageWithVision(ctx context.Context, llm model.LLM, imageURL string)
 		return fmt.Errorf("download image: %w", err)
 	}
 
-	// Create a request with an image part (base64-encoded JPEG as InlineData)
+	// Infer a suitable MIME type from the image URL extension, defaulting to JPEG.
+	mimeType := "image/jpeg"
+	lowerURL := strings.ToLower(imageURL)
+	switch {
+	case strings.HasSuffix(lowerURL, ".png"):
+		mimeType = "image/png"
+	case strings.HasSuffix(lowerURL, ".gif"):
+		mimeType = "image/gif"
+	case strings.HasSuffix(lowerURL, ".webp"):
+		mimeType = "image/webp"
+	}
+
+	// Create a request with an image part (base64-encoded image as InlineData)
 	req := &model.LLMRequest{
 		Contents: []*genai.Content{
 			{
 				Role: genai.RoleUser,
 				Parts: []*genai.Part{
 					{Text: "What do you see in this image? Please describe it in detail."},
-					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: []byte(imageData)}},
+					{InlineData: &genai.Blob{MIMEType: mimeType, Data: []byte(imageData)}},
 				},
 			},
 		},
