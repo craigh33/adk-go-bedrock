@@ -211,17 +211,23 @@ func (m *Model) generateStream(
 }
 
 type streamState struct {
-	textBuf        strings.Builder
-	lastYieldedLen int
-	toolsBySlot    map[int32]*streamToolCall
-	imagesBySlot   map[int32]*streamImageBlock
-	reasonBySlot   map[int32]*streamReasoningBlock
-	slotOrder      []int32
+	textBuf           strings.Builder
+	lastYieldedLen    int
+	textBySlot        map[int32]*streamTextBlock
+	lastYieldedBySlot map[int32]int
+	toolsBySlot       map[int32]*streamToolCall
+	imagesBySlot      map[int32]*streamImageBlock
+	reasonBySlot      map[int32]*streamReasoningBlock
+	slotOrder         []int32
 
 	lastUsage      *genai.GenerateContentResponseUsageMetadata
 	customMetadata map[string]any
 	guardrailTrace *types.GuardrailTraceAssessment
 	stopReason     types.StopReason
+}
+
+type streamTextBlock struct {
+	Text strings.Builder
 }
 
 type streamToolCall struct {
@@ -243,9 +249,11 @@ type streamReasoningBlock struct {
 
 func newStreamState() *streamState {
 	return &streamState{
-		toolsBySlot:  make(map[int32]*streamToolCall),
-		imagesBySlot: make(map[int32]*streamImageBlock),
-		reasonBySlot: make(map[int32]*streamReasoningBlock),
+		textBySlot:        make(map[int32]*streamTextBlock),
+		lastYieldedBySlot: make(map[int32]int),
+		toolsBySlot:       make(map[int32]*streamToolCall),
+		imagesBySlot:      make(map[int32]*streamImageBlock),
+		reasonBySlot:      make(map[int32]*streamReasoningBlock),
 	}
 }
 
@@ -296,10 +304,17 @@ func (s *streamState) onContentBlockDelta(ev *types.ContentBlockDeltaEvent) (*mo
 	}
 	switch d := ev.Delta.(type) {
 	case *types.ContentBlockDeltaMemberText:
-		s.rememberSlot(*ev.ContentBlockIndex)
+		idx := *ev.ContentBlockIndex
+		s.rememberSlot(idx)
 		if d.Value == "" {
 			return nil, nil //nolint:nilnil // Empty text delta does not produce output.
 		}
+		// Track text in the per-slot buffer for final assembly
+		textBlock := s.ensureTextBlock(idx)
+		if _, err := textBlock.Text.WriteString(d.Value); err != nil {
+			return nil, err
+		}
+		// Track in legacy textBuf for streaming delta calculation
 		if _, err := s.textBuf.WriteString(d.Value); err != nil {
 			return nil, err
 		}
@@ -358,6 +373,16 @@ func (s *streamState) ensureToolCall(idx int32) *streamToolCall {
 	return call
 }
 
+func (s *streamState) ensureTextBlock(idx int32) *streamTextBlock {
+	s.rememberSlot(idx)
+	if text, ok := s.textBySlot[idx]; ok {
+		return text
+	}
+	text := &streamTextBlock{}
+	s.textBySlot[idx] = text
+	return text
+}
+
 func (s *streamState) ensureImageBlock(idx int32) *streamImageBlock {
 	s.rememberSlot(idx)
 	if img, ok := s.imagesBySlot[idx]; ok {
@@ -410,11 +435,16 @@ func (s *streamState) finalResponse() *model.LLMResponse {
 }
 
 func (s *streamState) finalParts() []*genai.Part { //nolint:gocognit
-	parts := make([]*genai.Part, 0, 1+len(s.slotOrder))
-	if s.textBuf.Len() > 0 {
-		parts = append(parts, &genai.Part{Text: s.textBuf.String()})
-	}
+	parts := make([]*genai.Part, 0, len(s.slotOrder))
+
+	// Assemble all parts in strict slot order to preserve Bedrock block ordering
 	for _, idx := range s.sortedSlotOrder() {
+		// Emit text for this slot
+		if text := s.textBySlot[idx]; text != nil && text.Text.Len() > 0 {
+			parts = append(parts, &genai.Part{Text: text.Text.String()})
+		}
+
+		// Emit reasoning for this slot
 		if reason := s.reasonBySlot[idx]; reason != nil && reason.Text.Len() > 0 {
 			part := &genai.Part{Text: reason.Text.String(), Thought: true}
 			if reason.Signature != "" {
@@ -422,11 +452,15 @@ func (s *streamState) finalParts() []*genai.Part { //nolint:gocognit
 			}
 			parts = append(parts, part)
 		}
+
+		// Emit image for this slot
 		if img := s.imagesBySlot[idx]; img != nil && len(img.Data) > 0 {
 			if mime, err := streamImageMIMEFromFormat(img.Format); err == nil {
 				parts = append(parts, &genai.Part{InlineData: &genai.Blob{Data: img.Data, MIMEType: mime}})
 			}
 		}
+
+		// Emit tool call for this slot
 		if call := s.toolsBySlot[idx]; call != nil {
 			id := call.ID
 			if id == "" {
