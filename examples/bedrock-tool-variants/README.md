@@ -1,22 +1,17 @@
 # bedrock-tool-variants example
 
-This example demonstrates how to use non-function tool variants with the Bedrock Converse provider, including Google Search, Code Execution, Retrieval, MCP Servers, and combinations with traditional function declarations.
+This example documents the current Bedrock provider behavior for ADK tool variants. Bedrock tool calling works with function declarations, while non-function ADK tool variants (for example Google Search, Code Execution, Retrieval, URL Context, and MCP servers) are currently rejected early with a clear provider error instead of being sent as invalid Bedrock requests.
 
 ## Features
 
-- **Google Search** - Enable web search as a tool
-- **Code Execution** - Allow the model to write and execute code
-- **Retrieval** - Access knowledge bases and documentation
-- **URL Context** - Retrieve and analyze content from URLs
-- **MCP Servers** - Connect to Model Context Protocol servers
-- **Function Declarations** - Traditional custom function tools
-- **Mixed Tools** - Combine function declarations with tool variants
-- **Multiple Variants** - Use multiple tool types in a single request
-- **System Instructions** - Guide tool usage with detailed instructions
+- **Function Declarations** - Supported Bedrock custom function tools
+- **Unsupported Variant Detection** - Early, clear errors for non-function ADK tool variants
+- **Mixed Tool Validation** - Demonstrates that unsupported variants are detected even when mixed with valid function declarations
+- **System Instructions** - Shows that system instructions still work with supported function tools
 
 ## Prerequisites
 
-- `BEDROCK_MODEL_ID` set to a Bedrock model ID that supports these tool variants
+- `BEDROCK_MODEL_ID` set to a Bedrock model ID that supports function calling
 - AWS credentials configured via the default chain
 - AWS region configured (for example `AWS_REGION=us-east-1`)
 - Bedrock model should support the specific tool variants you want to use
@@ -27,11 +22,9 @@ This example demonstrates how to use non-function tool variants with the Bedrock
 make -C examples/bedrock-tool-variants run
 ```
 
-## Supported Tool Variants
+## Unsupported Non-Function Tool Variants
 
-### Single Tool Variants
-
-Each of these can be used as a standalone tool:
+The following ADK tool variants are currently **not** mapped to Bedrock Converse by this provider and are rejected locally with a clear error:
 
 ```go
 // Google Search
@@ -62,7 +55,7 @@ Tools: []*genai.Tool{{
 
 ### Combining with Function Declarations
 
-Mix tool variants with custom function declarations:
+If you mix unsupported variants with function declarations, the provider returns an explicit error instead of sending a partially-invalid request to Bedrock:
 
 ```go
 Tools: []*genai.Tool{{
@@ -77,7 +70,7 @@ Tools: []*genai.Tool{{
 
 ### Multiple Variants
 
-Combine multiple tool variants in a single request:
+Multiple unsupported variants are reported together in one error:
 
 ```go
 Tools: []*genai.Tool{{
@@ -89,21 +82,12 @@ Tools: []*genai.Tool{{
 
 ## Tool Mapping
 
-The provider maps genai tool variants to Bedrock system tools:
+The Bedrock provider currently supports:
 
-| genai Variant | Bedrock System Tool | Purpose |
+| ADK Tool Type | Bedrock Mapping | Status |
 |---|---|---|
-| `GoogleSearch` | `google_search` | Web search |
-| `CodeExecution` | `code_execution` | Code running |
-| `Retrieval` | `retrieval` | Knowledge base access |
-| `URLContext` | `url_context` | URL content analysis |
-| `ComputerUse` | `computer_use` | Computer interaction |
-| `FileSearch` | `file_search` | File searching |
-| `GoogleMaps` | `google_maps` | Geospatial queries |
-| `EnterpriseWebSearch` | `enterprise_web_search` | Enterprise search |
-| `GoogleSearchRetrieval` | `google_search_retrieval` | Enhanced retrieval |
-| `ParallelAISearch` | `parallel_ai_search` | Parallel searching |
-| `MCPServers` | `system_tool(name)` | Protocol servers |
+| `FunctionDeclarations` | `ToolSpecification` | ✅ Supported |
+| Non-function variants (`GoogleSearch`, `CodeExecution`, `Retrieval`, `URLContext`, `MCPServers`, etc.) | none | ❌ Rejected early with a clear error |
 
 ## Example Patterns
 
@@ -164,34 +148,23 @@ Config: &genai.GenerateContentConfig{
 
 ## Model Capabilities
 
-Not all Bedrock models support all tool variants. Check:
+For this provider implementation:
 
-- Model documentation for supported tools
-- Bedrock console for availability in your region
-- Error messages for specific unsupported variants
-
-Common support levels:
-
-- **Always**: Function declarations
-- **Usually**: Google Search, Code Execution
-- **Model-dependent**: Retrieval, URL Context, MCP
-- **Region-dependent**: Enterprise search features
+- **Supported**: Function declarations
+- **Not currently supported**: Non-function ADK tool variants
 
 ## Error Handling
 
-If you use an unsupported tool variant:
+If you use an unsupported non-function ADK tool variant:
 
-1. Bedrock will return an error at request time
-2. The error message will indicate which variant is unsupported
-3. Try a different model or tool combination
-4. Check the Bedrock documentation for your model
+1. The provider returns an error before sending the request to Bedrock
+2. The error message lists the unsupported variant names
+3. Replace the variant with `FunctionDeclarations` where possible
 
 ## Limitations
 
-- Not all models support all tool variants
-- Some tools may have regional availability restrictions
-- Tool availability may differ across Bedrock regions
-- Mixed tools (functions + variants) depend on model capability
+- Non-function ADK tool variants are not currently mapped to Bedrock Converse
+- Mixed tools are only supported when all entries are function declarations
 
 ## Advanced Usage
 

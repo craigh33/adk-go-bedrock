@@ -44,37 +44,42 @@ func downloadImage(url string) ([]byte, error) {
 	return data, nil
 }
 
+// mimeTypeFromURL infers the image MIME type from the URL file extension, defaulting to JPEG.
+func mimeTypeFromURL(rawURL string) string {
+	lower := strings.ToLower(rawURL)
+	// Strip any query string before checking the extension.
+	if i := strings.IndexByte(lower, '?'); i >= 0 {
+		lower = lower[:i]
+	}
+	switch {
+	case strings.HasSuffix(lower, ".png"):
+		return "image/png"
+	case strings.HasSuffix(lower, ".gif"):
+		return "image/gif"
+	case strings.HasSuffix(lower, ".webp"):
+		return "image/webp"
+	default:
+		return "image/jpeg"
+	}
+}
+
 // analyzeImageWithVision demonstrates image analysis with the Bedrock model.
 func analyzeImageWithVision(ctx context.Context, llm model.LLM, imageURL string) error {
 	fmt.Println("\n=== Image Analysis Example ===")
 	fmt.Printf("Downloading image from: %s\n", imageURL)
 
-	// Download the image
 	imageData, err := downloadImage(imageURL)
 	if err != nil {
 		return fmt.Errorf("download image: %w", err)
 	}
 
-	// Infer a suitable MIME type from the image URL extension, defaulting to JPEG.
-	mimeType := "image/jpeg"
-	lowerURL := strings.ToLower(imageURL)
-	switch {
-	case strings.HasSuffix(lowerURL, ".png"):
-		mimeType = "image/png"
-	case strings.HasSuffix(lowerURL, ".gif"):
-		mimeType = "image/gif"
-	case strings.HasSuffix(lowerURL, ".webp"):
-		mimeType = "image/webp"
-	}
-
-	// Create a request with an image part (base64-encoded image as InlineData)
 	req := &model.LLMRequest{
 		Contents: []*genai.Content{
 			{
 				Role: genai.RoleUser,
 				Parts: []*genai.Part{
 					{Text: "What do you see in this image? Please describe it in detail."},
-					{InlineData: &genai.Blob{MIMEType: mimeType, Data: imageData}},
+					{InlineData: &genai.Blob{MIMEType: mimeTypeFromURL(imageURL), Data: imageData}},
 				},
 			},
 		},
@@ -129,7 +134,7 @@ func analyzeImageWithSystemInstruction(ctx context.Context, llm model.LLM, image
 				Role: genai.RoleUser,
 				Parts: []*genai.Part{
 					{Text: "Analyze this image"},
-					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
+					{InlineData: &genai.Blob{MIMEType: mimeTypeFromURL(imageURL), Data: imageData}},
 				},
 			},
 		},
@@ -181,7 +186,7 @@ func demonstrateConversationHistory(ctx context.Context, llm model.LLM, imageURL
 			Role: genai.RoleUser,
 			Parts: []*genai.Part{
 				{Text: "Here's an image. What do you see?"},
-				{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
+				{InlineData: &genai.Blob{MIMEType: mimeTypeFromURL(imageURL), Data: imageData}},
 			},
 		},
 	}
@@ -273,7 +278,7 @@ func demonstrateVisionWithReasoning(ctx context.Context, llm model.LLM, imageURL
 					{
 						Text: "Carefully analyze this image and identify all the key visual elements, their relationships, and what story or message they convey. Think step by step.",
 					},
-					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
+					{InlineData: &genai.Blob{MIMEType: mimeTypeFromURL(imageURL), Data: imageData}},
 				},
 			},
 		},
@@ -334,22 +339,20 @@ func demonstrateToolCallingWithImages(ctx context.Context, llm model.LLM, imageU
 							Type:        genai.TypeString,
 							Description: "The main subject or focus of the image",
 						},
-						"tags": {
-							Type:        genai.TypeArray,
-							Description: "Array of relevant tags",
-							Items:       &genai.Schema{Type: genai.TypeString},
+						"tags_csv": {
+							Type:        genai.TypeString,
+							Description: "Comma-separated relevant tags for the image",
 						},
-						"colors": {
-							Type:        genai.TypeArray,
-							Description: "Dominant colors in the image",
-							Items:       &genai.Schema{Type: genai.TypeString},
+						"colors_csv": {
+							Type:        genai.TypeString,
+							Description: "Comma-separated dominant colors in the image",
 						},
 						"style": {
 							Type:        genai.TypeString,
 							Description: "Visual style or aesthetic (e.g., modern, vintage, abstract)",
 						},
 					},
-					Required: []string{"primary_subject", "tags"},
+					Required: []string{"primary_subject", "tags_csv"},
 				},
 			},
 		},
@@ -360,8 +363,10 @@ func demonstrateToolCallingWithImages(ctx context.Context, llm model.LLM, imageU
 			{
 				Role: genai.RoleUser,
 				Parts: []*genai.Part{
-					{Text: "Please analyze this image and tag it using the tag_image tool."},
-					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
+					{
+						Text: "Please analyze this image and tag it using the tag_image tool. Return comma-separated strings for tags_csv and colors_csv.",
+					},
+					{InlineData: &genai.Blob{MIMEType: mimeTypeFromURL(imageURL), Data: imageData}},
 				},
 			},
 		},
@@ -401,20 +406,24 @@ func demonstrateMultipleImages(ctx context.Context, llm model.LLM) error {
 	// Use two different public images
 	imageURLs := []string{
 		"https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png",
-		"https://www.gstatic.com/devrel-devsite/prod/v2210deb39920cd4a3bd580441aa58e7853afc04b39a9d9ac4198e1cd7fbe04ef/google/images/branding/product/1x/cloud_logo_favicons_415x415.png",
+		"https://www.google.com/images/branding/googleg/1x/googleg_standard_color_128dp.png",
 	}
 
-	images := make([][]byte, 0)
+	type imageBlob struct {
+		data     []byte
+		mimeType string
+	}
+	blobs := make([]imageBlob, 0, len(imageURLs))
 	for _, url := range imageURLs {
 		data, err := downloadImage(url)
 		if err != nil {
 			fmt.Printf("Note: Could not download image from %s: %v\n", url, err)
 			continue
 		}
-		images = append(images, data)
+		blobs = append(blobs, imageBlob{data: data, mimeType: mimeTypeFromURL(url)})
 	}
 
-	if len(images) < 2 {
+	if len(blobs) < 2 {
 		fmt.Println("Note: Could not download enough images for comparison")
 		return nil
 	}
@@ -423,9 +432,9 @@ func demonstrateMultipleImages(ctx context.Context, llm model.LLM) error {
 	parts := []*genai.Part{
 		{Text: "Compare these two images. What are the similarities and differences?"},
 	}
-	for _, imgData := range images {
+	for _, b := range blobs {
 		parts = append(parts, &genai.Part{
-			InlineData: &genai.Blob{MIMEType: "image/png", Data: imgData},
+			InlineData: &genai.Blob{MIMEType: b.mimeType, Data: b.data},
 		})
 	}
 
@@ -482,7 +491,7 @@ func demonstrateStreamingWithImages(ctx context.Context, llm model.LLM, imageURL
 				Role: genai.RoleUser,
 				Parts: []*genai.Part{
 					{Text: "Describe this image in detail, streaming your analysis as you go:"},
-					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
+					{InlineData: &genai.Blob{MIMEType: mimeTypeFromURL(imageURL), Data: imageData}},
 				},
 			},
 		},
@@ -533,10 +542,9 @@ func demonstrateMediaInToolResponses(ctx context.Context, llm model.LLM, imageUR
 				Parameters: &genai.Schema{
 					Type: genai.TypeObject,
 					Properties: map[string]*genai.Schema{
-						"regions": {
-							Type:        genai.TypeArray,
-							Description: "Regions to analyze",
-							Items:       &genai.Schema{Type: genai.TypeString},
+						"regions_csv": {
+							Type:        genai.TypeString,
+							Description: "Comma-separated regions to analyze (for example: top,bottom,center)",
 						},
 					},
 				},
@@ -544,13 +552,17 @@ func demonstrateMediaInToolResponses(ctx context.Context, llm model.LLM, imageUR
 		},
 	}
 
+	mimeType := mimeTypeFromURL(imageURL)
+
 	req := &model.LLMRequest{
 		Contents: []*genai.Content{
 			{
 				Role: genai.RoleUser,
 				Parts: []*genai.Part{
-					{Text: "Analyze the regions of this image:"},
-					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
+					{
+						Text: "Analyze the regions of this image. If you call the tool, pass the regions as a comma-separated string in regions_csv, then use the tool result to provide an overall assessment.",
+					},
+					{InlineData: &genai.Blob{MIMEType: mimeType, Data: imageData}},
 				},
 			},
 		},
@@ -560,7 +572,8 @@ func demonstrateMediaInToolResponses(ctx context.Context, llm model.LLM, imageUR
 		},
 	}
 
-	var hadToolCall bool
+	var modelToolParts []*genai.Part
+	var toolResultParts []*genai.Part
 	for resp, err := range llm.GenerateContent(ctx, req, false) {
 		if err != nil {
 			return fmt.Errorf("generate: %w", err)
@@ -571,65 +584,48 @@ func demonstrateMediaInToolResponses(ctx context.Context, llm model.LLM, imageUR
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.FunctionCall != nil {
-					hadToolCall = true
 					fmt.Printf("Tool call: %s\n", part.FunctionCall.Name)
+					modelToolParts = append(modelToolParts, part)
+					toolResultParts = append(toolResultParts, &genai.Part{FunctionResponse: &genai.FunctionResponse{
+						ID:   part.FunctionCall.ID,
+						Name: part.FunctionCall.Name,
+						Response: map[string]any{
+							"results": "Analysis complete",
+						},
+						Parts: []*genai.FunctionResponsePart{{
+							InlineData: &genai.FunctionResponseBlob{MIMEType: mimeType, Data: imageData},
+						}},
+					}})
 				}
 			}
 		}
 	}
 
-	if hadToolCall { //nolint:nestif // tool-response continuation flow requires nested content blocks
-		// Simulate tool response with image content
-		req.Contents = append(req.Contents, &genai.Content{
-			Role: genai.RoleModel,
-			Parts: []*genai.Part{
-				{
-					FunctionCall: &genai.FunctionCall{
-						Name: "analyze_image_regions",
-						Args: map[string]any{
-							"regions": []string{"top", "bottom", "center"},
-						},
-					},
-				},
-			},
-		})
+	if len(toolResultParts) == 0 {
+		fmt.Println("No tool call was returned; skipping tool-response follow-up.")
+		return nil
+	}
 
-		// Add tool response with image data
-		req.Contents = append(req.Contents, &genai.Content{
-			Role: genai.RoleUser,
-			Parts: []*genai.Part{
-				{
-					FunctionResponse: &genai.FunctionResponse{
-						Name: "analyze_image_regions",
-						Response: map[string]any{
-							"results": "Analysis complete",
-						},
-					},
-				},
-				{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
-			},
-		})
+	followupReq := &model.LLMRequest{
+		Contents: []*genai.Content{
+			req.Contents[0],
+			{Role: genai.RoleModel, Parts: modelToolParts},
+			{Role: genai.RoleUser, Parts: toolResultParts},
+		},
+		Config: req.Config,
+	}
 
-		// Follow-up
-		req.Contents = append(req.Contents, &genai.Content{
-			Role: genai.RoleUser,
-			Parts: []*genai.Part{
-				{Text: "Based on the regions analyzed, what is your overall assessment?"},
-			},
-		})
-
-		for resp, err := range llm.GenerateContent(ctx, req, false) {
-			if err != nil {
-				return fmt.Errorf("generate: %w", err)
-			}
-			if resp == nil {
-				continue
-			}
-			if resp.Content != nil {
-				for _, part := range resp.Content.Parts {
-					if part.Text != "" {
-						fmt.Printf("Assessment: %s\n", part.Text)
-					}
+	for resp, err := range llm.GenerateContent(ctx, followupReq, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
+		if resp.Content != nil {
+			for _, part := range resp.Content.Parts {
+				if part.Text != "" {
+					fmt.Printf("Assessment: %s\n", part.Text)
 				}
 			}
 		}
@@ -660,7 +656,7 @@ func demonstrateImageConstraints(ctx context.Context, llm model.LLM, imageURL st
 				Role: genai.RoleUser,
 				Parts: []*genai.Part{
 					{Text: "Analyze this image for key elements:"},
-					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
+					{InlineData: &genai.Blob{MIMEType: mimeTypeFromURL(imageURL), Data: imageData}},
 				},
 			},
 		},

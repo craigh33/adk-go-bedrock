@@ -93,7 +93,7 @@ Each example has its own `README.md` and `Makefile`:
 - [`examples/bedrock-chat`](examples/bedrock-chat): runner-based chat example.
 - [`examples/bedrock-tool-calling`](examples/bedrock-tool-calling): tool-calling agent example with function declarations.
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
-- [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): Google Search, Code Execution, Retrieval, MCP Servers, and mixed tool usage.
+- [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
 - [`examples/bedrock-multimodal`](examples/bedrock-multimodal): comprehensive image analysis, document processing, tool calling with rich media, and vision-based reasoning.
 - [`examples/bedrock-guardrails`](examples/bedrock-guardrails): safety assessments, content filtering, and guardrail metadata handling.
 - [`examples/bedrock-system-instruction`](examples/bedrock-system-instruction): system instructions for role definition, output formatting, and behavioral control.
@@ -119,8 +119,7 @@ make -C examples/bedrock-stream run
 - **System instruction**: `GenerateContentConfig.SystemInstruction` is sent as Bedrock system content.
 - **Tools**: the mapper converts `GenerateContentConfig.Tools` entries:
   - `FunctionDeclarations` → Bedrock `ToolSpecification` (custom function tools)
-  - Non-function variants (Google Search, Code Execution, Retrieval, MCP Servers, Computer Use, File Search, Google Maps, URL Context, etc.) → Bedrock `SystemTool` by mapped name
-  - All supported variants are sent to Bedrock; unsupported ones cause an error.
+  - Non-function ADK variants (Google Search, Code Execution, Retrieval, MCP Servers, Computer Use, File Search, Google Maps, URL Context, etc.) are rejected early with a clear provider error because they are not currently mapped to Bedrock Converse
 - **Multimodal parts**: ADK `Part` text, thoughts/reasoning, inline/file-backed images, audio, video, and documents are mapped on the Bedrock-compatible subset. Rich user media is sent as Bedrock content blocks; assistant reasoning is preserved as Bedrock reasoning content.
 - **Function responses**: JSON tool output still maps as before, and image/video/document `FunctionResponse.Parts` are preserved through Bedrock tool-result content blocks.
 - **Streaming**: When ADK uses SSE streaming, the provider calls `ConverseStream`, emits partial text responses, and buffers streamed tool calls, reasoning blocks, image blocks, usage, and guardrail metadata into the final `TurnComplete` response.

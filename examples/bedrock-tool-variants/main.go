@@ -461,6 +461,10 @@ func demonstrateToolVariantsWithSystemInstruction(ctx context.Context, llm model
 	return nil
 }
 
+func isUnsupportedToolVariantError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "bedrock Converse does not support these genai tool variants")
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -509,15 +513,18 @@ func main() {
 
 	for _, demo := range demonstrations {
 		if err := demo.fn(ctx, llm); err != nil {
+			if isUnsupportedToolVariantError(err) {
+				log.Printf("SKIP in %s: %v\n", demo.name, err)
+				continue
+			}
 			log.Printf("ERROR in %s: %v\n", demo.name, err)
 		}
 	}
 
 	fmt.Println("\n=== Tool Variants Examples Complete ===")
 	fmt.Println("\nKey Points:")
-	fmt.Println("- Google Search, Code Execution, Retrieval, and other variants are now supported")
-	fmt.Println("- Function declarations and tool variants can be used together")
-	fmt.Println("- Multiple variants can be combined in a single tool entry")
-	fmt.Println("- Tool variants work seamlessly with system instructions")
-	fmt.Println("- All supported tool types are sent to Bedrock for model use")
+	fmt.Println("- Function declarations are supported and map to Bedrock custom tool specifications")
+	fmt.Println("- Non-function ADK tool variants are not currently supported by this Bedrock provider")
+	fmt.Println("- Unsupported variants are detected locally and skipped with a clear message")
+	fmt.Println("- Use FunctionDeclarations for portable Bedrock tool-calling workflows")
 }
