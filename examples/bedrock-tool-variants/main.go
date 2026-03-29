@@ -22,6 +22,8 @@ import (
 )
 
 // demonstrateGoogleSearch shows how to enable Google Search as a tool.
+//
+//nolint:dupl // intentionally similar structure — each function demonstrates a different tool type.
 func demonstrateGoogleSearch(ctx context.Context, llm model.LLM) error {
 	fmt.Println("\n=== Google Search Tool ===")
 	fmt.Println("Request: What are the latest AI developments in 2026?")
@@ -44,7 +46,13 @@ func demonstrateGoogleSearch(ctx context.Context, llm model.LLM) error {
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -58,6 +66,8 @@ func demonstrateGoogleSearch(ctx context.Context, llm model.LLM) error {
 }
 
 // demonstrateCodeExecution shows how to enable code execution as a tool.
+//
+//nolint:dupl // intentionally similar structure — each function demonstrates a different tool type.
 func demonstrateCodeExecution(ctx context.Context, llm model.LLM) error {
 	fmt.Println("\n=== Code Execution Tool ===")
 	fmt.Println("Request: Calculate factorial of 10")
@@ -80,7 +90,13 @@ func demonstrateCodeExecution(ctx context.Context, llm model.LLM) error {
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -94,6 +110,8 @@ func demonstrateCodeExecution(ctx context.Context, llm model.LLM) error {
 }
 
 // demonstrateRetrieval shows how to enable retrieval as a tool.
+//
+//nolint:dupl // intentionally similar structure — each function demonstrates a different tool type.
 func demonstrateRetrieval(ctx context.Context, llm model.LLM) error {
 	fmt.Println("\n=== Retrieval Tool ===")
 	fmt.Println("Request: Find information from knowledge base")
@@ -116,7 +134,13 @@ func demonstrateRetrieval(ctx context.Context, llm model.LLM) error {
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -130,6 +154,8 @@ func demonstrateRetrieval(ctx context.Context, llm model.LLM) error {
 }
 
 // demonstrateURLContext shows how to enable URL context as a tool.
+//
+//nolint:dupl // intentionally similar structure — each function demonstrates a different tool type.
 func demonstrateURLContext(ctx context.Context, llm model.LLM) error {
 	fmt.Println("\n=== URL Context Tool ===")
 	fmt.Println("Request: Summarize content from a URL")
@@ -152,7 +178,13 @@ func demonstrateURLContext(ctx context.Context, llm model.LLM) error {
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -192,7 +224,13 @@ func demonstrateMCPServers(ctx context.Context, llm model.LLM) error {
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -240,7 +278,13 @@ func demonstrateFunctionDeclarations(ctx context.Context, llm model.LLM) error {
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -295,7 +339,13 @@ func demonstrateMixedTools(ctx context.Context, llm model.LLM) error {
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -338,7 +388,13 @@ func demonstrateMultipleVariants(ctx context.Context, llm model.LLM) error {
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -386,7 +442,13 @@ func demonstrateToolVariantsWithSystemInstruction(ctx context.Context, llm model
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -418,8 +480,8 @@ func main() {
 	// Get model ID
 	modelID := os.Getenv("BEDROCK_MODEL_ID")
 	if modelID == "" {
-		log.Println("BEDROCK_MODEL_ID is required (e.g., us.anthropic.claude-3-5-sonnet-20241022-v2:0)")
-		modelID = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+		log.Println("BEDROCK_MODEL_ID is required (e.g. eu.amazon.nova-2-lite-v1:0) using default model")
+		modelID = "eu.amazon.nova-2-lite-v1:0"
 	}
 
 	// Create Bedrock LLM

@@ -389,7 +389,7 @@ func documentToMap(d brdoc.Interface) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 	var direct map[string]any
-	if err := d.UnmarshalSmithyDocument(&direct); err == nil || direct != nil {
+	if err := d.UnmarshalSmithyDocument(&direct); err == nil {
 		if direct == nil {
 			return map[string]any{}, nil
 		}

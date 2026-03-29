@@ -23,10 +23,7 @@ import (
 )
 
 // demonstrateTechnicalAssistant shows system instruction for a technical expert role.
-func demonstrateTechnicalAssistant(
-	ctx context.Context,
-	llm model.LLM,
-) error { //nolint:unparam // consistent function signature
+func demonstrateTechnicalAssistant(ctx context.Context, llm model.LLM) error {
 	fmt.Println("\n=== Technical Assistant ===")
 
 	req := &model.LLMRequest{
@@ -60,7 +57,13 @@ Use technical terminology accurately. Assume the user has intermediate knowledge
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -74,10 +77,7 @@ Use technical terminology accurately. Assume the user has intermediate knowledge
 }
 
 // demonstrateJSONOutputFormatter shows how to format structured output as JSON.
-func demonstrateJSONOutputFormatter(
-	ctx context.Context,
-	llm model.LLM,
-) error { //nolint:unparam // consistent function signature
+func demonstrateJSONOutputFormatter(ctx context.Context, llm model.LLM) error {
 	fmt.Println("\n=== JSON Output Formatter ===")
 
 	req := &model.LLMRequest{
@@ -108,7 +108,13 @@ Do not include any text outside the JSON object.`},
 	}
 
 	var responseText strings.Builder
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -131,10 +137,7 @@ Do not include any text outside the JSON object.`},
 }
 
 // demonstrateCreativeWriter shows how system instruction shapes creative output.
-func demonstrateCreativeWriter(
-	ctx context.Context,
-	llm model.LLM,
-) error { //nolint:unparam // consistent function signature
+func demonstrateCreativeWriter(ctx context.Context, llm model.LLM) error {
 	fmt.Println("\n=== Creative Writer ===")
 
 	req := &model.LLMRequest{
@@ -166,7 +169,13 @@ For haikus specifically:
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -180,10 +189,7 @@ For haikus specifically:
 }
 
 // demonstrateConversationWithConsistentContext shows multi-turn with system instruction.
-func demonstrateConversationWithConsistentContext(
-	ctx context.Context,
-	llm model.LLM,
-) error { //nolint:unparam // consistent function signature
+func demonstrateConversationWithConsistentContext(ctx context.Context, llm model.LLM) error {
 	fmt.Println("\n=== Multi-turn Conversation with Consistent System Context ===")
 
 	systemInstruction := &genai.Content{
@@ -216,7 +222,13 @@ Your teaching style:
 	}
 
 	var firstResponse strings.Builder
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -253,7 +265,13 @@ Your teaching style:
 	}
 
 	var secondResponse strings.Builder
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -292,8 +310,8 @@ func main() {
 	// Get model ID
 	modelID := os.Getenv("BEDROCK_MODEL_ID")
 	if modelID == "" {
-		log.Println("BEDROCK_MODEL_ID is required (e.g., us.anthropic.claude-3-5-sonnet-20241022-v2:0)")
-		modelID = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+		log.Println("BEDROCK_MODEL_ID is required (e.g. eu.amazon.nova-2-lite-v1:0) using default model")
+		modelID = "eu.amazon.nova-2-lite-v1:0"
 	}
 
 	// Create Bedrock LLM

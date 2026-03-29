@@ -42,7 +42,13 @@ func demonstrateSafetyRatings(ctx context.Context, llm model.LLM) error {
 	}
 
 	// Generate response and capture safety metadata
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -109,7 +115,13 @@ func demonstrateGuardrailIntervention(ctx context.Context, llm model.LLM) error 
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		// Check the finish reason to detect guardrail interventions
 		if resp.Content != nil {
 			fmt.Printf("Response content received\n")
@@ -150,7 +162,13 @@ func demonstrateGuardrailMetadataExtraction(ctx context.Context, llm model.LLM) 
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -210,7 +228,13 @@ func demonstrateMultipleSafetyCategories(ctx context.Context, llm model.LLM) err
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -271,7 +295,13 @@ func demonstrateStreamingWithGuardrails(ctx context.Context, llm model.LLM) erro
 	}
 
 	partialCount := 0
-	for resp := range llm.GenerateContent(ctx, req, true) { // true = streaming
+	for resp, err := range llm.GenerateContent(ctx, req, true) { // true = streaming
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil && resp.Content.Parts != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -325,9 +355,9 @@ func main() {
 	modelID := os.Getenv("BEDROCK_MODEL_ID")
 	if modelID == "" {
 		log.Println(
-			"BEDROCK_MODEL_ID is required (e.g. us.anthropic.claude-3-5-sonnet-20241022-v2:0) using default model",
+			"BEDROCK_MODEL_ID is required (e.g. eu.amazon.nova-2-lite-v1:0) using default model",
 		)
-		modelID = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+		modelID = "eu.amazon.nova-2-lite-v1:0"
 	}
 
 	br := bedrockruntime.NewFromConfig(awsCfg)

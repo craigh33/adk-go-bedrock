@@ -1,15 +1,13 @@
 // Bedrock multimodal example for adk-go: demonstrates image analysis, document processing,
 // vision-based reasoning, tool calling with rich media, and other multimodal content with
-// the Bedrock Converse provider. Set BEDROCK_MODEL_ID to a model that supports vision
-// (e.g., claude-3-5-sonnet-20241022-v2) and authenticate with AWS using the default
-// credential chain. Run:
+// the Bedrock Converse provider. Set BEDROCK_MODEL_ID to a multimodal-capable model and
+// authenticate with AWS using the default credential chain. Run:
 //
 //	go run ./examples/bedrock-multimodal
 package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,24 +24,24 @@ import (
 	"github.com/craigh33/adk-go-bedrock/bedrock"
 )
 
-// downloadImage fetches an image from a URL and returns its base64-encoded content.
-func downloadImage(url string) (string, error) {
+// downloadImage fetches an image from a URL and returns its raw binary content.
+func downloadImage(url string) ([]byte, error) {
 	resp, err := http.Get(url) //nolint:gosec,noctx // demonstration utility accepts arbitrary URLs
 	if err != nil {
-		return "", fmt.Errorf("download image: %w", err)
+		return nil, fmt.Errorf("download image: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download image: status %d", resp.StatusCode)
+		return nil, fmt.Errorf("download image: status %d", resp.StatusCode)
 	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("read image data: %w", err)
+		return nil, fmt.Errorf("read image data: %w", err)
 	}
 
-	return base64.StdEncoding.EncodeToString(data), nil
+	return data, nil
 }
 
 // analyzeImageWithVision demonstrates image analysis with the Bedrock model.
@@ -76,7 +74,7 @@ func analyzeImageWithVision(ctx context.Context, llm model.LLM, imageURL string)
 				Role: genai.RoleUser,
 				Parts: []*genai.Part{
 					{Text: "What do you see in this image? Please describe it in detail."},
-					{InlineData: &genai.Blob{MIMEType: mimeType, Data: []byte(imageData)}},
+					{InlineData: &genai.Blob{MIMEType: mimeType, Data: imageData}},
 				},
 			},
 		},
@@ -90,7 +88,13 @@ func analyzeImageWithVision(ctx context.Context, llm model.LLM, imageURL string)
 	}
 
 	// Generate response
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -125,7 +129,7 @@ func analyzeImageWithSystemInstruction(ctx context.Context, llm model.LLM, image
 				Role: genai.RoleUser,
 				Parts: []*genai.Part{
 					{Text: "Analyze this image"},
-					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: []byte(imageData)}},
+					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
 				},
 			},
 		},
@@ -143,7 +147,13 @@ func analyzeImageWithSystemInstruction(ctx context.Context, llm model.LLM, image
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -171,7 +181,7 @@ func demonstrateConversationHistory(ctx context.Context, llm model.LLM, imageURL
 			Role: genai.RoleUser,
 			Parts: []*genai.Part{
 				{Text: "Here's an image. What do you see?"},
-				{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: []byte(imageData)}},
+				{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
 			},
 		},
 	}
@@ -188,7 +198,13 @@ func demonstrateConversationHistory(ctx context.Context, llm model.LLM, imageURL
 	}
 
 	var modelResponse strings.Builder
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -220,7 +236,13 @@ func demonstrateConversationHistory(ctx context.Context, llm model.LLM, imageURL
 		Contents: contents,
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -251,7 +273,7 @@ func demonstrateVisionWithReasoning(ctx context.Context, llm model.LLM, imageURL
 					{
 						Text: "Carefully analyze this image and identify all the key visual elements, their relationships, and what story or message they convey. Think step by step.",
 					},
-					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: []byte(imageData)}},
+					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
 				},
 			},
 		},
@@ -271,7 +293,13 @@ Provide thorough, insightful analysis with specific observations.`},
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -333,7 +361,7 @@ func demonstrateToolCallingWithImages(ctx context.Context, llm model.LLM, imageU
 				Role: genai.RoleUser,
 				Parts: []*genai.Part{
 					{Text: "Please analyze this image and tag it using the tag_image tool."},
-					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: []byte(imageData)}},
+					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
 				},
 			},
 		},
@@ -343,7 +371,13 @@ func demonstrateToolCallingWithImages(ctx context.Context, llm model.LLM, imageU
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.FunctionCall != nil {
@@ -361,10 +395,7 @@ func demonstrateToolCallingWithImages(ctx context.Context, llm model.LLM, imageU
 }
 
 // demonstrateMultipleImages shows how to analyze multiple images in sequence.
-func demonstrateMultipleImages(
-	ctx context.Context,
-	llm model.LLM,
-) error { //nolint:unparam // consistent function signature with other demonstrations
+func demonstrateMultipleImages(ctx context.Context, llm model.LLM) error {
 	fmt.Println("\n=== Comparing Multiple Images ===")
 
 	// Use two different public images
@@ -380,7 +411,7 @@ func demonstrateMultipleImages(
 			fmt.Printf("Note: Could not download image from %s: %v\n", url, err)
 			continue
 		}
-		images = append(images, []byte(data))
+		images = append(images, data)
 	}
 
 	if len(images) < 2 {
@@ -417,7 +448,13 @@ func demonstrateMultipleImages(
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -445,7 +482,7 @@ func demonstrateStreamingWithImages(ctx context.Context, llm model.LLM, imageURL
 				Role: genai.RoleUser,
 				Parts: []*genai.Part{
 					{Text: "Describe this image in detail, streaming your analysis as you go:"},
-					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: []byte(imageData)}},
+					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
 				},
 			},
 		},
@@ -455,7 +492,13 @@ func demonstrateStreamingWithImages(ctx context.Context, llm model.LLM, imageURL
 	}
 
 	chunkCount := 0
-	for resp := range llm.GenerateContent(ctx, req, true) { // true = streaming
+	for resp, err := range llm.GenerateContent(ctx, req, true) { // true = streaming
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -507,7 +550,7 @@ func demonstrateMediaInToolResponses(ctx context.Context, llm model.LLM, imageUR
 				Role: genai.RoleUser,
 				Parts: []*genai.Part{
 					{Text: "Analyze the regions of this image:"},
-					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: []byte(imageData)}},
+					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
 				},
 			},
 		},
@@ -518,7 +561,13 @@ func demonstrateMediaInToolResponses(ctx context.Context, llm model.LLM, imageUR
 	}
 
 	var hadToolCall bool
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.FunctionCall != nil {
@@ -529,7 +578,7 @@ func demonstrateMediaInToolResponses(ctx context.Context, llm model.LLM, imageUR
 		}
 	}
 
-	if hadToolCall {
+	if hadToolCall { //nolint:nestif // tool-response continuation flow requires nested content blocks
 		// Simulate tool response with image content
 		req.Contents = append(req.Contents, &genai.Content{
 			Role: genai.RoleModel,
@@ -557,7 +606,7 @@ func demonstrateMediaInToolResponses(ctx context.Context, llm model.LLM, imageUR
 						},
 					},
 				},
-				{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: []byte(imageData)}},
+				{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
 			},
 		})
 
@@ -569,7 +618,13 @@ func demonstrateMediaInToolResponses(ctx context.Context, llm model.LLM, imageUR
 			},
 		})
 
-		for resp := range llm.GenerateContent(ctx, req, false) {
+		for resp, err := range llm.GenerateContent(ctx, req, false) {
+			if err != nil {
+				return fmt.Errorf("generate: %w", err)
+			}
+			if resp == nil {
+				continue
+			}
 			if resp.Content != nil {
 				for _, part := range resp.Content.Parts {
 					if part.Text != "" {
@@ -605,7 +660,7 @@ func demonstrateImageConstraints(ctx context.Context, llm model.LLM, imageURL st
 				Role: genai.RoleUser,
 				Parts: []*genai.Part{
 					{Text: "Analyze this image for key elements:"},
-					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: []byte(imageData)}},
+					{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: imageData}},
 				},
 			},
 		},
@@ -614,7 +669,13 @@ func demonstrateImageConstraints(ctx context.Context, llm model.LLM, imageURL st
 		},
 	}
 
-	for resp := range llm.GenerateContent(ctx, req, false) {
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		if resp == nil {
+			continue
+		}
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
 				if part.Text != "" {
@@ -652,8 +713,8 @@ func main() {
 	// Get model ID
 	modelID := os.Getenv("BEDROCK_MODEL_ID")
 	if modelID == "" {
-		log.Println("BEDROCK_MODEL_ID is required (e.g., us.anthropic.claude-3-5-sonnet-20241022-v2:0)")
-		modelID = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+		log.Println("BEDROCK_MODEL_ID is required (e.g. eu.amazon.nova-2-lite-v1:0) using default model")
+		modelID = "eu.amazon.nova-2-lite-v1:0"
 	}
 
 	// Get image URL from environment or use a default
