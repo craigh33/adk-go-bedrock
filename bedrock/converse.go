@@ -421,10 +421,19 @@ func (s *streamState) mergeCustomMetadata(md map[string]any) {
 }
 
 func (s *streamState) finalResponse() *model.LLMResponse {
-	parts := s.finalParts()
+	parts, unsupportedFormats := s.finalParts()
 	if len(parts) == 0 {
 		parts = []*genai.Part{{Text: ""}}
 	}
+
+	// Store any unsupported image formats in custom metadata so callers can detect them
+	if len(unsupportedFormats) > 0 {
+		if s.customMetadata == nil {
+			s.customMetadata = map[string]any{}
+		}
+		s.customMetadata["unsupported_image_formats"] = unsupportedFormats
+	}
+
 	return &model.LLMResponse{
 		Content:        &genai.Content{Role: "model", Parts: parts},
 		FinishReason:   mappers.FinishReasonFromStopReasonAndTrace(s.stopReason, s.guardrailTrace),
@@ -434,8 +443,9 @@ func (s *streamState) finalResponse() *model.LLMResponse {
 	}
 }
 
-func (s *streamState) finalParts() []*genai.Part { //nolint:gocognit
+func (s *streamState) finalParts() ([]*genai.Part, []string) { //nolint:gocognit
 	parts := make([]*genai.Part, 0, len(s.slotOrder))
+	unsupportedFormats := []string{} // Track unsupported image formats
 
 	// Assemble all parts in strict slot order to preserve Bedrock block ordering
 	for _, idx := range s.sortedSlotOrder() {
@@ -457,6 +467,10 @@ func (s *streamState) finalParts() []*genai.Part { //nolint:gocognit
 		if img := s.imagesBySlot[idx]; img != nil && len(img.Data) > 0 {
 			if mime, err := streamImageMIMEFromFormat(img.Format); err == nil {
 				parts = append(parts, &genai.Part{InlineData: &genai.Blob{Data: img.Data, MIMEType: mime}})
+			} else {
+				// Track unsupported format instead of silently dropping the image
+				format := fmt.Sprintf("unsupported_format_at_slot_%d: %v", idx, err)
+				unsupportedFormats = append(unsupportedFormats, format)
 			}
 		}
 
@@ -477,7 +491,7 @@ func (s *streamState) finalParts() []*genai.Part { //nolint:gocognit
 			}})
 		}
 	}
-	return parts
+	return parts, unsupportedFormats
 }
 
 func (s *streamState) sortedSlotOrder() []int32 {
