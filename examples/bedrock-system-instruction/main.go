@@ -263,7 +263,7 @@ Your teaching style:
 		}
 	}
 
-	fmt.Printf("Student: Your question was answered!\n")
+	fmt.Printf("Tutor: %s\n\n", secondResponse.String())
 	return nil
 }
 

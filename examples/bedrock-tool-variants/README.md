@@ -198,7 +198,14 @@ If you use an unsupported tool variant:
 ### Streaming with Tools
 
 ```go
-for resp := range llm.GenerateContent(ctx, req, true) { // true = streaming
+for resp, err := range llm.GenerateContent(ctx, req, true) { // true = streaming
+    if err != nil {
+        // Handle stream error (e.g., log, break, etc.)
+        break
+    }
+    if resp == nil {
+        continue
+    }
     // Handle streamed tool responses
 }
 ```

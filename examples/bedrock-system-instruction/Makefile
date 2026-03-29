@@ -6,4 +6,4 @@ run:
 		echo "Usage: BEDROCK_MODEL_ID=<model-id> AWS_REGION=<region> make run"; \
 		exit 1; \
 	fi
-	go run ./examples/bedrock-system-instruction
+	go run .
