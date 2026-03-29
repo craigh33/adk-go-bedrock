@@ -14,7 +14,6 @@ This example documents the current Bedrock provider behavior for ADK tool varian
 - `BEDROCK_MODEL_ID` set to a Bedrock model ID that supports function calling
 - AWS credentials configured via the default chain
 - AWS region configured (for example `AWS_REGION=us-east-1`)
-- Bedrock model should support the specific tool variants you want to use
 
 ## Run
 
