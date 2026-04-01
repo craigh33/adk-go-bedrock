@@ -219,7 +219,6 @@ type streamState struct {
 	imagesBySlot      map[int32]*streamImageBlock
 	reasonBySlot      map[int32]*streamReasoningBlock
 	slotOrder         []int32
-
 	lastUsage      *genai.GenerateContentResponseUsageMetadata
 	customMetadata map[string]any
 	guardrailTrace *types.GuardrailTraceAssessment
@@ -233,7 +232,6 @@ type streamTextBlock struct {
 type streamToolCall struct {
 	ID   string
 	Name string
-
 	input strings.Builder
 }
 
