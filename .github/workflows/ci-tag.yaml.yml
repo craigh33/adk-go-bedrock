@@ -1,0 +1,30 @@
+name: ci-tag.yaml
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Bumps version, creates tag, and creates a GitHub Release
+      - name: Bump version and create release tag
+        uses: mathieudutour/github-tag-action@v6.2
+        id: tag
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          release_branches: main
+          default_bump: patch
+          tag_prefix: "v"
+
+      - name: Show created tag
+        run: |
+          echo "new_tag=${{ steps.tagger.outputs.new_tag }}"
+          echo "changelog=${{ steps.tagger.outputs.changelog }}"
