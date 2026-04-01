@@ -14,7 +14,7 @@ const mimeApplicationOctetStream = "application/octet-stream"
 // This is a best-effort hint for clients that only know the file path (e.g. local uploads);
 // prefer an explicit MIME from the source (browser File.type, HTTP Content-Type) when available.
 //
-//nolint:funlen // Large extension→MIME table; a map would trip gochecknoglobals in this package.
+//nolint:funlen // Large inline extension→MIME table to avoid a package-level map that would trip gochecknoglobals.
 func MIMETypeFromExtension(path string) string {
 	switch strings.ToLower(filepath.Ext(path)) {
 	// Documents (Bedrock Converse document blocks)
