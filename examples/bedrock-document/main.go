@@ -48,7 +48,7 @@ func main() {
 	}
 
 	docPath = filepath.Clean(docPath)
-	data, err := os.ReadFile(docPath) // #nosec G703 -- path comes from -path / DOCUMENT_PATH (operator-chosen file)
+	data, err := os.ReadFile(docPath) // #nosec G304 -- path comes from -path / DOCUMENT_PATH (operator-chosen file)
 	if err != nil {
 		log.Fatalf("read file: %v", err)
 	}

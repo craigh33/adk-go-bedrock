@@ -50,7 +50,7 @@ Environment variable **`DOCUMENT_PATH`** is used if `-path` is omitted.
 ## What to look for
 
 - **`-dry-run`** prints Bedrock message count and block types (`document`, `text`, etc.). If mapping fails, you get an error immediately (no invocation ID on the server — same class of failure as a bad request body).
-- **MIME** is inferred from the file extension in this example (see `mimeFromExtension` in `main.go`). Your browser may send different types; the mapper also normalizes parameters and infers from `application/zip` / `application/octet-stream` when the filename is present.
+- **MIME** is inferred from the file extension in this example (see the `mappers.MIMETypeFromExtension` call in `main.go`). Your browser may send different types; the mapper also normalizes parameters and infers from `application/zip` / `application/octet-stream` when the filename is present.
 - On failure, the process logs **`GenerateContent: ...`** or **`mapping failed: ...`** with the underlying error (validation, AWS API, etc.).
 
 ## Makefile
