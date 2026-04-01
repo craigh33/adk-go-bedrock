@@ -85,13 +85,34 @@ agent, err := llmagent.New(llmagent.Config{
 
 The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conversions (requests, responses, tools, usage). Import it if you need the same mappings outside the default [`bedrock`](bedrock/) package. The Bedrock Runtime API abstraction used by [`converse.go`](bedrock/converse.go) is exported from [`bedrock`](bedrock/) (`RuntimeAPI`, `StreamReader`, and `NewRuntimeAPI`).
 
+## MCP support
+
+[Model Context Protocol](https://modelcontextprotocol.io/) tools work **through ADK**, not as a separate Bedrock API: [`mcptoolset`](https://pkg.go.dev/google.golang.org/adk/tool/mcptoolset) connects to an MCP server, discovers tools, and exposes them to the model as ordinary function declarations. By the time a request reaches this provider, MCP tools are indistinguishable from other tool-calling; the mapper sends them to Bedrock `Converse` as `ToolSpecification` entries like any other supported tools.
+
+A minimal end-to-end example is [`examples/bedrock-mcp/main.go`](examples/bedrock-mcp/main.go): it starts an in-memory MCP server with a `get_weather` tool, wires [`mcptoolset.New`](https://pkg.go.dev/google.golang.org/adk/tool/mcptoolset#New) into an `llmagent`, and runs one user turn through the Bedrock-backed runner. Set `AWS_REGION` (or configure region on your profile); `BEDROCK_MODEL_ID` is optional (the example defaults when unset). See [`examples/bedrock-mcp/README.md`](examples/bedrock-mcp/README.md) for `PROMPT` overrides.
+
+```bash
+make -C examples/bedrock-mcp run
+```
+
+Sample output:
+
+```
+2026/04/01 11:45:36 BEDROCK_MODEL_ID not set; defaulting to eu.amazon.nova-2-lite-v1:0
+User: What is the weather in Seattle? Use your MCP tool if needed.
+
+
+
+The weather in Seattle is sunny and 72°F today.
+```
+
 ## Examples
 
 Each example has its own `README.md` and `Makefile`:
 
 - [`examples/bedrock-a2a`](examples/bedrock-a2a): A2A remote-agent example backed by Bedrock.
 - [`examples/bedrock-chat`](examples/bedrock-chat): runner-based chat example.
-- [`examples/bedrock-mcp`](examples/bedrock-mcp): runner-based MCP example using ADK's `mcptoolset` with an in-memory MCP server.
+- [`examples/bedrock-mcp`](examples/bedrock-mcp): MCP support via ADK's `mcptoolset` with an in-memory MCP server ([MCP support](#mcp-support)).
 - [`examples/bedrock-tool-calling`](examples/bedrock-tool-calling): tool-calling agent example with function declarations.
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
 - [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
@@ -121,7 +142,7 @@ make -C examples/bedrock-stream run
 - **Tools**: the mapper converts `GenerateContentConfig.Tools` entries:
   - `FunctionDeclarations` → Bedrock `ToolSpecification` (custom function tools)
   - Non-function ADK variants (Google Search, Code Execution, Retrieval, MCP Servers, Computer Use, File Search, Google Maps, URL Context, etc.) are rejected early with a clear provider error because they are not currently mapped to Bedrock Converse
-  - MCP works through ADK toolsets such as `mcptoolset`, which expose MCP tools to the model as function declarations before they reach this provider. Other `genai.Tool` variants (Google Search, code execution, etc.) are not supported here.
+  - MCP: use ADK `mcptoolset` so MCP tools become function declarations before they reach this provider ([MCP support](#mcp-support)). Other `genai.Tool` variants (Google Search, code execution, etc.) are not supported here.
 - **Multimodal parts**: ADK `Part` text, thoughts/reasoning, inline/file-backed images, audio, video, and documents are mapped on the Bedrock-compatible subset. Rich user media is sent as Bedrock content blocks; assistant reasoning is preserved as Bedrock reasoning content.
 - **Function responses**: JSON tool output still maps as before, and image/video/document `FunctionResponse.Parts` are preserved through Bedrock tool-result content blocks.
 - **Streaming**: When ADK uses SSE streaming, the provider calls `ConverseStream`, emits partial text responses, and buffers streamed tool calls, reasoning blocks, image blocks, usage, and guardrail metadata into the final `TurnComplete` response.
