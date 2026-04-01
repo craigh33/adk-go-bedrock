@@ -1,4 +1,4 @@
-name: ci-tag.yaml
+name: ci-tag
 on:
   push:
     branches: [main]
