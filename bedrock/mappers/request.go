@@ -853,7 +853,8 @@ func documentName(displayName, fileURI, mime string) string {
 // sanitizeDocumentNameForBedrock enforces Bedrock Converse rules for document names:
 // only alphanumeric characters, whitespace, hyphens, parentheses, and square brackets;
 // no more than one consecutive space. Other characters (e.g. dots in "file.pdf") are
-// replaced with a single hyphen; repeated hyphens are collapsed.
+// replaced with a single hyphen; consecutive hyphens (from the input or from replacement)
+// are collapsed to one.
 func sanitizeDocumentNameForBedrock(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -875,7 +876,13 @@ func sanitizeDocumentNameForBedrock(name string) string {
 			}
 			b.WriteRune(' ')
 			prev = ' '
-		case r == '-' || r == '(' || r == ')' || r == '[' || r == ']':
+		case r == '-':
+			if prev == '-' {
+				continue
+			}
+			b.WriteRune('-')
+			prev = '-'
+		case r == '(' || r == ')' || r == '[' || r == ']':
 			b.WriteRune(r)
 			prev = r
 		default:

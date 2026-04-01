@@ -2,6 +2,7 @@ package mappers
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -327,6 +328,32 @@ func TestPartsToContentBlocks_powerPointRejected(t *testing.T) {
 	}
 }
 
+func TestPartsToContentBlocks_toolCallUnsupported(t *testing.T) {
+	t.Parallel()
+	_, err := PartsToContentBlocks([]*genai.Part{{
+		ToolCall: &genai.ToolCall{ID: "server-tool-1"},
+	}}, types.ConversationRoleUser)
+	if err == nil {
+		t.Fatal("expected error for ToolCall")
+	}
+	if !strings.Contains(err.Error(), "toolCall") {
+		t.Fatalf("expected error mentioning toolCall, got %v", err)
+	}
+}
+
+func TestPartsToContentBlocks_toolResponseUnsupported(t *testing.T) {
+	t.Parallel()
+	_, err := PartsToContentBlocks([]*genai.Part{{
+		ToolResponse: &genai.ToolResponse{ID: "server-tool-1"},
+	}}, types.ConversationRoleUser)
+	if err == nil {
+		t.Fatal("expected error for ToolResponse")
+	}
+	if !strings.Contains(err.Error(), "toolResponse") {
+		t.Fatalf("expected error mentioning toolResponse, got %v", err)
+	}
+}
+
 func TestSanitizeDocumentNameForBedrock(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -337,6 +364,8 @@ func TestSanitizeDocumentNameForBedrock(t *testing.T) {
 		{"N-able Internal Document Template.docx", "N-able Internal Document Template-docx"},
 		{"a  b  c", "a b c"},
 		{"file..name", "file-name"},
+		{"a--b", "a-b"},
+		{"--leading", "leading"},
 		{"", "document"},
 		{"...", "document"},
 	}
