@@ -13,6 +13,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/adk/model"
 	"google.golang.org/genai"
 
@@ -44,13 +47,39 @@ type RuntimeAPI interface {
 	) (StreamReader, error)
 }
 
+const otelTracerName = "github.com/craigh33/adk-go-bedrock/bedrock"
+
+// RuntimeAPIOption configures [NewRuntimeAPI].
+type RuntimeAPIOption func(*runtimeAdapter)
+
+// WithTracerProvider sets the OpenTelemetry [trace.TracerProvider] used for
+// Bedrock runtime spans. When omitted, [otel.GetTracerProvider] is used (the
+// global provider, or a no-op implementation if none was registered).
+func WithTracerProvider(tp trace.TracerProvider) RuntimeAPIOption {
+	return func(a *runtimeAdapter) {
+		a.tracerProvider = tp
+	}
+}
+
 type runtimeAdapter struct {
-	inner *bedrockruntime.Client
+	inner          *bedrockruntime.Client
+	tracerProvider trace.TracerProvider
 }
 
 // NewRuntimeAPI wraps a [bedrockruntime.Client] as [RuntimeAPI].
-func NewRuntimeAPI(c *bedrockruntime.Client) RuntimeAPI {
-	return &runtimeAdapter{inner: c}
+func NewRuntimeAPI(c *bedrockruntime.Client, opts ...RuntimeAPIOption) RuntimeAPI {
+	a := &runtimeAdapter{inner: c}
+	for _, opt := range opts {
+		opt(a)
+	}
+	if a.tracerProvider == nil {
+		a.tracerProvider = otel.GetTracerProvider()
+	}
+	return a
+}
+
+func (c *runtimeAdapter) tracer() trace.Tracer {
+	return c.tracerProvider.Tracer(otelTracerName)
 }
 
 func (c *runtimeAdapter) Converse(
@@ -58,7 +87,18 @@ func (c *runtimeAdapter) Converse(
 	params *bedrockruntime.ConverseInput,
 	optFns ...func(*bedrockruntime.Options),
 ) (*bedrockruntime.ConverseOutput, error) {
-	return c.inner.Converse(ctx, params, optFns...)
+	ctx, span := c.tracer().Start(ctx, "bedrockruntime.Converse",
+		trace.WithSpanKind(trace.SpanKindClient))
+	defer span.End()
+
+	out, err := c.inner.Converse(ctx, params, optFns...)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	span.SetStatus(codes.Ok, "")
+	return out, nil
 }
 
 func (c *runtimeAdapter) ConverseStream(
@@ -66,10 +106,17 @@ func (c *runtimeAdapter) ConverseStream(
 	params *bedrockruntime.ConverseStreamInput,
 	optFns ...func(*bedrockruntime.Options),
 ) (StreamReader, error) {
+	ctx, span := c.tracer().Start(ctx, "bedrockruntime.ConverseStream",
+		trace.WithSpanKind(trace.SpanKindClient))
+	defer span.End()
+
 	out, err := c.inner.ConverseStream(ctx, params, optFns...)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+	span.SetStatus(codes.Ok, "")
 	return out.GetStream(), nil
 }
 
