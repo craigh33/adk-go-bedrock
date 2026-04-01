@@ -91,6 +91,7 @@ Each example has its own `README.md` and `Makefile`:
 
 - [`examples/bedrock-a2a`](examples/bedrock-a2a): A2A remote-agent example backed by Bedrock.
 - [`examples/bedrock-chat`](examples/bedrock-chat): runner-based chat example.
+- [`examples/bedrock-mcp`](examples/bedrock-mcp): MCP support via ADK's `mcptoolset` with an in-memory MCP server ([MCP support](#mcp-support)).
 - [`examples/bedrock-tool-calling`](examples/bedrock-tool-calling): tool-calling agent example with function declarations.
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
 - [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
@@ -121,6 +122,7 @@ make -C examples/bedrock-stream run
 - **Tools**: the mapper converts `GenerateContentConfig.Tools` entries:
   - `FunctionDeclarations` → Bedrock `ToolSpecification` (custom function tools)
   - Non-function ADK variants (Google Search, Code Execution, Retrieval, MCP Servers, Computer Use, File Search, Google Maps, URL Context, etc.) are rejected early with a clear provider error because they are not currently mapped to Bedrock Converse
+  - MCP: use ADK `mcptoolset` so MCP tools become function declarations before they reach this provider ([MCP support](#mcp-support)). Other `genai.Tool` variants (Google Search, code execution, etc.) are not supported here.
 - **Multimodal parts**: ADK `Part` text, thoughts/reasoning, inline/file-backed images, audio, video, and documents are mapped on the Bedrock-compatible subset. Rich user media is sent as Bedrock content blocks; assistant reasoning is preserved as Bedrock reasoning content.
 - **Function responses**: JSON tool output still maps as before, and image/video/document `FunctionResponse.Parts` are preserved through Bedrock tool-result content blocks.
 - **Streaming**: When ADK uses SSE streaming, the provider calls `ConverseStream`, emits partial text responses, and buffers streamed tool calls, reasoning blocks, image blocks, usage, and guardrail metadata into the final `TurnComplete` response.
@@ -132,6 +134,7 @@ make -C examples/bedrock-stream run
 - **Request-side generic guardrails**: ADK `SafetySettings` / `ModelArmorConfig` are not currently supported for Bedrock Converse. Because they do not contain the Bedrock guardrail identifier + version required by `Converse`, the request builder returns an explicit error instead of silently dropping them, and there is currently no supported way to provide `GuardrailIdentifier` / `GuardrailVersion` through this provider.
 - **Provider surface mismatch**: Bedrock-specific features that require pre-provisioned AWS resources or have no generic ADK equivalent are exposed back through ADK-friendly `CustomMetadata`, but cannot always be reconstructed into first-class `genai` request fields.
 - **Unsupported tool types**: Tool variants not supported by Bedrock or the target model cause a request-time error with details about which variants are unsupported.
+
 
 ## License
 

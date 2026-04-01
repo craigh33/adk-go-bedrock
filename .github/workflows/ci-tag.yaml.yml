@@ -1,4 +1,4 @@
-name: ci-tag
+name: CI Tag
 on:
   push:
     branches: [main]
@@ -9,6 +9,8 @@ permissions:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.tag.outputs.new_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,3 +30,28 @@ jobs:
         run: |
           echo "new_tag=${{ steps.tag.outputs.new_tag }}"
           echo "changelog=${{ steps.tag.outputs.changelog }}"
+
+  # Pushes from workflows using GITHUB_TOKEN do not trigger other workflows, so tag
+  # pushes from the job above never fire ci-release.yaml. Run GoReleaser here instead.
+  goreleaser:
+    needs: tag
+    if: needs.tag.outputs.new_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.tag.outputs.new_tag }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
