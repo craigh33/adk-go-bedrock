@@ -270,6 +270,7 @@ func (s *streamState) consumeEvent(ev types.ConverseStreamOutput) (*model.LLMRes
 			s.guardrailTrace = v.Value.Trace.Guardrail
 		}
 	default:
+		// Ignore stream variants we do not map yet; Bedrock may add new event types over time.
 	}
 	return nil, nil //nolint:nilnil // Stream event type does not emit an intermediate response.
 }
