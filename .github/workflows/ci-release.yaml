@@ -1,5 +1,8 @@
 name: CI Release
 
+# Runs when a tag is pushed from outside Actions (e.g. local `git push --tags`).
+# Tags created by another workflow with secrets.GITHUB_TOKEN do not trigger this
+# workflow; see ci-tag.yaml.yml for automated releases after version bumps.
 on:
   push:
     tags:
