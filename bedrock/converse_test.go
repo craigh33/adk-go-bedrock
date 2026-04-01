@@ -270,3 +270,82 @@ func TestConverse_GenerateContent_streamError(t *testing.T) {
 		t.Fatalf("error: %v", gotErr)
 	}
 }
+
+func TestConverse_GenerateContent_streamImageReasoningAndGuardrailMetadata(t *testing.T) {
+	t.Parallel()
+
+	imgIdx := int32(0)
+	reasonIdx := int32(1)
+	ch := make(chan types.ConverseStreamOutput, 8)
+	ch <- &types.ConverseStreamOutputMemberContentBlockStart{Value: types.ContentBlockStartEvent{
+		ContentBlockIndex: &imgIdx,
+		Start:             &types.ContentBlockStartMemberImage{Value: types.ImageBlockStart{Format: types.ImageFormatPng}},
+	}}
+	ch <- &types.ConverseStreamOutputMemberContentBlockDelta{Value: types.ContentBlockDeltaEvent{
+		ContentBlockIndex: &imgIdx,
+		Delta:             &types.ContentBlockDeltaMemberImage{Value: types.ImageBlockDelta{Source: &types.ImageSourceMemberBytes{Value: []byte{0x01, 0x02}}}},
+	}}
+	ch <- &types.ConverseStreamOutputMemberContentBlockDelta{Value: types.ContentBlockDeltaEvent{
+		ContentBlockIndex: &reasonIdx,
+		Delta:             &types.ContentBlockDeltaMemberReasoningContent{Value: &types.ReasoningContentBlockDeltaMemberText{Value: "thinking"}},
+	}}
+	ch <- &types.ConverseStreamOutputMemberContentBlockDelta{Value: types.ContentBlockDeltaEvent{
+		ContentBlockIndex: &reasonIdx,
+		Delta:             &types.ContentBlockDeltaMemberReasoningContent{Value: &types.ReasoningContentBlockDeltaMemberSignature{Value: "sig-1"}},
+	}}
+	ch <- &types.ConverseStreamOutputMemberMetadata{Value: types.ConverseStreamMetadataEvent{
+		Usage: &types.TokenUsage{InputTokens: aws.Int32(1), OutputTokens: aws.Int32(1), TotalTokens: aws.Int32(2)},
+		Trace: &types.ConverseStreamTrace{Guardrail: &types.GuardrailTraceAssessment{
+			OutputAssessments: map[string][]types.GuardrailAssessment{
+				"0": {{ContentPolicy: &types.GuardrailContentPolicyAssessment{Filters: []types.GuardrailContentFilter{{
+					Type:           types.GuardrailContentFilterTypeHate,
+					Confidence:     types.GuardrailContentFilterConfidenceHigh,
+					FilterStrength: types.GuardrailContentFilterStrengthHigh,
+					Action:         types.GuardrailContentPolicyActionBlocked,
+				}}}}},
+			},
+		}},
+	}}
+	ch <- &types.ConverseStreamOutputMemberMessageStop{Value: types.MessageStopEvent{StopReason: types.StopReasonGuardrailIntervened}}
+	close(ch)
+
+	api := &fakeAPI{stream: &fakeStream{ch: ch}}
+	m, err := NewWithAPI("mid", api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("hi", "user")},
+		Config:   &genai.GenerateContentConfig{},
+	}
+
+	var final *model.LLMResponse
+	for r, err := range m.GenerateContent(context.Background(), req, true) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !r.Partial {
+			final = r
+		}
+	}
+	if final == nil {
+		t.Fatal("missing final response")
+	}
+	if final.FinishReason != genai.FinishReasonSafety {
+		t.Fatalf("finish reason: %v", final.FinishReason)
+	}
+	if final.Content == nil || len(final.Content.Parts) != 2 {
+		t.Fatalf("parts: %+v", final.Content)
+	}
+	if final.Content.Parts[0].InlineData == nil || final.Content.Parts[0].InlineData.MIMEType != "image/png" {
+		t.Fatalf("image part: %+v", final.Content.Parts[0])
+	}
+	if !final.Content.Parts[1].Thought || final.Content.Parts[1].Text != "thinking" ||
+		string(final.Content.Parts[1].ThoughtSignature) != "sig-1" {
+		t.Fatalf("reasoning part: %+v", final.Content.Parts[1])
+	}
+	ratings, ok := final.CustomMetadata["safety_ratings"].([]*genai.SafetyRating)
+	if !ok || len(ratings) != 1 || ratings[0].Category != genai.HarmCategoryHateSpeech {
+		t.Fatalf("custom metadata: %+v", final.CustomMetadata)
+	}
+}
