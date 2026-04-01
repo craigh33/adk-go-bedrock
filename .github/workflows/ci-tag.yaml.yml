@@ -26,5 +26,5 @@ jobs:
 
       - name: Show created tag
         run: |
-          echo "new_tag=${{ steps.tagger.outputs.new_tag }}"
-          echo "changelog=${{ steps.tagger.outputs.changelog }}"
+          echo "new_tag=${{ steps.tag.outputs.new_tag }}"
+          echo "changelog=${{ steps.tag.outputs.changelog }}"
