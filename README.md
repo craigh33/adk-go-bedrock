@@ -83,7 +83,7 @@ agent, err := llmagent.New(llmagent.Config{
 
 `bedrock.New` accepts a **model ID** or **inference profile ARN** as documented by AWS. [`LLMRequest.Model`](https://pkg.go.dev/google.golang.org/adk/model#LLMRequest) can override the model ID at runtime (e.g. from ADK callbacks).
 
-The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conversions (requests, responses, tools, usage). Import it if you need the same mappings outside the default [`bedrock`](bedrock/) package. The Bedrock Runtime API abstraction used by [`converse.go`](bedrock/converse.go) is exported from [`bedrock`](bedrock/) (`RuntimeAPI`, `StreamReader`, and `NewRuntimeAPI`).
+The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conversions (requests, responses, tools, usage). Import it if you need the same mappings outside the default [`bedrock`](bedrock/) package. It also exports [`MIMETypeFromExtension`](bedrock/mappers/mime_extension.go) for inferring MIME types from a filename when building `genai` parts. The Bedrock Runtime API abstraction used by [`converse.go`](bedrock/converse.go) is exported from [`bedrock`](bedrock/) (`RuntimeAPI`, `StreamReader`, and `NewRuntimeAPI`).
 
 ## Examples
 
@@ -95,6 +95,7 @@ Each example has its own `README.md` and `Makefile`:
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
 - [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
 - [`examples/bedrock-multimodal`](examples/bedrock-multimodal): comprehensive image analysis, document processing, tool calling with rich media, and vision-based reasoning.
+- [`examples/bedrock-document`](examples/bedrock-document): CLI to debug document uploads (`-dry-run` mapper check, optional `-combined` / `-stream`).
 - [`examples/bedrock-guardrails`](examples/bedrock-guardrails): safety assessments, content filtering, and guardrail metadata handling.
 - [`examples/bedrock-system-instruction`](examples/bedrock-system-instruction): system instructions for role definition, output formatting, and behavioral control.
 - [`examples/bedrock-web-ui`](examples/bedrock-web-ui): ADK local web UI launcher.

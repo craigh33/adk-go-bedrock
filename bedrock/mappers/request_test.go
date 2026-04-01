@@ -1,6 +1,7 @@
 package mappers
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -99,8 +100,102 @@ func TestPartsToContentBlocks_multimodalInlineAndFile(t *testing.T) {
 	if !ok {
 		t.Fatalf("block[3] type: %T", blocks[3])
 	}
-	if got := aws.ToString(doc.Value.Name); got != "report.pdf" {
-		t.Fatalf("document name: %q", got)
+	if got := aws.ToString(doc.Value.Name); got != "report-pdf" {
+		t.Fatalf("document name: %q (Bedrock rejects dots in names; expect sanitized form)", got)
+	}
+}
+
+func TestPartsToContentBlocks_pdfMIMEWithParams(t *testing.T) {
+	t.Parallel()
+	blocks, err := PartsToContentBlocks([]*genai.Part{{
+		InlineData: &genai.Blob{
+			Data:        []byte("%PDF-1.4 fake"),
+			MIMEType:    "application/pdf; charset=binary",
+			DisplayName: "memo.pdf",
+		},
+	}}, types.ConversationRoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("blocks: %+v", blocks)
+	}
+	doc, ok := blocks[0].(*types.ContentBlockMemberDocument)
+	if !ok {
+		t.Fatalf("want document block, got %T", blocks[0])
+	}
+	if doc.Value.Format != types.DocumentFormatPdf {
+		t.Fatalf("format: %v", doc.Value.Format)
+	}
+}
+
+func TestPartsToContentBlocks_pdfOctetStreamWithFilename(t *testing.T) {
+	t.Parallel()
+	blocks, err := PartsToContentBlocks([]*genai.Part{{
+		InlineData: &genai.Blob{
+			Data:        []byte("%PDF-1.4 fake"),
+			MIMEType:    "application/octet-stream",
+			DisplayName: "report.pdf",
+		},
+	}}, types.ConversationRoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("blocks: %+v", blocks)
+	}
+	doc, ok := blocks[0].(*types.ContentBlockMemberDocument)
+	if !ok {
+		t.Fatalf("want document block, got %T", blocks[0])
+	}
+	if doc.Value.Format != types.DocumentFormatPdf {
+		t.Fatalf("format: %v", doc.Value.Format)
+	}
+}
+
+func TestPartsToContentBlocks_docxMIMEWithParams(t *testing.T) {
+	t.Parallel()
+	const docxMIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	blocks, err := PartsToContentBlocks([]*genai.Part{{
+		InlineData: &genai.Blob{
+			Data:        []byte("PK\x03\x04"),
+			MIMEType:    docxMIME + "; charset=binary",
+			DisplayName: "memo.docx",
+		},
+	}}, types.ConversationRoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, ok := blocks[0].(*types.ContentBlockMemberDocument)
+	if !ok {
+		t.Fatalf("want document block, got %T", blocks[0])
+	}
+	if doc.Value.Format != types.DocumentFormatDocx {
+		t.Fatalf("format: %v", doc.Value.Format)
+	}
+}
+
+func TestPartsToContentBlocks_docxAsApplicationZip(t *testing.T) {
+	t.Parallel()
+	blocks, err := PartsToContentBlocks([]*genai.Part{{
+		InlineData: &genai.Blob{
+			Data:        []byte("PK\x03\x04 fake docx zip"),
+			MIMEType:    "application/zip",
+			DisplayName: "memo.docx",
+		},
+	}}, types.ConversationRoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("blocks: %+v", blocks)
+	}
+	doc, ok := blocks[0].(*types.ContentBlockMemberDocument)
+	if !ok {
+		t.Fatalf("want document block, got %T", blocks[0])
+	}
+	if doc.Value.Format != types.DocumentFormatDocx {
+		t.Fatalf("format: %v", doc.Value.Format)
 	}
 }
 
@@ -160,6 +255,45 @@ func TestPartsToContentBlocks_functionResponseMedia(t *testing.T) {
 	}
 }
 
+func TestPartsToContentBlocks_textAndInlineDataSamePart(t *testing.T) {
+	t.Parallel()
+	blocks, err := PartsToContentBlocks([]*genai.Part{{
+		Text: "Summarize this for me",
+		InlineData: &genai.Blob{
+			Data:        []byte("PK\x03\x04"),
+			MIMEType:    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			DisplayName: "N-able Internal Document Template.docx",
+		},
+	}}, types.ConversationRoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("want document then text (2 blocks), got %d: %#v", len(blocks), blocks)
+	}
+	doc0, ok := blocks[0].(*types.ContentBlockMemberDocument)
+	if !ok {
+		t.Fatalf("block[0] want document, got %T", blocks[0])
+	}
+	if got := aws.ToString(doc0.Value.Name); got != "N-able Internal Document Template-docx" {
+		t.Fatalf("document name: %q", got)
+	}
+	if txt, ok := blocks[1].(*types.ContentBlockMemberText); !ok || txt.Value != "Summarize this for me" {
+		t.Fatalf("block[1] want user text, got %#v", blocks[1])
+	}
+}
+
+func TestConverseInputFromLLMRequest_emptyUserParts(t *testing.T) {
+	t.Parallel()
+	_, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
+		Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{}}},
+		Config:   &genai.GenerateContentConfig{},
+	})
+	if err == nil {
+		t.Fatal("expected error for empty user message with no mappable parts")
+	}
+}
+
 func TestConverseInputFromLLMRequest_safetySettingsFailFast(t *testing.T) {
 	t.Parallel()
 	_, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
@@ -173,6 +307,43 @@ func TestConverseInputFromLLMRequest_safetySettingsFailFast(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestPartsToContentBlocks_powerPointRejected(t *testing.T) {
+	t.Parallel()
+	_, err := PartsToContentBlocks([]*genai.Part{{
+		InlineData: &genai.Blob{
+			Data:        []byte("PK\x03\x04"),
+			MIMEType:    "application/octet-stream",
+			DisplayName: "slides.pptx",
+		},
+	}}, types.ConversationRoleUser)
+	if err == nil {
+		t.Fatal("expected error for PowerPoint")
+	}
+	if !errors.Is(err, ErrBedrockPowerPointNotSupported) {
+		t.Fatalf("want ErrBedrockPowerPointNotSupported, got %v", err)
+	}
+}
+
+func TestSanitizeDocumentNameForBedrock(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		in, want string
+	}{
+		{"test.pdf", "test-pdf"},
+		{"report.pdf", "report-pdf"},
+		{"N-able Internal Document Template.docx", "N-able Internal Document Template-docx"},
+		{"a  b  c", "a b c"},
+		{"file..name", "file-name"},
+		{"", "document"},
+		{"...", "document"},
+	}
+	for _, tt := range tests {
+		if got := sanitizeDocumentNameForBedrock(tt.in); got != tt.want {
+			t.Errorf("sanitizeDocumentNameForBedrock(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }
 

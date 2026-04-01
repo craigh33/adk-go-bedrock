@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"unicode"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -56,6 +57,11 @@ func ConverseInputFromLLMRequest(modelID string, req *model.LLMRequest) (*bedroc
 	messages, err := contentsToMessages(msgsFromContents)
 	if err != nil {
 		return nil, err
+	}
+	if len(messages) == 0 {
+		return nil, errors.New(
+			"no messages to send to Bedrock: every user/model part was empty or could not be mapped (check for unsupported Part fields or combined parts dropped by the mapper)",
+		)
 	}
 
 	in := &bedrockruntime.ConverseInput{
@@ -203,8 +209,7 @@ func PartsToContentBlocks(parts []*genai.Part, role types.ConversationRole) ([]t
 		if p == nil {
 			continue
 		}
-		switch {
-		case p.Thought:
+		if p.Thought {
 			rb, err := thoughtPartToReasoningContentBlock(p, role)
 			if err != nil {
 				return nil, err
@@ -212,9 +217,11 @@ func PartsToContentBlocks(parts []*genai.Part, role types.ConversationRole) ([]t
 			if rb != nil {
 				blocks = append(blocks, rb)
 			}
-		case p.Text != "":
-			blocks = append(blocks, &types.ContentBlockMemberText{Value: p.Text})
-		case p.InlineData != nil && len(p.InlineData.Data) > 0:
+			continue
+		}
+		// InlineData / FileData must not lose to Text in the same Part: some clients set both
+		// a prompt string and a file blob on one Part (e.g. "Summarize this" + attachment).
+		if p.InlineData != nil && len(p.InlineData.Data) > 0 {
 			block, err := inlineDataToContentBlock(p, role)
 			if err != nil {
 				return nil, err
@@ -222,7 +229,8 @@ func PartsToContentBlocks(parts []*genai.Part, role types.ConversationRole) ([]t
 			if block != nil {
 				blocks = append(blocks, block)
 			}
-		case p.FileData != nil && p.FileData.FileURI != "":
+		}
+		if p.FileData != nil && p.FileData.FileURI != "" {
 			block, err := fileDataToContentBlock(p, role)
 			if err != nil {
 				return nil, err
@@ -230,7 +238,11 @@ func PartsToContentBlocks(parts []*genai.Part, role types.ConversationRole) ([]t
 			if block != nil {
 				blocks = append(blocks, block)
 			}
-		case p.FunctionCall != nil:
+		}
+		if p.Text != "" {
+			blocks = append(blocks, &types.ContentBlockMemberText{Value: p.Text})
+		}
+		if p.FunctionCall != nil {
 			if role != types.ConversationRoleAssistant {
 				return nil, errors.New("functionCall parts must be in a model-role content")
 			}
@@ -239,7 +251,8 @@ func PartsToContentBlocks(parts []*genai.Part, role types.ConversationRole) ([]t
 				return nil, err
 			}
 			blocks = append(blocks, tu)
-		case p.FunctionResponse != nil:
+		}
+		if p.FunctionResponse != nil {
 			if role != types.ConversationRoleUser {
 				return nil, errors.New("functionResponse parts must be in a user-role content")
 			}
@@ -248,11 +261,26 @@ func PartsToContentBlocks(parts []*genai.Part, role types.ConversationRole) ([]t
 				return nil, err
 			}
 			blocks = append(blocks, tr)
-		default:
-			continue
+		}
+		if err := checkUnsupportedPartFields(p); err != nil {
+			return nil, err
 		}
 	}
 	return blocks, nil
+}
+
+func checkUnsupportedPartFields(p *genai.Part) error {
+	if p.ToolCall != nil {
+		return errors.New(
+			"genai Part uses toolCall, which Bedrock Converse does not map here; use functionCall / functionResponse or extend the mapper",
+		)
+	}
+	if p.ToolResponse != nil {
+		return errors.New(
+			"genai Part uses toolResponse, which Bedrock Converse does not map here; use functionCall / functionResponse or extend the mapper",
+		)
+	}
+	return nil
 }
 
 func thoughtPartToReasoningContentBlock(p *genai.Part, role types.ConversationRole) (types.ContentBlock, error) {
@@ -282,9 +310,10 @@ func inlineDataToContentBlock(p *genai.Part, role types.ConversationRole) (types
 	if role != types.ConversationRoleUser {
 		return nil, errors.New("inline media is only supported for user messages on Bedrock Converse")
 	}
-	switch classifyMIME(p.InlineData.MIMEType) { //nolint:exhaustive // mediaKindUnknown handled by inference logic
+	mime, kind := resolveInlineMediaMIME(p)
+	switch kind { //nolint:exhaustive // mediaKindUnknown handled below
 	case mediaKindImage:
-		imgFmt, err := imageFormatFromMIME(p.InlineData.MIMEType)
+		imgFmt, err := imageFormatFromMIME(mime)
 		if err != nil {
 			return nil, err
 		}
@@ -293,7 +322,7 @@ func inlineDataToContentBlock(p *genai.Part, role types.ConversationRole) (types
 			Source: &types.ImageSourceMemberBytes{Value: p.InlineData.Data},
 		}}, nil
 	case mediaKindAudio:
-		audioFmt, err := audioFormatFromMIME(p.InlineData.MIMEType)
+		audioFmt, err := audioFormatFromMIME(mime)
 		if err != nil {
 			return nil, err
 		}
@@ -302,7 +331,7 @@ func inlineDataToContentBlock(p *genai.Part, role types.ConversationRole) (types
 			Source: &types.AudioSourceMemberBytes{Value: p.InlineData.Data},
 		}}, nil
 	case mediaKindVideo:
-		videoFmt, err := videoFormatFromMIME(p.InlineData.MIMEType)
+		videoFmt, err := videoFormatFromMIME(mime)
 		if err != nil {
 			return nil, err
 		}
@@ -311,12 +340,12 @@ func inlineDataToContentBlock(p *genai.Part, role types.ConversationRole) (types
 			Source: &types.VideoSourceMemberBytes{Value: p.InlineData.Data},
 		}}, nil
 	case mediaKindDocument:
-		docFmt, err := documentFormatFromMIME(p.InlineData.MIMEType)
+		docFmt, err := documentFormatFromMIME(mime)
 		if err != nil {
 			return nil, err
 		}
 		return &types.ContentBlockMemberDocument{Value: types.DocumentBlock{
-			Name:   aws.String(documentName(p.InlineData.DisplayName, "", p.InlineData.MIMEType)),
+			Name:   aws.String(documentName(p.InlineData.DisplayName, "", mime)),
 			Format: docFmt,
 			Source: &types.DocumentSourceMemberBytes{Value: p.InlineData.Data},
 		}}, nil
@@ -336,9 +365,10 @@ func fileDataToContentBlock(p *genai.Part, role types.ConversationRole) (types.C
 	if err != nil {
 		return nil, err
 	}
-	switch classifyMIME(p.FileData.MIMEType) { //nolint:exhaustive // mediaKindUnknown handled by inference logic
+	mime, kind := resolveFileMediaMIME(p)
+	switch kind { //nolint:exhaustive // mediaKindUnknown handled below
 	case mediaKindImage:
-		imgFmt, err := imageFormatFromMIME(p.FileData.MIMEType)
+		imgFmt, err := imageFormatFromMIME(mime)
 		if err != nil {
 			return nil, err
 		}
@@ -347,7 +377,7 @@ func fileDataToContentBlock(p *genai.Part, role types.ConversationRole) (types.C
 			Source: &types.ImageSourceMemberS3Location{Value: s3},
 		}}, nil
 	case mediaKindAudio:
-		audioFmt, err := audioFormatFromMIME(p.FileData.MIMEType)
+		audioFmt, err := audioFormatFromMIME(mime)
 		if err != nil {
 			return nil, err
 		}
@@ -356,7 +386,7 @@ func fileDataToContentBlock(p *genai.Part, role types.ConversationRole) (types.C
 			Source: &types.AudioSourceMemberS3Location{Value: s3},
 		}}, nil
 	case mediaKindVideo:
-		videoFmt, err := videoFormatFromMIME(p.FileData.MIMEType)
+		videoFmt, err := videoFormatFromMIME(mime)
 		if err != nil {
 			return nil, err
 		}
@@ -365,12 +395,12 @@ func fileDataToContentBlock(p *genai.Part, role types.ConversationRole) (types.C
 			Source: &types.VideoSourceMemberS3Location{Value: s3},
 		}}, nil
 	case mediaKindDocument:
-		docFmt, err := documentFormatFromMIME(p.FileData.MIMEType)
+		docFmt, err := documentFormatFromMIME(mime)
 		if err != nil {
 			return nil, err
 		}
 		return &types.ContentBlockMemberDocument{Value: types.DocumentBlock{
-			Name:   aws.String(documentName(p.FileData.DisplayName, p.FileData.FileURI, p.FileData.MIMEType)),
+			Name:   aws.String(documentName(p.FileData.DisplayName, p.FileData.FileURI, mime)),
 			Format: docFmt,
 			Source: &types.DocumentSourceMemberS3Location{Value: s3},
 		}}, nil
@@ -393,11 +423,50 @@ const (
 	mimeApplicationDOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	mimeApplicationXLS  = "application/vnd.ms-excel"
 	mimeApplicationXLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	// PowerPoint MIME types are recognized for classification but not supported by Bedrock Converse document blocks.
+	mimeApplicationPPT  = "application/vnd.ms-powerpoint"
+	mimeApplicationPPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 	mimeImagePNG        = "image/png"
+	mimeImageJPEG       = "image/jpeg"
+	mimeImageGIF        = "image/gif"
+	mimeImageWebp       = "image/webp"
+	mimeAudioMpeg       = "audio/mpeg"
+	mimeAudioWav        = "audio/wav"
+	mimeAudioFlac       = "audio/flac"
+	mimeAudioOgg        = "audio/ogg"
+	mimeAudioM4a        = "audio/m4a"
+	mimeVideoMatroska   = "video/x-matroska"
+	mimeVideoQuicktime  = "video/quicktime"
+	mimeVideoMP4        = "video/mp4"
+	mimeVideoWebm       = "video/webm"
+	mimeTextCSV         = "text/csv"
+	mimeTextHTML        = "text/html"
+	mimeTextPlain       = "text/plain"
+	mimeTextMarkdown    = "text/markdown"
 )
 
+// ErrBedrockPowerPointNotSupported is returned when mapping a PowerPoint document to Converse:
+// Bedrock document blocks have no ppt/pptx format; use PDF or another supported format.
+var ErrBedrockPowerPointNotSupported = errors.New(
+	"bedrock Converse does not support PowerPoint (.ppt/.pptx) as document input; convert to PDF or use pdf, docx, xlsx, csv, html, txt, or md",
+)
+
+// normalizeMIME returns the type/subtype in lowercase with parameters (e.g. ";charset=utf-8") stripped.
+// Clients often send "application/pdf; charset=binary" or "image/png; charset=utf-8", which would
+// otherwise fail exact-match switches.
+func normalizeMIME(mime string) string {
+	mime = strings.TrimSpace(strings.ToLower(mime))
+	if i := strings.IndexByte(mime, ';'); i >= 0 {
+		mime = strings.TrimSpace(mime[:i])
+	}
+	return mime
+}
+
 func classifyMIME(mime string) mediaKind {
-	mime = strings.ToLower(strings.TrimSpace(mime))
+	return classifyNormalizedMIME(normalizeMIME(mime))
+}
+
+func classifyNormalizedMIME(mime string) mediaKind {
 	switch {
 	case strings.HasPrefix(mime, "image/"):
 		return mediaKindImage
@@ -409,26 +478,106 @@ func classifyMIME(mime string) mediaKind {
 		return mediaKindDocument
 	case strings.HasPrefix(mime, "application/"):
 		switch mime {
-		case mimeApplicationPDF,
+		case mimeApplicationPDF, "application/x-pdf",
 			mimeApplicationDOC,
 			mimeApplicationDOCX,
 			mimeApplicationXLS,
-			mimeApplicationXLSX:
+			mimeApplicationXLSX,
+			mimeApplicationPPT,
+			mimeApplicationPPTX:
 			return mediaKindDocument
 		}
 	}
 	return mediaKindUnknown
 }
 
+func inferDocumentMIMEFromFilename(name string) (string, bool) {
+	base := strings.TrimSpace(path.Base(name))
+	if base == "" || base == "." {
+		return "", false
+	}
+	m := MIMETypeFromExtension(base)
+	if classifyNormalizedMIME(m) != mediaKindDocument {
+		return "", false
+	}
+	return m, true
+}
+
+func resolveInlineMediaMIME(p *genai.Part) (string, mediaKind) {
+	mime := normalizeMIME(p.InlineData.MIMEType)
+	kind := classifyNormalizedMIME(mime)
+	if kind != mediaKindUnknown {
+		return mime, kind
+	}
+	// Browsers often send DOCX as application/zip (OOXML is a zip) or application/octet-stream;
+	// infer the real document type from the filename whenever MIME alone is ambiguous.
+	if inferred, ok := inferDocumentMIMEFromFilename(p.InlineData.DisplayName); ok {
+		mime = inferred
+		kind = classifyNormalizedMIME(mime)
+	}
+	return mime, kind
+}
+
+func resolveFileMediaMIME(p *genai.Part) (string, mediaKind) {
+	mime := normalizeMIME(p.FileData.MIMEType)
+	kind := classifyNormalizedMIME(mime)
+	if kind != mediaKindUnknown {
+		return mime, kind
+	}
+	if inferred, ok := inferDocumentMIMEFromFilename(p.FileData.DisplayName); ok {
+		mime = inferred
+		kind = classifyNormalizedMIME(mime)
+	}
+	if kind == mediaKindUnknown && p.FileData.FileURI != "" {
+		if inferred, ok := inferDocumentMIMEFromFilename(path.Base(p.FileData.FileURI)); ok {
+			mime = inferred
+			kind = classifyNormalizedMIME(mime)
+		}
+	}
+	return mime, kind
+}
+
+func resolveFunctionResponseInlineMIME(part *genai.FunctionResponsePart) (string, mediaKind) {
+	mime := normalizeMIME(part.InlineData.MIMEType)
+	kind := classifyNormalizedMIME(mime)
+	if kind != mediaKindUnknown {
+		return mime, kind
+	}
+	if inferred, ok := inferDocumentMIMEFromFilename(part.InlineData.DisplayName); ok {
+		mime = inferred
+		kind = classifyNormalizedMIME(mime)
+	}
+	return mime, kind
+}
+
+func resolveFunctionResponseFileMIME(part *genai.FunctionResponsePart) (string, mediaKind) {
+	mime := normalizeMIME(part.FileData.MIMEType)
+	kind := classifyNormalizedMIME(mime)
+	if kind != mediaKindUnknown {
+		return mime, kind
+	}
+	if inferred, ok := inferDocumentMIMEFromFilename(part.FileData.DisplayName); ok {
+		mime = inferred
+		kind = classifyNormalizedMIME(mime)
+	}
+	if kind == mediaKindUnknown && part.FileData.FileURI != "" {
+		if inferred, ok := inferDocumentMIMEFromFilename(path.Base(part.FileData.FileURI)); ok {
+			mime = inferred
+			kind = classifyNormalizedMIME(mime)
+		}
+	}
+	return mime, kind
+}
+
 func imageFormatFromMIME(mime string) (types.ImageFormat, error) {
-	switch strings.ToLower(mime) {
-	case "image/jpeg", "image/jpg":
+	switch normalizeMIME(mime) {
+	case mimeImageJPEG, "image/jpg":
 		return types.ImageFormatJpeg, nil
 	case mimeImagePNG:
 		return types.ImageFormatPng, nil
-	case "image/gif":
+	case mimeImageGIF:
 		return types.ImageFormatGif, nil
-	case "image/webp":
+	case mimeImageWebp:
 		return types.ImageFormatWebp, nil
 	default:
 		return "", fmt.Errorf("unsupported image mime type for Bedrock: %q", mime)
@@ -436,26 +585,26 @@ func imageFormatFromMIME(mime string) (types.ImageFormat, error) {
 }
 
 func audioFormatFromMIME(mime string) (types.AudioFormat, error) {
-	switch strings.ToLower(mime) {
-	case "audio/mpeg", "audio/mp3":
+	switch normalizeMIME(mime) {
+	case mimeAudioMpeg, "audio/mp3":
 		return types.AudioFormatMp3, nil
 	case "audio/opus":
 		return types.AudioFormatOpus, nil
-	case "audio/wav", "audio/x-wav", "audio/wave":
+	case mimeAudioWav, "audio/x-wav", "audio/wave":
 		return types.AudioFormatWav, nil
 	case "audio/aac":
 		return types.AudioFormatAac, nil
-	case "audio/flac", "audio/x-flac":
+	case mimeAudioFlac, "audio/x-flac":
 		return types.AudioFormatFlac, nil
 	case "audio/mp4":
 		return types.AudioFormatMp4, nil
-	case "audio/ogg":
+	case mimeAudioOgg:
 		return types.AudioFormatOgg, nil
 	case "audio/x-matroska":
 		return types.AudioFormatMka, nil
 	case "audio/x-aac":
 		return types.AudioFormatXAac, nil
-	case "audio/m4a":
+	case mimeAudioM4a:
 		return types.AudioFormatM4a, nil
 	case "audio/mpga":
 		return types.AudioFormatMpga, nil
@@ -469,14 +618,14 @@ func audioFormatFromMIME(mime string) (types.AudioFormat, error) {
 }
 
 func videoFormatFromMIME(mime string) (types.VideoFormat, error) {
-	switch strings.ToLower(mime) {
-	case "video/x-matroska":
+	switch normalizeMIME(mime) {
+	case mimeVideoMatroska:
 		return types.VideoFormatMkv, nil
-	case "video/quicktime":
+	case mimeVideoQuicktime:
 		return types.VideoFormatMov, nil
-	case "video/mp4":
+	case mimeVideoMP4:
 		return types.VideoFormatMp4, nil
-	case "video/webm":
+	case mimeVideoWebm:
 		return types.VideoFormatWebm, nil
 	case "video/x-flv":
 		return types.VideoFormatFlv, nil
@@ -494,10 +643,12 @@ func videoFormatFromMIME(mime string) (types.VideoFormat, error) {
 }
 
 func documentFormatFromMIME(mime string) (types.DocumentFormat, error) {
-	switch strings.ToLower(mime) {
+	switch normalizeMIME(mime) {
+	case mimeApplicationPPT, mimeApplicationPPTX:
+		return "", ErrBedrockPowerPointNotSupported
 	case mimeApplicationPDF:
 		return types.DocumentFormatPdf, nil
-	case "text/csv":
+	case mimeTextCSV:
 		return types.DocumentFormatCsv, nil
 	case mimeApplicationDOC:
 		return types.DocumentFormatDoc, nil
@@ -507,11 +658,11 @@ func documentFormatFromMIME(mime string) (types.DocumentFormat, error) {
 		return types.DocumentFormatXls, nil
 	case mimeApplicationXLSX:
 		return types.DocumentFormatXlsx, nil
-	case "text/html":
+	case mimeTextHTML:
 		return types.DocumentFormatHtml, nil
-	case "text/plain":
+	case mimeTextPlain:
 		return types.DocumentFormatTxt, nil
-	case "text/markdown", "text/x-markdown":
+	case mimeTextMarkdown, "text/x-markdown":
 		return types.DocumentFormatMd, nil
 	default:
 		return "", fmt.Errorf("unsupported document mime type for Bedrock: %q", mime)
@@ -580,9 +731,10 @@ func functionResponsePartToToolResultContentBlock(
 		return nil, nil //nolint:nilnil // Optional conversion.
 	}
 	if part.InlineData != nil && len(part.InlineData.Data) > 0 {
-		switch classifyMIME(part.InlineData.MIMEType) { //nolint:exhaustive // mediaKindUnknown handled by inference
+		mime, kind := resolveFunctionResponseInlineMIME(part)
+		switch kind { //nolint:exhaustive // mediaKindUnknown handled below
 		case mediaKindImage:
-			imgFmt, err := imageFormatFromMIME(part.InlineData.MIMEType)
+			imgFmt, err := imageFormatFromMIME(mime)
 			if err != nil {
 				return nil, err
 			}
@@ -591,7 +743,7 @@ func functionResponsePartToToolResultContentBlock(
 				Source: &types.ImageSourceMemberBytes{Value: part.InlineData.Data},
 			}}, nil
 		case mediaKindVideo:
-			videoFmt, err := videoFormatFromMIME(part.InlineData.MIMEType)
+			videoFmt, err := videoFormatFromMIME(mime)
 			if err != nil {
 				return nil, err
 			}
@@ -600,12 +752,12 @@ func functionResponsePartToToolResultContentBlock(
 				Source: &types.VideoSourceMemberBytes{Value: part.InlineData.Data},
 			}}, nil
 		case mediaKindDocument:
-			docFmt, err := documentFormatFromMIME(part.InlineData.MIMEType)
+			docFmt, err := documentFormatFromMIME(mime)
 			if err != nil {
 				return nil, err
 			}
 			return &types.ToolResultContentBlockMemberDocument{Value: types.DocumentBlock{
-				Name:   aws.String(documentName(part.InlineData.DisplayName, "", part.InlineData.MIMEType)),
+				Name:   aws.String(documentName(part.InlineData.DisplayName, "", mime)),
 				Format: docFmt,
 				Source: &types.DocumentSourceMemberBytes{Value: part.InlineData.Data},
 			}}, nil
@@ -628,9 +780,10 @@ func functionResponsePartToToolResultContentBlock(
 	if err != nil {
 		return nil, err
 	}
-	switch classifyMIME(part.FileData.MIMEType) { //nolint:exhaustive // mediaKindUnknown handled by inference
+	mime, kind := resolveFunctionResponseFileMIME(part)
+	switch kind { //nolint:exhaustive // mediaKindUnknown handled below
 	case mediaKindImage:
-		imgFmt, err := imageFormatFromMIME(part.FileData.MIMEType)
+		imgFmt, err := imageFormatFromMIME(mime)
 		if err != nil {
 			return nil, err
 		}
@@ -639,7 +792,7 @@ func functionResponsePartToToolResultContentBlock(
 			Source: &types.ImageSourceMemberS3Location{Value: s3},
 		}}, nil
 	case mediaKindVideo:
-		videoFmt, err := videoFormatFromMIME(part.FileData.MIMEType)
+		videoFmt, err := videoFormatFromMIME(mime)
 		if err != nil {
 			return nil, err
 		}
@@ -648,12 +801,12 @@ func functionResponsePartToToolResultContentBlock(
 			Source: &types.VideoSourceMemberS3Location{Value: s3},
 		}}, nil
 	case mediaKindDocument:
-		docFmt, err := documentFormatFromMIME(part.FileData.MIMEType)
+		docFmt, err := documentFormatFromMIME(mime)
 		if err != nil {
 			return nil, err
 		}
 		return &types.ToolResultContentBlockMemberDocument{Value: types.DocumentBlock{
-			Name:   aws.String(documentName(part.FileData.DisplayName, part.FileData.FileURI, part.FileData.MIMEType)),
+			Name:   aws.String(documentName(part.FileData.DisplayName, part.FileData.FileURI, mime)),
 			Format: docFmt,
 			Source: &types.DocumentSourceMemberS3Location{Value: s3},
 		}}, nil
@@ -676,16 +829,16 @@ func s3LocationFromURI(uri string) (types.S3Location, error) {
 
 func documentName(displayName, fileURI, mime string) string {
 	if name := strings.TrimSpace(displayName); name != "" {
-		return name
+		return sanitizeDocumentNameForBedrock(name)
 	}
 	if fileURI != "" {
 		if base := strings.TrimSpace(path.Base(fileURI)); base != "" && base != "." && base != "/" {
-			return base
+			return sanitizeDocumentNameForBedrock(base)
 		}
 	}
 	switch classifyMIME(mime) { //nolint:exhaustive // mediaKindUnknown returns empty string
 	case mediaKindDocument:
-		return "document"
+		return string(mediaKindDocument)
 	case mediaKindImage:
 		return "image"
 	case mediaKindVideo:
@@ -695,6 +848,54 @@ func documentName(displayName, fileURI, mime string) string {
 	default:
 		return "attachment"
 	}
+}
+
+// sanitizeDocumentNameForBedrock enforces Bedrock Converse rules for document names:
+// only alphanumeric characters, whitespace, hyphens, parentheses, and square brackets;
+// no more than one consecutive space. Other characters (e.g. dots in "file.pdf") are
+// replaced with a single hyphen; repeated hyphens are collapsed.
+func sanitizeDocumentNameForBedrock(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return string(mediaKindDocument)
+	}
+	var b strings.Builder
+	var prev rune // zero value: no previous rune written
+	for _, r := range name {
+		if unicode.IsSpace(r) {
+			r = ' '
+		}
+		switch {
+		case isASCIILetterOrDigit(r):
+			b.WriteRune(r)
+			prev = r
+		case r == ' ':
+			if prev == ' ' {
+				continue
+			}
+			b.WriteRune(' ')
+			prev = ' '
+		case r == '-' || r == '(' || r == ')' || r == '[' || r == ']':
+			b.WriteRune(r)
+			prev = r
+		default:
+			if prev == '-' {
+				continue
+			}
+			b.WriteRune('-')
+			prev = '-'
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	out = strings.Trim(out, "-")
+	if out == "" {
+		return string(mediaKindDocument)
+	}
+	return out
+}
+
+func isASCIILetterOrDigit(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
 }
 
 //nolint:unparam // signature mirrors other config mappers and leaves room for future Bedrock guardrail mapping.
