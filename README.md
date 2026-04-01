@@ -85,27 +85,6 @@ agent, err := llmagent.New(llmagent.Config{
 
 The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conversions (requests, responses, tools, usage). Import it if you need the same mappings outside the default [`bedrock`](bedrock/) package. The Bedrock Runtime API abstraction used by [`converse.go`](bedrock/converse.go) is exported from [`bedrock`](bedrock/) (`RuntimeAPI`, `StreamReader`, and `NewRuntimeAPI`).
 
-## MCP support
-
-[Model Context Protocol](https://modelcontextprotocol.io/) tools work **through ADK**, not as a separate Bedrock API: [`mcptoolset`](https://pkg.go.dev/google.golang.org/adk/tool/mcptoolset) connects to an MCP server, discovers tools, and exposes them to the model as ordinary function declarations. By the time a request reaches this provider, MCP tools are indistinguishable from other tool-calling; the mapper sends them to Bedrock `Converse` as `ToolSpecification` entries like any other supported tools.
-
-A minimal end-to-end example is [`examples/bedrock-mcp/main.go`](examples/bedrock-mcp/main.go): it starts an in-memory MCP server with a `get_weather` tool, wires [`mcptoolset.New`](https://pkg.go.dev/google.golang.org/adk/tool/mcptoolset#New) into an `llmagent`, and runs one user turn through the Bedrock-backed runner. Set `AWS_REGION` (or configure region on your profile); `BEDROCK_MODEL_ID` is optional (the example defaults when unset). See [`examples/bedrock-mcp/README.md`](examples/bedrock-mcp/README.md) for `PROMPT` overrides.
-
-```bash
-make -C examples/bedrock-mcp run
-```
-
-Sample output:
-
-```
-2026/04/01 11:45:36 BEDROCK_MODEL_ID not set; defaulting to eu.amazon.nova-2-lite-v1:0
-User: What is the weather in Seattle? Use your MCP tool if needed.
-
-
-
-The weather in Seattle is sunny and 72°F today.
-```
-
 ## Examples
 
 Each example has its own `README.md` and `Makefile`:
