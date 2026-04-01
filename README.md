@@ -94,6 +94,10 @@ Each example has its own `README.md` and `Makefile`:
 - [`examples/bedrock-mcp`](examples/bedrock-mcp): runner-based MCP example using ADK's `mcptoolset` with an in-memory MCP server.
 - [`examples/bedrock-tool-calling`](examples/bedrock-tool-calling): tool-calling agent example with function declarations.
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
+- [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
+- [`examples/bedrock-multimodal`](examples/bedrock-multimodal): comprehensive image analysis, document processing, tool calling with rich media, and vision-based reasoning.
+- [`examples/bedrock-guardrails`](examples/bedrock-guardrails): safety assessments, content filtering, and guardrail metadata handling.
+- [`examples/bedrock-system-instruction`](examples/bedrock-system-instruction): system instructions for role definition, output formatting, and behavioral control.
 - [`examples/bedrock-web-ui`](examples/bedrock-web-ui): ADK local web UI launcher.
 
 All examples load AWS configuration with [`config.LoadDefaultConfig`](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/config#LoadDefaultConfig) and require **`BEDROCK_MODEL_ID`** plus region configuration (`AWS_REGION` or profile region).
@@ -114,15 +118,22 @@ make -C examples/bedrock-stream run
 
 - **Messages**: `genai` roles `user` and `model` map to Bedrock `user` and `assistant`. Optional `system` role entries in the conversation are mapped to Bedrock `system` blocks.
 - **System instruction**: `GenerateContentConfig.SystemInstruction` is sent as Bedrock system content.
-- **Tools**: `GenerateContentConfig.Tools` with `FunctionDeclarations` are converted to Bedrock tool specifications. MCP works through ADK toolsets such as `mcptoolset`, which expose MCP tools to the model as function declarations before they reach this provider. Other `genai.Tool` variants (Google Search, code execution, etc.) are not supported here.
-- **Streaming**: When ADK uses SSE streaming, the provider calls `ConverseStream`, emits partial text responses, then a final response with `TurnComplete` set.
+- **Tools**: the mapper converts `GenerateContentConfig.Tools` entries:
+  - `FunctionDeclarations` → Bedrock `ToolSpecification` (custom function tools)
+  - Non-function ADK variants (Google Search, Code Execution, Retrieval, MCP Servers, Computer Use, File Search, Google Maps, URL Context, etc.) are rejected early with a clear provider error because they are not currently mapped to Bedrock Converse
+  - MCP works through ADK toolsets such as `mcptoolset`, which expose MCP tools to the model as function declarations before they reach this provider. Other `genai.Tool` variants (Google Search, code execution, etc.) are not supported here.
+- **Multimodal parts**: ADK `Part` text, thoughts/reasoning, inline/file-backed images, audio, video, and documents are mapped on the Bedrock-compatible subset. Rich user media is sent as Bedrock content blocks; assistant reasoning is preserved as Bedrock reasoning content.
+- **Function responses**: JSON tool output still maps as before, and image/video/document `FunctionResponse.Parts` are preserved through Bedrock tool-result content blocks.
+- **Streaming**: When ADK uses SSE streaming, the provider calls `ConverseStream`, emits partial text responses, and buffers streamed tool calls, reasoning blocks, image blocks, usage, and guardrail metadata into the final `TurnComplete` response.
+- **Guardrails / safety results**: Bedrock guardrail stop reasons and trace metadata are mapped back into ADK `FinishReason` and `CustomMetadata`, including synthesized `safety_ratings` derived from Bedrock guardrail assessments when available.
 
 ## Limitations
 
-- **Non–function-calling tools**: Only function declarations are mapped at the provider boundary; retrieval, Google Search, and similar non-function `genai.Tool` variants are ignored. MCP is supported when ADK exposes MCP tools as function declarations via `mcptoolset`.
-- **Multimodal**: Inline images are supported for **user** turns with supported MIME types (`image/jpeg`, `image/png`, `image/gif`, `image/webp`). Other modalities may not round-trip.
-- **Streaming tool calls**: Tool input is accumulated as JSON text; streamed tool use is best-effort compared to non-streaming `Converse`.
-- **Safety / guardrails**: Genai safety settings are not mapped to Bedrock guardrails (you can extend the request builders if needed).
+- **Bedrock role restrictions**: Rich media input still follows Bedrock Converse constraints (for example, user turns are the interoperable place for images/documents/audio/video, while model turns are reserved for text/tool use/reasoning).
+- **Request-side generic guardrails**: ADK `SafetySettings` / `ModelArmorConfig` are not currently supported for Bedrock Converse. Because they do not contain the Bedrock guardrail identifier + version required by `Converse`, the request builder returns an explicit error instead of silently dropping them, and there is currently no supported way to provide `GuardrailIdentifier` / `GuardrailVersion` through this provider.
+- **Provider surface mismatch**: Bedrock-specific features that require pre-provisioned AWS resources or have no generic ADK equivalent are exposed back through ADK-friendly `CustomMetadata`, but cannot always be reconstructed into first-class `genai` request fields.
+- **Unsupported tool types**: Tool variants not supported by Bedrock or the target model cause a request-time error with details about which variants are unsupported.
+
 
 ## License
 
