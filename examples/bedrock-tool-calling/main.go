@@ -129,11 +129,11 @@ func main() {
 
 	resp, err := firstResponse(ctx, llm, initialReq)
 	if err != nil {
-		log.Fatalf("initial model call: %v", err)
+		log.Panicf("initial model call: %v", err)
 	}
 
 	if resp.Content == nil || len(resp.Content.Parts) == 0 {
-		log.Fatal("model returned no content")
+		log.Panic("model returned no content")
 	}
 
 	var modelToolParts []*genai.Part
@@ -146,7 +146,7 @@ func main() {
 		fmt.Printf("Tool call: %s args=%v\n", part.FunctionCall.Name, part.FunctionCall.Args)
 		result, werr := weatherToolHandler(part.FunctionCall)
 		if werr != nil {
-			log.Fatalf("weather tool: %v", werr)
+			log.Panicf("weather tool: %v", werr)
 		}
 		fmt.Printf("Tool result: %v\n\n", result["result"])
 		modelToolParts = append(modelToolParts, part)
@@ -182,7 +182,7 @@ func main() {
 
 	finalResp, err := firstResponse(ctx, llm, followupReq)
 	if err != nil {
-		log.Fatalf("final model call: %v", err)
+		log.Panicf("final model call: %v", err)
 	}
 
 	fmt.Println("Assistant's final response:")

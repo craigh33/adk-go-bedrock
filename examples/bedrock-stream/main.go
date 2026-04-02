@@ -65,7 +65,7 @@ func main() {
 	var accumulatedText strings.Builder
 	for resp, err := range llm.GenerateContent(ctx, req, true) {
 		if err != nil {
-			log.Fatalf("stream: %v", err)
+			log.Panicf("stream: %v", err)
 		}
 		if resp.Content == nil || len(resp.Content.Parts) == 0 {
 			continue
