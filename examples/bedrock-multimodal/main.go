@@ -22,6 +22,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
 )
 
 // downloadImage fetches an image from a URL and returns its raw binary content.
@@ -721,8 +722,14 @@ func main() {
 	}
 
 	// Create Bedrock LLM
+	tp, shutdownTP, err := exampletrace.TracerProvider(ctx)
+	if err != nil {
+		log.Fatalf("tracer provider: %v", err)
+	}
+	defer func() { _ = shutdownTP(context.Background()) }()
+
 	br := bedrockruntime.NewFromConfig(awsCfg)
-	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br))
+	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp)))
 	if err != nil {
 		log.Fatalf("create bedrock model: %v", err)
 	}

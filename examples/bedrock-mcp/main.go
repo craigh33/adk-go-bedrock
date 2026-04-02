@@ -28,6 +28,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
 )
 
 type weatherInput struct {
@@ -96,8 +97,15 @@ func main() {
 		modelID = "eu.amazon.nova-2-lite-v1:0"
 	}
 
+	tp, shutdownTP, err := exampletrace.TracerProvider(ctx)
+	if err != nil {
+		log.Printf("tracer provider: %v", err)
+		return
+	}
+	defer func() { _ = shutdownTP(context.Background()) }()
+
 	br := bedrockruntime.NewFromConfig(awsCfg)
-	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br))
+	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp)))
 	if err != nil {
 		log.Printf("bedrock model: %v", err)
 		return
