@@ -108,16 +108,44 @@ func (c *runtimeAdapter) ConverseStream(
 ) (StreamReader, error) {
 	ctx, span := c.tracer().Start(ctx, "bedrockruntime.ConverseStream",
 		trace.WithSpanKind(trace.SpanKindClient))
-	defer span.End()
 
 	out, err := c.inner.ConverseStream(ctx, params, optFns...)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+		span.End()
 		return nil, err
 	}
-	span.SetStatus(codes.Ok, "")
-	return out.GetStream(), nil
+	return &tracedStreamReader{inner: out.GetStream(), span: span}, nil
+}
+
+// tracedStreamReader wraps a StreamReader and keeps its OTel span alive for
+// the entire duration of stream consumption. The span is ended in Close(),
+// where stream.Err() is inspected to determine the final status.
+type tracedStreamReader struct {
+	inner StreamReader
+	span  trace.Span
+}
+
+func (t *tracedStreamReader) Events() <-chan types.ConverseStreamOutput {
+	return t.inner.Events()
+}
+
+func (t *tracedStreamReader) Err() error {
+	return t.inner.Err()
+}
+
+func (t *tracedStreamReader) Close() error {
+	streamErr := t.inner.Err()
+	closeErr := t.inner.Close()
+	if streamErr != nil {
+		t.span.RecordError(streamErr)
+		t.span.SetStatus(codes.Error, streamErr.Error())
+	} else {
+		t.span.SetStatus(codes.Ok, "")
+	}
+	t.span.End()
+	return closeErr
 }
 
 var _ RuntimeAPI = (*runtimeAdapter)(nil)

@@ -425,8 +425,7 @@ func TestNewRuntimeAPI_WithTracerProvider_Converse_recordsClientSpan(t *testing.
 }
 
 func TestNewRuntimeAPI_usesGlobalTracerProviderWhenOptionOmitted(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: mutates the process-global OTel tracer provider.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -532,5 +531,44 @@ func TestNewRuntimeAPI_WithTracerProvider_ConverseStream_recordsErrorSpan(t *tes
 	}
 	if span.Status().Code != codes.Error {
 		t.Fatalf("status: got %v want Error", span.Status().Code)
+	}
+}
+
+// TestTracedStreamReader_Close_recordsStreamErr verifies that when Events()
+// drains and Err() returns a non-nil error, Close() ends the span with
+// status=Error and records the error.
+func TestTracedStreamReader_Close_recordsStreamErr(t *testing.T) {
+	t.Parallel()
+
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer(otelTracerName).Start(context.Background(),
+		"bedrockruntime.ConverseStream", trace.WithSpanKind(trace.SpanKindClient))
+
+	ch := make(chan types.ConverseStreamOutput)
+	close(ch)
+	streamErr := errors.New("mid-stream failure")
+	inner := &fakeStream{ch: ch, err: streamErr}
+
+	reader := &tracedStreamReader{inner: inner, span: span}
+
+	// Drain the (already-closed) events channel.
+	for range reader.Events() {
+	}
+
+	// Close records stream.Err() and ends the span.
+	if err := reader.Close(); err != nil {
+		t.Fatalf("Close returned unexpected error: %v", err)
+	}
+
+	s := findEndedSpan(sr, "bedrockruntime.ConverseStream")
+	if s == nil {
+		t.Fatalf("span not ended after Close(); ended=%d", len(sr.Ended()))
+	}
+	if s.Status().Code != codes.Error {
+		t.Fatalf("status: got %v want Error", s.Status().Code)
+	}
+	if len(s.Events()) == 0 {
+		t.Fatal("expected recorded error event on span")
 	}
 }
