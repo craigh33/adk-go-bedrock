@@ -3,11 +3,19 @@ package bedrock
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/adk/model"
 	"google.golang.org/genai"
 )
@@ -347,5 +355,220 @@ func TestConverse_GenerateContent_streamImageReasoningAndGuardrailMetadata(t *te
 	ratings, ok := final.CustomMetadata["safety_ratings"].([]*genai.SafetyRating)
 	if !ok || len(ratings) != 1 || ratings[0].Category != genai.HarmCategoryHateSpeech {
 		t.Fatalf("custom metadata: %+v", final.CustomMetadata)
+	}
+}
+
+// Minimal successful Converse REST JSON (restjson) shape for a mocked Bedrock endpoint.
+const testConverseOKJSON = `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`
+
+func newTestBedrockClient(t *testing.T, srv *httptest.Server) *bedrockruntime.Client {
+	t.Helper()
+	return bedrockruntime.New(bedrockruntime.Options{
+		Region: "us-east-1",
+		// Static credentials satisfy the SDK auth middleware against a local httptest server.
+		Credentials:  credentials.NewStaticCredentialsProvider("test-akid", "test-secret", ""),
+		BaseEndpoint: aws.String(srv.URL),
+		HTTPClient:   srv.Client(),
+	})
+}
+
+func findEndedSpan(recorder *tracetest.SpanRecorder, name string) sdktrace.ReadOnlySpan {
+	for _, s := range recorder.Ended() {
+		if s.Name() == name {
+			return s
+		}
+	}
+	return nil
+}
+
+func TestNewRuntimeAPI_WithTracerProvider_Converse_recordsClientSpan(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(testConverseOKJSON))
+	}))
+	defer srv.Close()
+
+	cli := newTestBedrockClient(t, srv)
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	api := NewRuntimeAPI(cli, WithTracerProvider(tp))
+
+	_, err := api.Converse(context.Background(), &bedrockruntime.ConverseInput{
+		ModelId: aws.String("eu.amazon.nova-2-lite-v1:0"),
+		Messages: []types.Message{{
+			Role: types.ConversationRoleUser,
+			Content: []types.ContentBlock{
+				&types.ContentBlockMemberText{Value: "hi"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+
+	span := findEndedSpan(sr, "bedrockruntime.Converse")
+	if span == nil {
+		t.Fatalf("no bedrockruntime.Converse span; ended=%d", len(sr.Ended()))
+	}
+	if span.InstrumentationScope().Name != otelTracerName {
+		t.Fatalf("scope name: got %q want %q", span.InstrumentationScope().Name, otelTracerName)
+	}
+	if span.SpanKind() != trace.SpanKindClient {
+		t.Fatalf("span kind: got %v want client", span.SpanKind())
+	}
+	if span.Status().Code != codes.Ok {
+		t.Fatalf("status: got %v (%q) want Ok", span.Status().Code, span.Status().Description)
+	}
+}
+
+func TestNewRuntimeAPI_usesGlobalTracerProviderWhenOptionOmitted(t *testing.T) {
+	// Not parallel: mutates the process-global OTel tracer provider.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(testConverseOKJSON))
+	}))
+	defer srv.Close()
+
+	prev := otel.GetTracerProvider()
+	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+
+	sr := tracetest.NewSpanRecorder()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr)))
+
+	cli := newTestBedrockClient(t, srv)
+	api := NewRuntimeAPI(cli)
+
+	_, err := api.Converse(context.Background(), &bedrockruntime.ConverseInput{
+		ModelId: aws.String("eu.amazon.nova-2-lite-v1:0"),
+		Messages: []types.Message{{
+			Role: types.ConversationRoleUser,
+			Content: []types.ContentBlock{
+				&types.ContentBlockMemberText{Value: "hi"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+
+	if findEndedSpan(sr, "bedrockruntime.Converse") == nil {
+		t.Fatalf("expected global tracer provider to be used; ended=%d", len(sr.Ended()))
+	}
+}
+
+func TestNewRuntimeAPI_WithTracerProvider_Converse_recordsErrorSpan(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"__type":"ValidationException","message":"invalid"}`))
+	}))
+	defer srv.Close()
+
+	cli := newTestBedrockClient(t, srv)
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	api := NewRuntimeAPI(cli, WithTracerProvider(tp))
+
+	_, err := api.Converse(context.Background(), &bedrockruntime.ConverseInput{
+		ModelId: aws.String("eu.amazon.nova-2-lite-v1:0"),
+		Messages: []types.Message{{
+			Role: types.ConversationRoleUser,
+			Content: []types.ContentBlock{
+				&types.ContentBlockMemberText{Value: "hi"},
+			},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected error from Converse")
+	}
+
+	span := findEndedSpan(sr, "bedrockruntime.Converse")
+	if span == nil {
+		t.Fatalf("no bedrockruntime.Converse span; ended=%d", len(sr.Ended()))
+	}
+	if span.Status().Code != codes.Error {
+		t.Fatalf("status: got %v want Error", span.Status().Code)
+	}
+}
+
+func TestNewRuntimeAPI_WithTracerProvider_ConverseStream_recordsErrorSpan(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"__type":"ValidationException","message":"invalid stream"}`))
+	}))
+	defer srv.Close()
+
+	cli := newTestBedrockClient(t, srv)
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	api := NewRuntimeAPI(cli, WithTracerProvider(tp))
+
+	_, err := api.ConverseStream(context.Background(), &bedrockruntime.ConverseStreamInput{
+		ModelId: aws.String("eu.amazon.nova-2-lite-v1:0"),
+		Messages: []types.Message{{
+			Role: types.ConversationRoleUser,
+			Content: []types.ContentBlock{
+				&types.ContentBlockMemberText{Value: "hi"},
+			},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected error from ConverseStream")
+	}
+
+	span := findEndedSpan(sr, "bedrockruntime.ConverseStream")
+	if span == nil {
+		t.Fatalf("no bedrockruntime.ConverseStream span; ended=%d", len(sr.Ended()))
+	}
+	if span.Status().Code != codes.Error {
+		t.Fatalf("status: got %v want Error", span.Status().Code)
+	}
+}
+
+// TestTracedStreamReader_Close_recordsStreamErr verifies that when Events()
+// drains and Err() returns a non-nil error, Close() ends the span with
+// status=Error and records the error.
+func TestTracedStreamReader_Close_recordsStreamErr(t *testing.T) {
+	t.Parallel()
+
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer(otelTracerName).Start(context.Background(),
+		"bedrockruntime.ConverseStream", trace.WithSpanKind(trace.SpanKindClient))
+
+	ch := make(chan types.ConverseStreamOutput)
+	close(ch)
+	streamErr := errors.New("mid-stream failure")
+	inner := &fakeStream{ch: ch, err: streamErr}
+
+	reader := &tracedStreamReader{inner: inner, span: span}
+
+	// Drain the (already-closed) events channel.
+	for range reader.Events() {
+	}
+
+	// Close records stream.Err() and ends the span.
+	if err := reader.Close(); err != nil {
+		t.Fatalf("Close returned unexpected error: %v", err)
+	}
+
+	s := findEndedSpan(sr, "bedrockruntime.ConverseStream")
+	if s == nil {
+		t.Fatalf("span not ended after Close(); ended=%d", len(sr.Ended()))
+	}
+	if s.Status().Code != codes.Error {
+		t.Fatalf("status: got %v want Error", s.Status().Code)
+	}
+	if len(s.Events()) == 0 {
+		t.Fatal("expected recorded error event on span")
 	}
 }

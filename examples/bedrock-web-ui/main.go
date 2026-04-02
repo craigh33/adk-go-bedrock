@@ -15,6 +15,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
 )
 
 func main() {
@@ -41,10 +42,16 @@ func main() {
 		modelID = "eu.amazon.nova-2-lite-v1:0"
 	}
 
-	br := bedrockruntime.NewFromConfig(awsCfg)
-	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br))
+	tp, shutdownTP, err := exampletrace.TracerProvider(ctx)
 	if err != nil {
-		log.Fatalf("bedrock model: %v", err)
+		log.Fatalf("tracer provider: %v", err)
+	}
+	defer func() { _ = shutdownTP(context.Background()) }()
+
+	br := bedrockruntime.NewFromConfig(awsCfg)
+	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp)))
+	if err != nil {
+		log.Panicf("bedrock model: %v", err)
 	}
 
 	a, err := llmagent.New(llmagent.Config{
@@ -57,7 +64,7 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatalf("agent: %v", err)
+		log.Panicf("agent: %v", err)
 	}
 
 	launcherCfg := &launcher.Config{
@@ -66,6 +73,6 @@ func main() {
 
 	l := full.NewLauncher()
 	if err = l.Execute(ctx, launcherCfg, os.Args[1:]); err != nil {
-		log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())
+		log.Panicf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())
 	}
 }

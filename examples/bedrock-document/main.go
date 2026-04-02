@@ -25,6 +25,7 @@ import (
 
 	"github.com/craigh33/adk-go-bedrock/bedrock"
 	"github.com/craigh33/adk-go-bedrock/bedrock/mappers"
+	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
 )
 
 func main() {
@@ -44,7 +45,7 @@ func main() {
 		docPath = strings.TrimSpace(os.Getenv("DOCUMENT_PATH"))
 	}
 	if docPath == "" {
-		log.Fatal("usage: go run . -path /path/to/file.docx   (or set DOCUMENT_PATH)")
+		log.Panicf("usage: go run . -path /path/to/file.docx   (or set DOCUMENT_PATH)")
 	}
 
 	docPath = filepath.Clean(docPath)
@@ -94,10 +95,16 @@ func main() {
 		log.Println("BEDROCK_MODEL_ID unset; using default model id for this example")
 	}
 
-	br := bedrockruntime.NewFromConfig(awsCfg)
-	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br))
+	tp, shutdownTP, err := exampletrace.TracerProvider(ctx)
 	if err != nil {
-		log.Fatalf("bedrock model: %v", err)
+		log.Fatalf("tracer provider: %v", err)
+	}
+	defer func() { _ = shutdownTP(context.Background()) }()
+
+	br := bedrockruntime.NewFromConfig(awsCfg)
+	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp)))
+	if err != nil {
+		log.Panicf("bedrock model: %v", err)
 	}
 
 	if *stream {
@@ -186,7 +193,7 @@ func runUnary(ctx context.Context, llm model.LLM, req *model.LLMRequest) {
 	fmt.Println("--- response (unary) ---")
 	for resp, err := range llm.GenerateContent(ctx, req, false) {
 		if err != nil {
-			log.Fatalf("GenerateContent: %v", err)
+			log.Panicf("GenerateContent: %v", err)
 		}
 		if resp == nil || resp.Content == nil {
 			continue
@@ -209,7 +216,7 @@ func runStream(ctx context.Context, llm model.LLM, req *model.LLMRequest) {
 	fmt.Println("--- response (stream) ---")
 	for resp, err := range llm.GenerateContent(ctx, req, true) {
 		if err != nil {
-			log.Fatalf("stream: %v", err)
+			log.Panicf("stream: %v", err)
 		}
 		if resp == nil || resp.Content == nil || len(resp.Content.Parts) == 0 {
 			continue

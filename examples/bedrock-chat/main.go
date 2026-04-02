@@ -22,6 +22,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
 )
 
 func main() {
@@ -48,10 +49,16 @@ func main() {
 		modelID = "eu.amazon.nova-2-lite-v1:0"
 	}
 
-	br := bedrockruntime.NewFromConfig(awsCfg)
-	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br))
+	tp, shutdownTP, err := exampletrace.TracerProvider(ctx)
 	if err != nil {
-		log.Fatalf("bedrock model: %v", err)
+		log.Fatalf("tracer provider: %v", err)
+	}
+	defer func() { _ = shutdownTP(context.Background()) }()
+
+	br := bedrockruntime.NewFromConfig(awsCfg)
+	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp)))
+	if err != nil {
+		log.Panicf("bedrock model: %v", err)
 	}
 
 	a, err := llmagent.New(llmagent.Config{
@@ -64,7 +71,7 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatalf("agent: %v", err)
+		log.Panicf("agent: %v", err)
 	}
 
 	r, err := runner.New(runner.Config{
@@ -74,7 +81,7 @@ func main() {
 		AutoCreateSession: true,
 	})
 	if err != nil {
-		log.Fatalf("runner: %v", err)
+		log.Panicf("runner: %v", err)
 	}
 
 	userMsg := "What is 2+2? Reply with just the number."
@@ -84,7 +91,7 @@ func main() {
 
 	for ev, err := range r.Run(ctx, "local-user", "demo-session", genai.NewContentFromText(userMsg, genai.RoleUser), agent.RunConfig{}) {
 		if err != nil {
-			log.Fatalf("run: %v", err)
+			log.Panicf("run: %v", err)
 		}
 		if ev.Author != a.Name() {
 			continue
