@@ -325,7 +325,7 @@ func main() {
 	br := bedrockruntime.NewFromConfig(awsCfg)
 	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp)))
 	if err != nil {
-		log.Fatalf("create bedrock model: %v", err)
+		log.Panicf("create bedrock model: %v", err)
 	}
 
 	// Run demonstrations

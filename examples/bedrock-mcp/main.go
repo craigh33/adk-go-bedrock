@@ -73,6 +73,7 @@ func userMessageFromArgs(args []string) string {
 	return userMsg
 }
 
+//nolint:funlen //example main function with setup and run loop
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()

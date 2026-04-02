@@ -135,7 +135,7 @@ func main() {
 		AgentCardSource: a2aServerAddress,
 	})
 	if err != nil {
-		log.Fatalf("create remote agent: %v", err)
+		log.Panicf("create remote agent: %v", err)
 	}
 
 	launcherCfg := &launcher.Config{AgentLoader: agent.NewSingleLoader(remoteAgent)}

@@ -51,7 +51,7 @@ func main() {
 	br := bedrockruntime.NewFromConfig(awsCfg)
 	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp)))
 	if err != nil {
-		log.Fatalf("bedrock model: %v", err)
+		log.Panicf("bedrock model: %v", err)
 	}
 
 	a, err := llmagent.New(llmagent.Config{
