@@ -12,6 +12,14 @@
 
 version: "2"
 
+# Must be <= the Go version used to build golangci-lint (`golangci-lint version`).
+# The module `go` directive in go.mod must also be <= that version, or loading packages panics with
+# "file requires newer Go version" (the linter embeds go/types from its build toolchain).
+# Fix: match go.mod to this, or install golangci-lint built with a newer Go, e.g.
+#   go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
+run:
+  go: "1.25"
+
 issues:
   # Maximum count of issues with the same text.
   # Set to 0 to disable.

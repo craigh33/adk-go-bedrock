@@ -10,11 +10,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
+	"google.golang.org/adk/artifact"
 	"google.golang.org/adk/cmd/launcher"
 	"google.golang.org/adk/cmd/launcher/full"
+	"google.golang.org/adk/tool"
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/tools/imagegenerator"
 )
 
 func main() {
@@ -47,21 +50,31 @@ func main() {
 		log.Fatalf("bedrock model: %v", err)
 	}
 
+	imgTool, err := imagegenerator.New(imagegenerator.Config{
+		API:      br,
+		Provider: imagegenerator.NewCanvasProvider("amazon.nova-canvas-v1:0"),
+	})
+	if err != nil {
+		log.Fatalf("image generator tool: %v", err)
+	}
+
 	a, err := llmagent.New(llmagent.Config{
 		Name:        "assistant",
 		Description: "A helpful assistant",
 		Model:       llm,
 		Instruction: "You reply briefly and clearly.",
 		GenerateContentConfig: &genai.GenerateContentConfig{
-			MaxOutputTokens: 512,
+			MaxOutputTokens: 1024,
 		},
+		Tools: []tool.Tool{imgTool},
 	})
 	if err != nil {
 		log.Fatalf("agent: %v", err)
 	}
 
 	launcherCfg := &launcher.Config{
-		AgentLoader: agent.NewSingleLoader(a),
+		AgentLoader:     agent.NewSingleLoader(a),
+		ArtifactService: artifact.InMemoryService(),
 	}
 
 	l := full.NewLauncher()
