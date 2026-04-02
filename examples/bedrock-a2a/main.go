@@ -142,6 +142,6 @@ func main() {
 
 	l := full.NewLauncher()
 	if err = l.Execute(ctx, launcherCfg, os.Args[1:]); err != nil {
-		log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())
+		log.Panicf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())
 	}
 }
