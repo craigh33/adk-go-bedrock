@@ -3,7 +3,7 @@ module github.com/craigh33/adk-go-bedrock
 go 1.25.0
 
 require (
-	github.com/a2aproject/a2a-go v0.3.10
+	github.com/a2aproject/a2a-go v0.3.13
 	github.com/aws/aws-sdk-go-v2 v1.41.5
 	github.com/aws/aws-sdk-go-v2/config v1.32.12
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.14
