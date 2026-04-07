@@ -17,11 +17,8 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock"
-<<<<<<< AddImageGenTool
 	"github.com/craigh33/adk-go-bedrock/tools/imagegenerator"
-=======
 	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
->>>>>>> main
 )
 
 func main() {
