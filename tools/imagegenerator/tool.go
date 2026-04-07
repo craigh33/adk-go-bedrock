@@ -22,7 +22,31 @@ const (
 	defaultCanvasWidth    = 512
 	defaultCanvasHeight   = 512
 	defaultCanvasCfgScale = 8.0
+	// maxNovaCanvasSeed is the maximum allowed value for imageGenerationConfig.seed on Nova Canvas
+	// (Bedrock returns ValidationException if seed > this value).
+	maxNovaCanvasSeed int64 = 2147483646
 )
+
+// clampNovaCanvasSeed maps s into [0, maxNovaCanvasSeed] so InvokeModel validation succeeds.
+func clampNovaCanvasSeed(s int64) int64 {
+	if s < 0 {
+		return 0
+	}
+	if s <= maxNovaCanvasSeed {
+		return s
+	}
+	return s % (maxNovaCanvasSeed + 1)
+}
+
+// randomNovaCanvasSeed returns a pseudo-random seed in [1, maxNovaCanvasSeed]. UnixNano alone is
+// too large for the API (see maxNovaCanvasSeed).
+func randomNovaCanvasSeed() int64 {
+	n := time.Now().UnixNano()
+	if n < 0 {
+		n = -n
+	}
+	return 1 + (n % maxNovaCanvasSeed)
+}
 
 // InvokeModelAPI is the subset of the Bedrock Runtime API needed for image generation.
 type InvokeModelAPI interface {
@@ -235,7 +259,9 @@ func NewCanvasProvider(
 		quality = "standard"
 	}
 	if seed == 0 {
-		seed = time.Now().UnixNano()
+		seed = randomNovaCanvasSeed()
+	} else {
+		seed = clampNovaCanvasSeed(seed)
 	}
 	return &CanvasProvider{
 		modelID:        modelID,
@@ -262,7 +288,7 @@ func (p *CanvasProvider) MarshalRequest(prompt string) ([]byte, error) {
 			CfgScale:       p.CfgScale,
 			Height:         p.Height,
 			Width:          p.Width,
-			Seed:           p.Seed,
+			Seed:           clampNovaCanvasSeed(p.Seed),
 		},
 	}
 	return json.Marshal(req)

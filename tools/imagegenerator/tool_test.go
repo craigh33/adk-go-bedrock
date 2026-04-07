@@ -353,3 +353,35 @@ func TestCanvasProvider_ModelID_Custom(t *testing.T) {
 		t.Errorf("ModelID = %q", p.ModelID())
 	}
 }
+
+func TestClampNovaCanvasSeed(t *testing.T) {
+	t.Parallel()
+	if clampNovaCanvasSeed(100) != 100 {
+		t.Errorf("expected 100, got %d", clampNovaCanvasSeed(100))
+	}
+	if clampNovaCanvasSeed(maxNovaCanvasSeed) != maxNovaCanvasSeed {
+		t.Errorf("expected max, got %d", clampNovaCanvasSeed(maxNovaCanvasSeed))
+	}
+	if clampNovaCanvasSeed(maxNovaCanvasSeed+1) != 0 {
+		t.Errorf("expected 0 for overflow mod, got %d", clampNovaCanvasSeed(maxNovaCanvasSeed+1))
+	}
+	if clampNovaCanvasSeed(-1) != 0 {
+		t.Errorf("expected 0 for negative, got %d", clampNovaCanvasSeed(-1))
+	}
+}
+
+func TestCanvasProvider_MarshalRequest_SeedWithinAPIRange(t *testing.T) {
+	t.Parallel()
+	p := NewCanvasProvider(DefaultCanvasModelID, 0, 0, 0, 0, "", 0)
+	body, err := p.MarshalRequest("x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req canvasRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.ImageGenerationConfig.Seed < 0 || req.ImageGenerationConfig.Seed > maxNovaCanvasSeed {
+		t.Errorf("seed %d out of API range [0,%d]", req.ImageGenerationConfig.Seed, maxNovaCanvasSeed)
+	}
+}
