@@ -99,13 +99,18 @@ func newFakeToolCtx(arts *fakeArtifacts) *fakeToolContext {
 	return &fakeToolContext{Context: context.Background(), artifacts: arts}
 }
 
+// testCanvasProvider builds a provider with default dimensions/quality; zero modelID uses [DefaultCanvasModelID].
+func testCanvasProvider(modelID string) *CanvasProvider {
+	return NewCanvasProvider(modelID, 0, 0, 0, 0, "", 0)
+}
+
 // ---------------------------------------------------------------------------
 // New()
 // ---------------------------------------------------------------------------
 
 func TestNew_NilAPI(t *testing.T) {
 	t.Parallel()
-	_, err := New(Config{Provider: NewCanvasProvider("")})
+	_, err := New(Config{Provider: testCanvasProvider("")})
 	if err == nil {
 		t.Fatal("expected error for nil API")
 	}
@@ -121,7 +126,7 @@ func TestNew_NilProvider(t *testing.T) {
 
 func TestNew_OK(t *testing.T) {
 	t.Parallel()
-	tl, err := New(Config{API: &fakeInvokeAPI{}, Provider: NewCanvasProvider("")})
+	tl, err := New(Config{API: &fakeInvokeAPI{}, Provider: testCanvasProvider("")})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -139,7 +144,7 @@ func TestNew_OK(t *testing.T) {
 
 func TestDeclaration(t *testing.T) {
 	t.Parallel()
-	tl, _ := New(Config{API: &fakeInvokeAPI{}, Provider: NewCanvasProvider("")})
+	tl, _ := New(Config{API: &fakeInvokeAPI{}, Provider: testCanvasProvider("")})
 	gt := tl.(*imageGenTool)
 	decl := gt.Declaration()
 	if decl == nil {
@@ -154,6 +159,9 @@ func TestDeclaration(t *testing.T) {
 	if decl.Parameters.Properties["file_name"] == nil {
 		t.Error("missing file_name parameter")
 	}
+	if len(decl.Parameters.Required) != 1 || decl.Parameters.Required[0] != "prompt" {
+		t.Errorf("Required = %v, want [prompt]", decl.Parameters.Required)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -162,7 +170,7 @@ func TestDeclaration(t *testing.T) {
 
 func TestProcessRequest_PacksDeclaration(t *testing.T) {
 	t.Parallel()
-	tl, _ := New(Config{API: &fakeInvokeAPI{}, Provider: NewCanvasProvider("")})
+	tl, _ := New(Config{API: &fakeInvokeAPI{}, Provider: testCanvasProvider("")})
 	gt := tl.(*imageGenTool)
 	req := &model.LLMRequest{}
 	if err := gt.ProcessRequest(newFakeToolCtx(&fakeArtifacts{}), req); err != nil {
@@ -181,7 +189,7 @@ func TestProcessRequest_PacksDeclaration(t *testing.T) {
 
 func TestProcessRequest_DuplicateError(t *testing.T) {
 	t.Parallel()
-	tl, _ := New(Config{API: &fakeInvokeAPI{}, Provider: NewCanvasProvider("")})
+	tl, _ := New(Config{API: &fakeInvokeAPI{}, Provider: testCanvasProvider("")})
 	gt := tl.(*imageGenTool)
 	req := &model.LLMRequest{}
 	_ = gt.ProcessRequest(newFakeToolCtx(&fakeArtifacts{}), req)
@@ -206,7 +214,7 @@ func TestRun_Success(t *testing.T) {
 	t.Parallel()
 	api := &fakeInvokeAPI{output: &bedrockruntime.InvokeModelOutput{Body: canvasSuccessBody()}}
 	arts := &fakeArtifacts{version: 1}
-	tl, _ := New(Config{API: api, Provider: NewCanvasProvider("")})
+	tl, _ := New(Config{API: api, Provider: testCanvasProvider("")})
 	gt := tl.(*imageGenTool)
 
 	result, err := gt.Run(newFakeToolCtx(arts), map[string]any{
@@ -235,7 +243,7 @@ func TestRun_Success(t *testing.T) {
 
 func TestRun_EmptyPrompt(t *testing.T) {
 	t.Parallel()
-	tl, _ := New(Config{API: &fakeInvokeAPI{}, Provider: NewCanvasProvider("")})
+	tl, _ := New(Config{API: &fakeInvokeAPI{}, Provider: testCanvasProvider("")})
 	gt := tl.(*imageGenTool)
 
 	_, err := gt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{"prompt": ""})
@@ -248,7 +256,7 @@ func TestRun_DefaultFileName(t *testing.T) {
 	t.Parallel()
 	api := &fakeInvokeAPI{output: &bedrockruntime.InvokeModelOutput{Body: canvasSuccessBody()}}
 	arts := &fakeArtifacts{version: 1}
-	tl, _ := New(Config{API: api, Provider: NewCanvasProvider("")})
+	tl, _ := New(Config{API: api, Provider: testCanvasProvider("")})
 	gt := tl.(*imageGenTool)
 
 	result, err := gt.Run(newFakeToolCtx(arts), map[string]any{"prompt": "hello"})
@@ -263,7 +271,7 @@ func TestRun_DefaultFileName(t *testing.T) {
 func TestRun_InvokeModelError(t *testing.T) {
 	t.Parallel()
 	api := &fakeInvokeAPI{err: errors.New("throttled")}
-	tl, _ := New(Config{API: api, Provider: NewCanvasProvider("")})
+	tl, _ := New(Config{API: api, Provider: testCanvasProvider("")})
 	gt := tl.(*imageGenTool)
 
 	_, err := gt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{"prompt": "hi"})
@@ -276,7 +284,7 @@ func TestRun_ArtifactSaveError(t *testing.T) {
 	t.Parallel()
 	api := &fakeInvokeAPI{output: &bedrockruntime.InvokeModelOutput{Body: canvasSuccessBody()}}
 	arts := &fakeArtifacts{saveErr: errors.New("storage full")}
-	tl, _ := New(Config{API: api, Provider: NewCanvasProvider("")})
+	tl, _ := New(Config{API: api, Provider: testCanvasProvider("")})
 	gt := tl.(*imageGenTool)
 
 	_, err := gt.Run(newFakeToolCtx(arts), map[string]any{"prompt": "hi"})
@@ -287,7 +295,7 @@ func TestRun_ArtifactSaveError(t *testing.T) {
 
 func TestRun_BadArgsType(t *testing.T) {
 	t.Parallel()
-	tl, _ := New(Config{API: &fakeInvokeAPI{}, Provider: NewCanvasProvider("")})
+	tl, _ := New(Config{API: &fakeInvokeAPI{}, Provider: testCanvasProvider("")})
 	gt := tl.(*imageGenTool)
 
 	_, err := gt.Run(newFakeToolCtx(&fakeArtifacts{}), "not-a-map")
@@ -302,7 +310,7 @@ func TestRun_BadArgsType(t *testing.T) {
 
 func TestCanvasProvider_MarshalRequest(t *testing.T) {
 	t.Parallel()
-	p := NewCanvasProvider("")
+	p := testCanvasProvider("")
 	body, err := p.MarshalRequest("a dog")
 	if err != nil {
 		t.Fatalf("MarshalRequest: %v", err)
@@ -321,7 +329,7 @@ func TestCanvasProvider_MarshalRequest(t *testing.T) {
 
 func TestCanvasProvider_UnmarshalResponse_NoImages(t *testing.T) {
 	t.Parallel()
-	p := NewCanvasProvider("")
+	p := testCanvasProvider("")
 	body, _ := json.Marshal(canvasResponse{Images: []string{}})
 	_, _, err := p.UnmarshalResponse(body)
 	if err == nil {
@@ -331,7 +339,7 @@ func TestCanvasProvider_UnmarshalResponse_NoImages(t *testing.T) {
 
 func TestCanvasProvider_ModelID_Default(t *testing.T) {
 	t.Parallel()
-	p := NewCanvasProvider("")
+	p := testCanvasProvider("")
 	if p.ModelID() != DefaultCanvasModelID {
 		t.Errorf("ModelID = %q, want %q", p.ModelID(), DefaultCanvasModelID)
 	}
@@ -340,7 +348,7 @@ func TestCanvasProvider_ModelID_Default(t *testing.T) {
 func TestCanvasProvider_ModelID_Custom(t *testing.T) {
 	t.Parallel()
 	custom := "eu.amazon.nova-canvas-v1:0"
-	p := NewCanvasProvider(custom)
+	p := testCanvasProvider(custom)
 	if p.ModelID() != custom {
 		t.Errorf("ModelID = %q", p.ModelID())
 	}

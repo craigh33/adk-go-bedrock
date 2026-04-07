@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -87,10 +88,10 @@ func (t *imageGenTool) Declaration() *genai.FunctionDeclaration {
 				},
 				"file_name": {
 					Type:        "STRING",
-					Description: "The filename to save the generated image as (e.g. 'landscape.png')",
+					Description: "The filename to save the generated image as (e.g. 'landscape.png'). If not provided, the image will be saved as 'generated_image.png'.",
 				},
 			},
-			Required: []string{"prompt", "file_name"},
+			Required: []string{"prompt"},
 		},
 	}
 }
@@ -206,17 +207,44 @@ type CanvasProvider struct {
 
 // NewCanvasProvider returns a provider configured for Nova Canvas text-to-image.
 // Pass an empty modelID to use [DefaultCanvasModelID].
-func NewCanvasProvider(modelID string) *CanvasProvider {
+func NewCanvasProvider(
+	modelID string,
+	width int,
+	height int,
+	cfgScale float64,
+	numberOfImages int,
+	quality string,
+	seed int64,
+) *CanvasProvider {
 	if modelID == "" {
 		modelID = DefaultCanvasModelID
 	}
+	if width == 0 {
+		width = defaultCanvasWidth
+	}
+	if height == 0 {
+		height = defaultCanvasHeight
+	}
+	if cfgScale == 0 {
+		cfgScale = defaultCanvasCfgScale
+	}
+	if numberOfImages == 0 {
+		numberOfImages = 1
+	}
+	if quality == "" {
+		quality = "standard"
+	}
+	if seed == 0 {
+		seed = time.Now().UnixNano()
+	}
 	return &CanvasProvider{
 		modelID:        modelID,
-		Width:          defaultCanvasWidth,
-		Height:         defaultCanvasHeight,
-		CfgScale:       defaultCanvasCfgScale,
-		NumberOfImages: 1,
-		Quality:        "standard",
+		Width:          width,
+		Height:         height,
+		CfgScale:       cfgScale,
+		NumberOfImages: numberOfImages,
+		Quality:        quality,
+		Seed:           seed,
 	}
 }
 

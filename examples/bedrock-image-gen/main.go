@@ -58,7 +58,7 @@ func main() {
 
 	imgTool, err := imagegenerator.New(imagegenerator.Config{
 		API:      br,
-		Provider: imagegenerator.NewCanvasProvider(""),
+		Provider: imagegenerator.NewCanvasProvider("", 0, 0, 0, 0, "", 0),
 	})
 	if err != nil {
 		log.Fatalf("image generator tool: %v", err)

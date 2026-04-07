@@ -52,7 +52,7 @@ func main() {
 
 	imgTool, err := imagegenerator.New(imagegenerator.Config{
 		API:      br,
-		Provider: imagegenerator.NewCanvasProvider("amazon.nova-canvas-v1:0"),
+		Provider: imagegenerator.NewCanvasProvider("amazon.nova-canvas-v1:0", 0, 0, 0, 0, "", 0),
 	})
 	if err != nil {
 		log.Fatalf("image generator tool: %v", err)
