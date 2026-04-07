@@ -376,4 +376,7 @@ func TestSanitizeDocumentNameForBedrock(t *testing.T) {
 	}
 }
 
-func ptrFloat32(f float32) *float32 { return &f }
+func ptrFloat32(f float32) *float32 {
+	p := f
+	return &p
+}

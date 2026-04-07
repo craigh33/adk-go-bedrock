@@ -101,6 +101,7 @@ Each example has its own `README.md` and `Makefile`:
 - [`examples/bedrock-chat`](examples/bedrock-chat): runner-based chat example.
 - [`examples/bedrock-mcp`](examples/bedrock-mcp): MCP support via ADK's `mcptoolset` with an in-memory MCP server ([MCP support](#mcp-support)).
 - [`examples/bedrock-tool-calling`](examples/bedrock-tool-calling): tool-calling agent example with function declarations.
+- [`examples/bedrock-image-gen`](examples/bedrock-image-gen): ADK runner with the [`imagegenerator`](tools/imagegenerator) tool—Nova Canvas image generation via Bedrock `InvokeModel` and artifact storage.
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
 - [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
 - [`examples/bedrock-multimodal`](examples/bedrock-multimodal): comprehensive image analysis, document processing, tool calling with rich media, and vision-based reasoning.
