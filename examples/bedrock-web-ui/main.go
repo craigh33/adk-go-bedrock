@@ -17,8 +17,8 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock"
-	"github.com/craigh33/adk-go-bedrock/tools/imagegenerator"
 	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
+	"github.com/craigh33/adk-go-bedrock/tools/imagegenerator"
 )
 
 func main() {
@@ -62,7 +62,7 @@ func main() {
 		Provider: imagegenerator.NewCanvasProvider("amazon.nova-canvas-v1:0", 0, 0, 0, 0, "", 0),
 	})
 	if err != nil {
-		log.Fatalf("image generator tool: %v", err)
+		log.Fatalf("image generator tool: %v", err) //nolint:gocritic // exitAfterDefer: intentional for this example
 	}
 
 	a, err := llmagent.New(llmagent.Config{
