@@ -24,10 +24,13 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
 )
 
-func newWeatherAgent(ctx context.Context) agent.Agent {
+func newWeatherAgent(ctx context.Context, tp trace.TracerProvider) agent.Agent {
 	var loadOpts []func(*config.LoadOptions) error
 	if r := strings.TrimSpace(os.Getenv("AWS_REGION")); r != "" {
 		loadOpts = append(loadOpts, config.WithRegion(r))
@@ -47,7 +50,7 @@ func newWeatherAgent(ctx context.Context) agent.Agent {
 	}
 
 	br := bedrockruntime.NewFromConfig(awsCfg)
-	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br))
+	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp)))
 	if err != nil {
 		log.Fatalf("bedrock model: %v", err)
 	}
@@ -67,7 +70,7 @@ func newWeatherAgent(ctx context.Context) agent.Agent {
 	return a
 }
 
-func startWeatherAgentServer(ctx context.Context) string {
+func startWeatherAgentServer(ctx context.Context, tp trace.TracerProvider) string {
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		log.Fatalf("bind A2A server: %v", err)
@@ -77,7 +80,7 @@ func startWeatherAgentServer(ctx context.Context) string {
 	log.Printf("Starting A2A server on %s", baseURL.String())
 
 	go func() {
-		a := newWeatherAgent(ctx)
+		a := newWeatherAgent(ctx, tp)
 
 		agentPath := "/invoke"
 		agentCard := &a2a.AgentCard{
@@ -119,20 +122,26 @@ func startWeatherAgentServer(ctx context.Context) string {
 func main() {
 	ctx := context.Background()
 
-	a2aServerAddress := startWeatherAgentServer(ctx)
+	tp, shutdownTP, err := exampletrace.TracerProvider(ctx)
+	if err != nil {
+		log.Fatalf("tracer provider: %v", err)
+	}
+	defer func() { _ = shutdownTP(context.Background()) }()
+
+	a2aServerAddress := startWeatherAgentServer(ctx, tp)
 
 	remoteAgent, err := remoteagent.NewA2A(remoteagent.A2AConfig{
 		Name:            "A2A Bedrock Weather agent",
 		AgentCardSource: a2aServerAddress,
 	})
 	if err != nil {
-		log.Fatalf("create remote agent: %v", err)
+		log.Panicf("create remote agent: %v", err)
 	}
 
 	launcherCfg := &launcher.Config{AgentLoader: agent.NewSingleLoader(remoteAgent)}
 
 	l := full.NewLauncher()
 	if err = l.Execute(ctx, launcherCfg, os.Args[1:]); err != nil {
-		log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())
+		log.Panicf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
 )
 
 // demonstrateTechnicalAssistant shows system instruction for a technical expert role.
@@ -315,10 +316,16 @@ func main() {
 	}
 
 	// Create Bedrock LLM
-	br := bedrockruntime.NewFromConfig(awsCfg)
-	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br))
+	tp, shutdownTP, err := exampletrace.TracerProvider(ctx)
 	if err != nil {
-		log.Fatalf("create bedrock model: %v", err)
+		log.Fatalf("tracer provider: %v", err)
+	}
+	defer func() { _ = shutdownTP(context.Background()) }()
+
+	br := bedrockruntime.NewFromConfig(awsCfg)
+	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp)))
+	if err != nil {
+		log.Panicf("create bedrock model: %v", err)
 	}
 
 	// Run demonstrations

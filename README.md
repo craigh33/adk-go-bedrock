@@ -1,3 +1,11 @@
+<p align="center">
+  <img
+    src="docs/images/readme-header.jpg"
+    alt="adk-go-bedrock banner showing Agent Development Kit connected to Amazon Bedrock"
+    width="100%"
+  />
+</p>
+
 # adk-go-bedrock
 
 [Amazon Bedrock](https://aws.amazon.com/bedrock/) **Converse** / **ConverseStream** implementation of the [`model.LLM`](https://pkg.go.dev/google.golang.org/adk/model#LLM) interface for [adk-go](https://github.com/google/adk-go), so you can run agents on Claude, Nova, and other Bedrock chat models with the same ADK APIs you use for Gemini.
