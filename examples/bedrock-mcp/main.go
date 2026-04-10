@@ -19,10 +19,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/oauth2"
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/runner"
-	"google.golang.org/adk/session"
+	"google.golang.org/adk/cmd/launcher"
+	"google.golang.org/adk/cmd/launcher/full"
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/mcptoolset"
 	"google.golang.org/genai"
@@ -64,17 +65,22 @@ func localMCPTransport(ctx context.Context) mcp.Transport {
 	return clientTransport
 }
 
-func userMessageFromArgs(args []string) string {
-	userMsg := "What is the weather in Seattle? Use your MCP tool if needed."
-	if len(args) > 1 {
-		userMsg = strings.Join(args[1:], " ")
+func githubMCPTransport(ctx context.Context) mcp.Transport {
+	ts := oauth2.StaticTokenSource(
+		&oauth2.Token{AccessToken: os.Getenv("GITHUB_PAT")},
+	)
+	return &mcp.StreamableClientTransport{
+		Endpoint:   "https://api.githubcopilot.com/mcp/",
+		HTTPClient: oauth2.NewClient(ctx, ts),
 	}
+}
 
-	return userMsg
+func main() {
+	os.Exit(runMain())
 }
 
 //nolint:funlen //example main function with setup and run loop
-func main() {
+func runMain() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
@@ -85,11 +91,11 @@ func main() {
 	awsCfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
 		log.Printf("load AWS config (check credentials and AWS_PROFILE): %v", err)
-		return
+		return 1
 	}
 	if awsCfg.Region == "" {
 		log.Print("AWS region is unset: set AWS_REGION or add region to your ~/.aws/config profile")
-		return
+		return 1
 	}
 
 	modelID := os.Getenv("BEDROCK_MODEL_ID")
@@ -101,7 +107,7 @@ func main() {
 	tp, shutdownTP, err := exampletrace.TracerProvider(ctx)
 	if err != nil {
 		log.Printf("tracer provider: %v", err)
-		return
+		return 1
 	}
 	defer func() { _ = shutdownTP(context.Background()) }()
 
@@ -109,15 +115,22 @@ func main() {
 	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp)))
 	if err != nil {
 		log.Printf("bedrock model: %v", err)
-		return
+		return 1
+	}
+
+	var transport mcp.Transport
+	if strings.ToLower(os.Getenv("AGENT_MODE")) == "github" {
+		transport = githubMCPTransport(ctx)
+	} else {
+		transport = localMCPTransport(ctx)
 	}
 
 	mcpToolSet, err := mcptoolset.New(mcptoolset.Config{
-		Transport: localMCPTransport(ctx),
+		Transport: transport,
 	})
 	if err != nil {
 		log.Printf("create MCP tool set: %v", err)
-		return
+		return 1
 	}
 
 	a, err := llmagent.New(llmagent.Config{
@@ -132,43 +145,16 @@ func main() {
 	})
 	if err != nil {
 		log.Printf("agent: %v", err)
-		return
+		return 1
 	}
 
-	r, err := runner.New(runner.Config{
-		AppName:           "bedrock-mcp-example",
-		Agent:             a,
-		SessionService:    session.InMemoryService(),
-		AutoCreateSession: true,
-	})
-	if err != nil {
-		log.Printf("runner: %v", err)
-		return
+	config := &launcher.Config{
+		AgentLoader: agent.NewSingleLoader(a),
 	}
-
-	userMsg := userMessageFromArgs(os.Args)
-
-	fmt.Printf("User: %s\n\n", userMsg)
-
-	for ev, err := range r.Run(ctx, "local-user", "demo-session", genai.NewContentFromText(userMsg, genai.RoleUser), agent.RunConfig{}) {
-		if err != nil {
-			log.Printf("run: %v", err)
-			return
-		}
-		if ev.Author != a.Name() {
-			continue
-		}
-		if ev.LLMResponse.Partial {
-			continue
-		}
-		if ev.LLMResponse.Content == nil {
-			continue
-		}
-		for _, p := range ev.LLMResponse.Content.Parts {
-			if p.Text != "" {
-				fmt.Print(p.Text)
-			}
-		}
-		fmt.Println()
+	l := full.NewLauncher()
+	if err = l.Execute(ctx, config, os.Args[1:]); err != nil {
+		log.Printf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())
+		return 1
 	}
+	return 0
 }
