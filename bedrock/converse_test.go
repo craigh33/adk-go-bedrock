@@ -242,7 +242,10 @@ func TestConverse_GenerateContent_streamToolCalls_parseAndRawArgs(t *testing.T) 
 	if callA.Name != toolAName || callA.ID != toolAID {
 		t.Fatalf("callA: %+v", callA)
 	}
-	if callA.Args[rawFunctionArgsJSONKey] != "{\"city\":\"Dublin\"}" || callA.Args["city"] != "Dublin" {
+	if _, ok := callA.Args[rawFunctionArgsJSONKey]; ok {
+		t.Fatalf("callA args should not include rawArgsJson when JSON parses: %+v", callA.Args)
+	}
+	if callA.Args["city"] != "Dublin" {
 		t.Fatalf("callA args: %+v", callA.Args)
 	}
 	if callB.Name != toolBName || callB.ID != toolBID {

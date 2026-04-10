@@ -1,6 +1,7 @@
 package mappers
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -388,15 +389,12 @@ func documentToMap(d brdoc.Interface) (map[string]any, error) {
 	if d == nil {
 		return map[string]any{}, nil
 	}
-	var direct map[string]any
-	if err := d.UnmarshalSmithyDocument(&direct); err == nil {
-		if direct == nil {
-			return map[string]any{}, nil
-		}
-		return direct, nil
+	b, err := d.MarshalSmithyDocument()
+	if err != nil {
+		return nil, err
 	}
 	var raw any
-	if err := d.UnmarshalSmithyDocument(&raw); err != nil && raw == nil {
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return nil, err
 	}
 	raw = dereferenceJSONValue(raw)
