@@ -79,7 +79,6 @@ func main() {
 	os.Exit(runMain())
 }
 
-//nolint:funlen //example main function with setup and run loop
 func runMain() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
