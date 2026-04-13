@@ -604,17 +604,13 @@ func streamImageMIMEFromFormat(f types.ImageFormat) (string, error) {
 }
 
 func functionArgsFromRawJSON(raw string) map[string]any {
-	args := map[string]any{}
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return args
+		return map[string]any{}
 	}
-
-	args[rawFunctionArgsJSONKey] = raw
-
 	var parsed map[string]any
-	if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
-		maps.Copy(args, parsed)
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+		return parsed
 	}
-	return args
+	return map[string]any{rawFunctionArgsJSONKey: raw}
 }
