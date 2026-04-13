@@ -1,6 +1,7 @@
 package mappers
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -153,6 +154,67 @@ func TestToolResultToFunctionResponse_media(t *testing.T) {
 	}
 	if fr.Parts[1].FileData == nil || fr.Parts[1].FileData.FileURI != "s3://bucket/report.pdf" {
 		t.Fatalf("document part: %+v", fr.Parts[1])
+	}
+}
+
+func TestDocumentToMap_numericToolResultAndToolUse(t *testing.T) {
+	t.Parallel()
+	tr := &types.ToolResultBlock{
+		ToolUseId: aws.String("call_num"),
+		Content: []types.ToolResultContentBlock{
+			&types.ToolResultContentBlockMemberJson{Value: brdoc.NewLazyDocument(map[string]any{
+				"count": float64(42),
+				"ratio": 0.25,
+			})},
+		},
+	}
+	fr, err := toolResultToFunctionResponse(tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := fr.Response["count"].(float64)
+	if !ok || c != 42 {
+		t.Fatalf("count: got %T %v want float64 42", fr.Response["count"], fr.Response["count"])
+	}
+	r, ok := fr.Response["ratio"].(float64)
+	if !ok || r != 0.25 {
+		t.Fatalf("ratio: got %T %v want float64 0.25", fr.Response["ratio"], fr.Response["ratio"])
+	}
+	b, err := json.Marshal(fr.Response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundtrip map[string]any
+	if err := json.Unmarshal(b, &roundtrip); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := roundtrip["count"].(float64); !ok {
+		t.Fatalf("JSON round-trip count not numeric: %v", roundtrip["count"])
+	}
+
+	msg := &types.Message{
+		Role: types.ConversationRoleAssistant,
+		Content: []types.ContentBlock{
+			&types.ContentBlockMemberToolUse{Value: types.ToolUseBlock{
+				ToolUseId: aws.String("tool_1"),
+				Name:      aws.String("demo"),
+				Input:     brdoc.NewLazyDocument(map[string]any{"limit": float64(10), "offset": 0.0}),
+			}},
+		},
+	}
+	content, err := MessageToGenaiContent(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content.Parts) != 1 || content.Parts[0].FunctionCall == nil {
+		t.Fatalf("parts: %+v", content.Parts)
+	}
+	args := content.Parts[0].FunctionCall.Args
+	if lim, ok := args["limit"].(float64); !ok || lim != 10 {
+		t.Fatalf("limit: got %T %v", args["limit"], args["limit"])
+	}
+	if off, ok := args["offset"].(float64); !ok || off != 0 {
+		t.Fatalf("offset: got %T %v", args["offset"], args["offset"])
 	}
 }
 
