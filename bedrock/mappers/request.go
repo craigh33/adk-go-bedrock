@@ -39,7 +39,11 @@ func MaybeAppendUserContent(contents []*genai.Content) []*genai.Content {
 }
 
 // ConverseInputFromLLMRequest builds a Bedrock [bedrockruntime.ConverseInput] from an ADK request.
-func ConverseInputFromLLMRequest(modelID string, req *model.LLMRequest) (*bedrockruntime.ConverseInput, error) {
+func ConverseInputFromLLMRequest(
+	modelID string,
+	req *model.LLMRequest,
+	cacheSystemPrompt bool,
+) (*bedrockruntime.ConverseInput, error) {
 	if req == nil {
 		return nil, errors.New("nil LLMRequest")
 	}
@@ -50,7 +54,7 @@ func ConverseInputFromLLMRequest(modelID string, req *model.LLMRequest) (*bedroc
 
 	contents := MaybeAppendUserContent(append([]*genai.Content(nil), req.Contents...))
 
-	system := buildSystemBlocks(cfg)
+	system := buildSystemBlocks(cfg, cacheSystemPrompt)
 	sysFromContents, msgsFromContents := splitContents(contents)
 	system = append(system, sysFromContents...)
 
@@ -97,8 +101,9 @@ func ConverseInputFromLLMRequest(modelID string, req *model.LLMRequest) (*bedroc
 func ConverseStreamInputFromLLMRequest(
 	modelID string,
 	req *model.LLMRequest,
+	cacheSystemPrompt bool,
 ) (*bedrockruntime.ConverseStreamInput, error) {
-	conv, err := ConverseInputFromLLMRequest(modelID, req)
+	conv, err := ConverseInputFromLLMRequest(modelID, req, cacheSystemPrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -119,18 +124,21 @@ func ConverseStreamInputFromLLMRequest(
 	}, nil
 }
 
-func buildSystemBlocks(cfg *genai.GenerateContentConfig) []types.SystemContentBlock {
+func buildSystemBlocks(cfg *genai.GenerateContentConfig, cacheSystemPrompt bool) []types.SystemContentBlock {
 	if cfg == nil || cfg.SystemInstruction == nil {
 		return nil
 	}
 	var blocks []types.SystemContentBlock
 	for _, part := range cfg.SystemInstruction.Parts {
-		if part == nil {
+		if part == nil || part.Text == "" {
 			continue
 		}
-		if part.Text != "" {
-			blocks = append(blocks, &types.SystemContentBlockMemberText{Value: part.Text})
-		}
+		blocks = append(blocks, &types.SystemContentBlockMemberText{Value: part.Text})
+	}
+	if cacheSystemPrompt && len(blocks) > 0 {
+		blocks = append(blocks, &types.SystemContentBlockMemberCachePoint{
+			Value: types.CachePointBlock{Type: types.CachePointTypeDefault},
+		})
 	}
 	return blocks
 }
