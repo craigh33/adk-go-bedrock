@@ -24,7 +24,7 @@ func TestConverseInputFromLLMRequest_basicUserMessage(t *testing.T) {
 			MaxOutputTokens:   100,
 		},
 	}
-	in, err := ConverseInputFromLLMRequest("model-id", req, false)
+	in, err := ConverseInputFromLLMRequest("model-id", req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestConverseInputFromLLMRequest_emptyUserParts(t *testing.T) {
 	_, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
 		Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{}}},
 		Config:   &genai.GenerateContentConfig{},
-	}, false)
+	})
 	if err == nil {
 		t.Fatal("expected error for empty user message with no mappable parts")
 	}
@@ -305,7 +305,7 @@ func TestConverseInputFromLLMRequest_safetySettingsFailFast(t *testing.T) {
 				Threshold: genai.HarmBlockThresholdBlockMediumAndAbove,
 			}},
 		},
-	}, false)
+	})
 	if err == nil {
 		t.Fatal("expected error")
 	}

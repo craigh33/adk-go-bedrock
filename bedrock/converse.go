@@ -226,17 +226,30 @@ func (m *Model) GenerateContent(
 	}
 }
 
+// appendSystemCachePoint appends a Bedrock CachePoint block to sys when
+// cacheSystemPrompt is enabled and the slice is non-empty. The cache point
+// marks everything before it as eligible for prompt caching.
+func (m *Model) appendSystemCachePoint(sys []types.SystemContentBlock) []types.SystemContentBlock {
+	if !m.cacheSystemPrompt || len(sys) == 0 {
+		return sys
+	}
+	return append(sys, &types.SystemContentBlockMemberCachePoint{
+		Value: types.CachePointBlock{Type: types.CachePointTypeDefault},
+	})
+}
+
 func (m *Model) generateUnary(
 	ctx context.Context,
 	modelID string,
 	req *model.LLMRequest,
 ) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		in, err := mappers.ConverseInputFromLLMRequest(modelID, req, m.cacheSystemPrompt)
+		in, err := mappers.ConverseInputFromLLMRequest(modelID, req)
 		if err != nil {
 			yield(nil, err)
 			return
 		}
+		in.System = m.appendSystemCachePoint(in.System)
 		out, err := m.api.Converse(ctx, in)
 		if err != nil {
 			yield(nil, err)
@@ -254,11 +267,12 @@ func (m *Model) generateStream(
 	req *model.LLMRequest,
 ) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		in, err := mappers.ConverseStreamInputFromLLMRequest(modelID, req, m.cacheSystemPrompt)
+		in, err := mappers.ConverseStreamInputFromLLMRequest(modelID, req)
 		if err != nil {
 			yield(nil, err)
 			return
 		}
+		in.System = m.appendSystemCachePoint(in.System)
 		stream, err := m.api.ConverseStream(ctx, in)
 		if err != nil {
 			yield(nil, err)
