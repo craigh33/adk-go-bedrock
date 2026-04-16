@@ -1,4 +1,4 @@
 .PHONY: run
 
 run:
-	go run . $(PROMPT)
+	go run .
