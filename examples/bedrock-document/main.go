@@ -24,8 +24,8 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock"
-	"github.com/craigh33/adk-go-bedrock/bedrock/mappers"
 	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
+	"github.com/craigh33/adk-go-bedrock/internal/mappers"
 )
 
 func main() {

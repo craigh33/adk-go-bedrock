@@ -19,7 +19,7 @@ import (
 	"google.golang.org/adk/model"
 	"google.golang.org/genai"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock/mappers"
+	"github.com/craigh33/adk-go-bedrock/internal/mappers"
 )
 
 var _ model.LLM = (*Model)(nil)
