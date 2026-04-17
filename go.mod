@@ -15,7 +15,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.43.0
 	golang.org/x/oauth2 v0.35.0
 	google.golang.org/adk v1.1.0
-	google.golang.org/genai v1.53.0
+	google.golang.org/genai v1.54.0
 )
 
 require (
