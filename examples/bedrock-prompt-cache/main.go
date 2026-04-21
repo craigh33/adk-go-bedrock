@@ -87,7 +87,7 @@ func printUsage(label string, u *genai.GenerateContentResponseUsageMetadata) {
 	if u == nil {
 		return
 	}
-	fmt.Printf("[%s] prompt=%d  candidates=%d  fromCache=%d total=%d tokens\n ",
+	fmt.Printf("[%s] prompt=%d  candidates=%d  fromCache=%d total=%d tokens\n",
 		label, u.PromptTokenCount, u.CandidatesTokenCount, u.CachedContentTokenCount, u.TotalTokenCount)
 }
 
