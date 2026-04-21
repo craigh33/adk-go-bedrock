@@ -14,9 +14,3 @@ For more on Bedrock prompt caching, see the [Bedrock documentation](https://docs
 ```bash
 make -C examples/bedrock-prompt-cache run
 ```
-
-Or pass a custom prompt:
-
-```bash
-make -C examples/bedrock-prompt-cache run
-```
