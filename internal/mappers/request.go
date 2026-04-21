@@ -54,9 +54,8 @@ func ConverseInputFromLLMRequest(
 
 	contents := MaybeAppendUserContent(append([]*genai.Content(nil), req.Contents...))
 
-	system := buildSystemBlocks(cfg, cacheSystemPrompt)
 	sysFromContents, msgsFromContents := splitContents(contents)
-	system = append(system, sysFromContents...)
+	system := buildSystemBlocks(cfg, sysFromContents, cacheSystemPrompt)
 
 	messages, err := contentsToMessages(msgsFromContents)
 	if err != nil {
@@ -124,17 +123,21 @@ func ConverseStreamInputFromLLMRequest(
 	}, nil
 }
 
-func buildSystemBlocks(cfg *genai.GenerateContentConfig, cacheSystemPrompt bool) []types.SystemContentBlock {
-	if cfg == nil || cfg.SystemInstruction == nil {
-		return nil
-	}
+func buildSystemBlocks(
+	cfg *genai.GenerateContentConfig,
+	extra []types.SystemContentBlock,
+	cacheSystemPrompt bool,
+) []types.SystemContentBlock {
 	var blocks []types.SystemContentBlock
-	for _, part := range cfg.SystemInstruction.Parts {
-		if part == nil || part.Text == "" {
-			continue
+	if cfg != nil && cfg.SystemInstruction != nil {
+		for _, part := range cfg.SystemInstruction.Parts {
+			if part == nil || part.Text == "" {
+				continue
+			}
+			blocks = append(blocks, &types.SystemContentBlockMemberText{Value: part.Text})
 		}
-		blocks = append(blocks, &types.SystemContentBlockMemberText{Value: part.Text})
 	}
+	blocks = append(blocks, extra...)
 	if cacheSystemPrompt && len(blocks) > 0 {
 		blocks = append(blocks, &types.SystemContentBlockMemberCachePoint{
 			Value: types.CachePointBlock{Type: types.CachePointTypeDefault},

@@ -376,6 +376,100 @@ func TestSanitizeDocumentNameForBedrock(t *testing.T) {
 	}
 }
 
+func TestConverseInputFromLLMRequest_cachePointAfterAllSystemBlocks(t *testing.T) {
+	t.Parallel()
+	// System prompt from SystemInstruction + system-role content in Contents.
+	// CachePoint must appear as the very last system block, after both sources.
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Role: "system", Parts: []*genai.Part{{Text: "extra system"}}},
+			genai.NewContentFromText("hello", "user"),
+		},
+		Config: &genai.GenerateContentConfig{
+			SystemInstruction: genai.NewContentFromText("base instruction", "system"),
+		},
+	}
+	in, err := ConverseInputFromLLMRequest("mid", req, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(in.System) != 3 {
+		t.Fatalf("want 3 system blocks (instruction + extra + cachepoint), got %d: %#v", len(in.System), in.System)
+	}
+	if _, ok := in.System[0].(*types.SystemContentBlockMemberText); !ok {
+		t.Fatalf("system[0] want text, got %T", in.System[0])
+	}
+	if _, ok := in.System[1].(*types.SystemContentBlockMemberText); !ok {
+		t.Fatalf("system[1] want text, got %T", in.System[1])
+	}
+	if _, ok := in.System[2].(*types.SystemContentBlockMemberCachePoint); !ok {
+		t.Fatalf("system[2] want CachePoint, got %T", in.System[2])
+	}
+}
+
+func TestConverseInputFromLLMRequest_cachePointNotAddedWithoutSystemBlocks(t *testing.T) {
+	t.Parallel()
+	// No system prompt at all — CachePoint must not be added even when cacheSystemPrompt=true.
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			genai.NewContentFromText("hello", "user"),
+		},
+		Config: &genai.GenerateContentConfig{},
+	}
+	in, err := ConverseInputFromLLMRequest("mid", req, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(in.System) != 0 {
+		t.Fatalf("want no system blocks, got %d: %#v", len(in.System), in.System)
+	}
+}
+
+func TestConverseInputFromLLMRequest_cachePointNotAddedWhenDisabled(t *testing.T) {
+	t.Parallel()
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			genai.NewContentFromText("hello", "user"),
+		},
+		Config: &genai.GenerateContentConfig{
+			SystemInstruction: genai.NewContentFromText("be helpful", "system"),
+		},
+	}
+	in, err := ConverseInputFromLLMRequest("mid", req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(in.System) != 1 {
+		t.Fatalf("want 1 system block, got %d", len(in.System))
+	}
+	if _, ok := in.System[0].(*types.SystemContentBlockMemberCachePoint); ok {
+		t.Fatal("CachePoint must not be added when cacheSystemPrompt=false")
+	}
+}
+
+func TestConverseInputFromLLMRequest_cachePointOnlyFromContentsSystem(t *testing.T) {
+	t.Parallel()
+	// System prompt provided only via Contents (no SystemInstruction).
+	// CachePoint must still appear after the system block.
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Role: "system", Parts: []*genai.Part{{Text: "only from contents"}}},
+			genai.NewContentFromText("hello", "user"),
+		},
+		Config: &genai.GenerateContentConfig{},
+	}
+	in, err := ConverseInputFromLLMRequest("mid", req, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(in.System) != 2 {
+		t.Fatalf("want 2 system blocks (text + cachepoint), got %d: %#v", len(in.System), in.System)
+	}
+	if _, ok := in.System[1].(*types.SystemContentBlockMemberCachePoint); !ok {
+		t.Fatalf("system[1] want CachePoint, got %T", in.System[1])
+	}
+}
+
 func ptrFloat32(f float32) *float32 {
 	p := f
 	return &p
