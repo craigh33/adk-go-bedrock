@@ -1,6 +1,6 @@
 # bedrock-prompt-cache example
 
-This example shows how to use the `ModelOptions` and namely prompt caching to increase token efficiency.
+This example shows how to use `ModelOption`, specifically prompt caching, to increase token efficiency.
 For more on Bedrock prompt caching, see the [Bedrock documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html).
 
 ## Prerequisites
