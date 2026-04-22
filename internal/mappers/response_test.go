@@ -44,6 +44,48 @@ func TestLLMResponseFromConverseOutput_text(t *testing.T) {
 	}
 }
 
+func TestTokenUsageToGenai_cachedTokens(t *testing.T) {
+	t.Parallel()
+	u := &types.TokenUsage{
+		InputTokens:          aws.Int32(100),
+		OutputTokens:         aws.Int32(50),
+		TotalTokens:          aws.Int32(150),
+		CacheReadInputTokens: aws.Int32(40),
+	}
+	meta := TokenUsageToGenai(u)
+	if meta == nil {
+		t.Fatal("expected non-nil metadata")
+	}
+	if meta.PromptTokenCount != 100 {
+		t.Errorf("PromptTokenCount: got %d, want 100", meta.PromptTokenCount)
+	}
+	if meta.CandidatesTokenCount != 50 {
+		t.Errorf("CandidatesTokenCount: got %d, want 50", meta.CandidatesTokenCount)
+	}
+	if meta.TotalTokenCount != 150 {
+		t.Errorf("TotalTokenCount: got %d, want 150", meta.TotalTokenCount)
+	}
+	if meta.CachedContentTokenCount != 40 {
+		t.Errorf("CachedContentTokenCount: got %d, want 40", meta.CachedContentTokenCount)
+	}
+}
+
+func TestTokenUsageToGenai_noCachedTokens(t *testing.T) {
+	t.Parallel()
+	u := &types.TokenUsage{
+		InputTokens:  aws.Int32(10),
+		OutputTokens: aws.Int32(5),
+		TotalTokens:  aws.Int32(15),
+	}
+	meta := TokenUsageToGenai(u)
+	if meta == nil {
+		t.Fatal("expected non-nil metadata")
+	}
+	if meta.CachedContentTokenCount != 0 {
+		t.Errorf("CachedContentTokenCount: got %d, want 0 when no cache read", meta.CachedContentTokenCount)
+	}
+}
+
 func TestStopReasonMapping(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

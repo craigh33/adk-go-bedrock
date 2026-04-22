@@ -39,7 +39,11 @@ func MaybeAppendUserContent(contents []*genai.Content) []*genai.Content {
 }
 
 // ConverseInputFromLLMRequest builds a Bedrock [bedrockruntime.ConverseInput] from an ADK request.
-func ConverseInputFromLLMRequest(modelID string, req *model.LLMRequest) (*bedrockruntime.ConverseInput, error) {
+func ConverseInputFromLLMRequest(
+	modelID string,
+	req *model.LLMRequest,
+	cacheSystemPrompt bool,
+) (*bedrockruntime.ConverseInput, error) {
 	if req == nil {
 		return nil, errors.New("nil LLMRequest")
 	}
@@ -50,9 +54,8 @@ func ConverseInputFromLLMRequest(modelID string, req *model.LLMRequest) (*bedroc
 
 	contents := MaybeAppendUserContent(append([]*genai.Content(nil), req.Contents...))
 
-	system := buildSystemBlocks(cfg)
 	sysFromContents, msgsFromContents := splitContents(contents)
-	system = append(system, sysFromContents...)
+	system := buildSystemBlocks(cfg, sysFromContents, cacheSystemPrompt)
 
 	messages, err := contentsToMessages(msgsFromContents)
 	if err != nil {
@@ -97,8 +100,9 @@ func ConverseInputFromLLMRequest(modelID string, req *model.LLMRequest) (*bedroc
 func ConverseStreamInputFromLLMRequest(
 	modelID string,
 	req *model.LLMRequest,
+	cacheSystemPrompt bool,
 ) (*bedrockruntime.ConverseStreamInput, error) {
-	conv, err := ConverseInputFromLLMRequest(modelID, req)
+	conv, err := ConverseInputFromLLMRequest(modelID, req, cacheSystemPrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -119,18 +123,25 @@ func ConverseStreamInputFromLLMRequest(
 	}, nil
 }
 
-func buildSystemBlocks(cfg *genai.GenerateContentConfig) []types.SystemContentBlock {
-	if cfg == nil || cfg.SystemInstruction == nil {
-		return nil
-	}
+func buildSystemBlocks(
+	cfg *genai.GenerateContentConfig,
+	extra []types.SystemContentBlock,
+	cacheSystemPrompt bool,
+) []types.SystemContentBlock {
 	var blocks []types.SystemContentBlock
-	for _, part := range cfg.SystemInstruction.Parts {
-		if part == nil {
-			continue
-		}
-		if part.Text != "" {
+	if cfg != nil && cfg.SystemInstruction != nil {
+		for _, part := range cfg.SystemInstruction.Parts {
+			if part == nil || part.Text == "" {
+				continue
+			}
 			blocks = append(blocks, &types.SystemContentBlockMemberText{Value: part.Text})
 		}
+	}
+	blocks = append(blocks, extra...)
+	if cacheSystemPrompt && len(blocks) > 0 {
+		blocks = append(blocks, &types.SystemContentBlockMemberCachePoint{
+			Value: types.CachePointBlock{Type: types.CachePointTypeDefault},
+		})
 	}
 	return blocks
 }

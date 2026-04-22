@@ -158,13 +158,14 @@ type Options struct {
 
 // Model implements [model.LLM] using Amazon Bedrock Runtime Converse / ConverseStream.
 type Model struct {
-	modelID string
-	api     RuntimeAPI
+	modelID           string
+	api               RuntimeAPI
+	cacheSystemPrompt bool
 }
 
 // New creates a [Model] using the default AWS configuration chain and a new
 // [bedrockruntime.Client]. ModelID is the Bedrock model ID or inference profile ARN.
-func New(ctx context.Context, modelID string, opts *Options) (*Model, error) {
+func New(ctx context.Context, modelID string, opts *Options, modelOpts ...ModelOption) (*Model, error) {
 	if strings.TrimSpace(modelID) == "" {
 		return nil, errors.New("modelID is required")
 	}
@@ -176,18 +177,22 @@ func New(ctx context.Context, modelID string, opts *Options) (*Model, error) {
 		cfg.Region = opts.Region
 	}
 	cli := bedrockruntime.NewFromConfig(cfg)
-	return NewWithAPI(modelID, NewRuntimeAPI(cli))
+	return NewWithAPI(modelID, NewRuntimeAPI(cli), modelOpts...)
 }
 
 // NewWithAPI wires a Bedrock runtime implementation.
-func NewWithAPI(modelID string, api RuntimeAPI) (*Model, error) {
+func NewWithAPI(modelID string, api RuntimeAPI, opts ...ModelOption) (*Model, error) {
 	if strings.TrimSpace(modelID) == "" {
 		return nil, errors.New("modelID is required")
 	}
 	if api == nil {
 		return nil, errors.New("nil RuntimeAPI")
 	}
-	return &Model{modelID: modelID, api: api}, nil
+	m := &Model{modelID: modelID, api: api}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m, nil
 }
 
 // Name returns the configured model identifier (see [New]).
@@ -227,7 +232,7 @@ func (m *Model) generateUnary(
 	req *model.LLMRequest,
 ) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		in, err := mappers.ConverseInputFromLLMRequest(modelID, req)
+		in, err := mappers.ConverseInputFromLLMRequest(modelID, req, m.cacheSystemPrompt)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -249,7 +254,7 @@ func (m *Model) generateStream(
 	req *model.LLMRequest,
 ) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		in, err := mappers.ConverseStreamInputFromLLMRequest(modelID, req)
+		in, err := mappers.ConverseStreamInputFromLLMRequest(modelID, req, m.cacheSystemPrompt)
 		if err != nil {
 			yield(nil, err)
 			return

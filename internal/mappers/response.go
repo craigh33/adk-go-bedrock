@@ -439,6 +439,12 @@ func TokenUsageToGenai(u *types.TokenUsage) *genai.GenerateContentResponseUsageM
 	if u.TotalTokens != nil {
 		meta.TotalTokenCount = *u.TotalTokens
 	}
+
+	if u.CacheReadInputTokens != nil {
+		// The ADK only supports returning how many cached tokens have been used (i.e. read)
+		// not how many have been written.
+		meta.CachedContentTokenCount = *u.CacheReadInputTokens
+	}
 	return meta
 }
 
