@@ -36,7 +36,7 @@ The root [`Makefile`](Makefile) defines these targets:
 | `make lint` | Run `golangci-lint run ./...` (see [.golangci.yaml](.golangci.yaml)) |
 | `make pre-commit-install` | Install pre-commit and `commit-msg` hooks (requires `pre-commit` on your `PATH`; see [Pre-commit](#pre-commit-required)) |
 
-`make pre-commit-install` delegates to `make pre-commit`, which may run `brew install pre-commit` on macOS if the binary is missing.
+`make pre-commit-install` delegates to `make pre-commit`. If `pre-commit` is missing, the current Makefile attempts to run `brew install pre-commit`, so automatic installation requires Homebrew to be available. On Linux, Windows, or macOS systems without Homebrew, install `pre-commit` manually before running `make pre-commit-install`.
 
 Run checks locally before pushing:
 
@@ -48,7 +48,7 @@ make build
 
 ## Pre-commit (required)
 
-Contributions **must** pass [pre-commit](https://pre-commit.com) checks. On pull requests, CI runs `pre-commit run --all-files` then `go test ./... -count=1` ([`.github/workflows/ci-build.yaml`](.github/workflows/ci-build.yaml)); run the same locally before opening or updating a PR.
+Contributions **must** pass [pre-commit](https://pre-commit.com) checks. Run `pre-commit run --all-files` locally before opening or updating a PR. On pull requests, CI currently runs `golangci-lint` and `go test ./... -count=1` as defined in [`.github/workflows/ci-build.yaml`](.github/workflows/ci-build.yaml).
 
 The `no-commit-to-branch` hook blocks commits when your checked-out branch is `main`; use a feature branch instead.
 

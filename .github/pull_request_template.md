@@ -23,7 +23,7 @@
 
 ## Checklist
 
-- [ ] I ran **`pre-commit run --all-files`** (or equivalent local hooks) and CI will pass pre-commit.
+- [ ] I ran **`pre-commit run --all-files`** (or equivalent local hooks).
 - [ ] My change follows existing patterns in this repository (naming, layout, error handling).
 - [ ] I updated docs when behavior, setup, or public API surface changed (if applicable).
 - [ ] I considered backwards compatibility for library consumers (if applicable).
