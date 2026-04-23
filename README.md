@@ -104,7 +104,7 @@ make -C examples/bedrock-stream run
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for Makefile targets, the fork-based workflow, required pre-commit setup, commit message conventions, and pull request guidelines. For new issues, use the [bug report](https://github.com/craigh33/adk-go-bedrock/issues/new?template=bug_report.yml) or [feature request](https://github.com/craigh33/adk-go-bedrock/issues/new?template=feature_request.yml) templates.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for Makefile targets, required pre-commit setup, commit message conventions, and pull request guidelines. For new issues, use the [bug report](https://github.com/craigh33/adk-go-bedrock/issues/new?template=bug_report.yml) or [feature request](https://github.com/craigh33/adk-go-bedrock/issues/new?template=feature_request.yml) templates.
 
 ## License
 

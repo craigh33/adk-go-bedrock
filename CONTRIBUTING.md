@@ -2,37 +2,6 @@
 
 Thank you for investing time in this project. Contributions are welcome through issues and pull requests.
 
-## Fork-based workflow
-
-This repository uses a **fork-based** contribution model: changes land via pull requests from forks, not from new branches pushed directly to this repo (unless you are a maintainer with explicit access).
-
-1. **Fork** this repository on GitHub (your account owns the fork).
-2. **Clone your fork** and add this repo as `upstream`:
-
-   ```bash
-   git clone https://github.com/YOUR_GITHUB_USERNAME/adk-go-bedrock.git
-   cd adk-go-bedrock
-   git remote add upstream https://github.com/craigh33/adk-go-bedrock.git
-   ```
-
-3. **Sync before you branch** (optional but recommended):
-
-   ```bash
-   git fetch upstream
-   git checkout main
-   git merge upstream/main
-   ```
-
-4. **Create a branch** from `main` for your change:
-
-   ```bash
-   git checkout -b feat/your-change
-   ```
-
-5. **Commit, push to your fork**, and open a **pull request** from your branch into `craigh33/adk-go-bedrock:main`.
-
-Maintainers cannot push fixes to your PR branch unless you grant [maintainer edits](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/allowing-changes-to-a-pull-request-branch-created-from-a-fork); enabling that speeds up small follow-ups.
-
 ## Before you start
 
 - Review [README.md](README.md) for scope, requirements, and usage.
@@ -42,7 +11,7 @@ Maintainers cannot push fixes to your PR branch unless you grant [maintainer edi
 ## Development setup
 
 - **Go**: match `go.mod` (see [`go.mod`](go.mod); currently Go 1.25+).
-- **Clone your fork** and work on a branch off `main` (see [Fork-based workflow](#fork-based-workflow)).
+- **Clone** the repository and work on a branch off `main`.
 
 ### Homebrew Bundle (macOS)
 
@@ -81,7 +50,7 @@ make build
 
 Contributions **must** pass [pre-commit](https://pre-commit.com) checks. On pull requests, CI runs `pre-commit run --all-files` then `go test ./... -count=1` ([`.github/workflows/ci-build.yaml`](.github/workflows/ci-build.yaml)); run the same locally before opening or updating a PR.
 
-The `no-commit-to-branch` hook blocks commits when your checked-out branch is `main`. Use a feature branch (see [Fork-based workflow](#fork-based-workflow)).
+The `no-commit-to-branch` hook blocks commits when your checked-out branch is `main`; use a feature branch instead.
 
 If you already ran **`brew bundle install`** on macOS, `pre-commit`, `golangci-lint`, and `gitleaks` are on your `PATH`. Otherwise install these tools manually:
 
@@ -119,7 +88,6 @@ If a hook fails, fix the findings or let the hook auto-fix what it can, then com
 
 ## Pull requests
 
-- Open PRs **from your fork** into `main` on this repository (see [Fork-based workflow](#fork-based-workflow)).
 - Fill out the PR template and describe **what** changed and **why** (not only the diff).
 - Add or update tests when behavior changes.
 - Update user-facing docs (for example `README.md` or example READMEs) when behavior or setup changes.
