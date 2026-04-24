@@ -23,7 +23,7 @@ brew bundle install
 
 That installs **`make`**, **`go`**, **`pre-commit`**, **`gitleaks`**, **`golangci-lint`**, and **`goreleaser`**. For typical contributions you only need the first five; **`goreleaser`** is for maintainers releasing binaries.
 
-If you do not use macOS or Homebrew, install the equivalent tools yourself (see [Pre-commit](#pre-commit-required) for what must be on your `PATH` for hooks versus `make lint`).
+If you do not use macOS or Homebrew, install the equivalent tools yourself (see [Pre-commit](#pre-commit-required)).
 
 ### Makefile
 
@@ -34,45 +34,28 @@ The root [`Makefile`](Makefile) defines these targets:
 | `make test` | Run unit tests (`go test ./... -count=1`) |
 | `make build` | Compile all packages (`go build ./...`) |
 | `make lint` | Run `golangci-lint run ./...` (see [.golangci.yaml](.golangci.yaml)) |
-| `make pre-commit-install` | Install pre-commit and `commit-msg` hooks (delegates to `make pre-commit`; if `pre-commit` is missing, the Makefile runs `brew install pre-commit`. Without Homebrew, install `pre-commit` yourself first—see [Pre-commit](#pre-commit-required)) |
+| `make pre-commit-install` | Install `pre-commit` and `commit-msg` hooks (same as `make pre-commit`; tries `brew install pre-commit` if the binary is missing) |
 
-`make pre-commit-install` is the same as `make pre-commit` for hook installation; the only difference is naming. If `pre-commit` is not on your `PATH`, the Makefile attempts `brew install pre-commit`, which requires Homebrew. On systems without Homebrew, install `pre-commit` manually (for example from [pre-commit.com](https://pre-commit.com/#install)) before running either target.
-
-Run checks locally before pushing:
+Before you push, run pre-commit plus the same Makefile targets CI uses ([workflow](.github/workflows/ci-build.yaml)):
 
 ```bash
-make test
-make lint
-make build
+pre-commit run --show-diff-on-failure --color always --all-files
+make test lint build
 ```
 
 ## Pre-commit (required)
 
-Contributions **must** pass [pre-commit](https://pre-commit.com) checks. Run `pre-commit run --all-files` locally before opening or updating a PR. On pull requests, CI currently runs `golangci-lint` and `go test ./... -count=1` as defined in [`.github/workflows/ci-build.yaml`](.github/workflows/ci-build.yaml).
-
-The `no-commit-to-branch` hook blocks commits when your checked-out branch is `main`; use a feature branch instead.
-
-If you already ran **`brew bundle install`** on macOS, `pre-commit`, `golangci-lint`, and `gitleaks` are on your `PATH`, which covers hooks and **`make lint`** in one step.
-
-**Pre-commit hooks** need **`pre-commit`** on your `PATH`, plus **`gitleaks`**: the [gitleaks hook](.pre-commit-config.yaml) is a local `language: system` hook, so it does not bundle a binary. The **`golangci-lint`** hook uses the [golangci-lint pre-commit repo](https://github.com/golangci/golangci-lint), which installs a pinned linter for you—you do **not** need a separate system `golangci-lint` install for `pre-commit run` or git hooks.
-
-**`make lint`** runs `golangci-lint` from your shell, so that target **does** need **`golangci-lint`** installed and on your `PATH` (unless you rely on the hook or CI only).
-
-Manual installs (when not using Homebrew Bundle):
-
-| Tool | Needed for | Install (examples) |
-|------|------------|-------------------|
-| [pre-commit](https://pre-commit.com) | Hooks | `brew install pre-commit` or [other install methods](https://pre-commit.com/#install) |
-| [gitleaks](https://github.com/gitleaks/gitleaks) | Hooks (local hook) | `brew install gitleaks` or [release binaries](https://github.com/gitleaks/gitleaks/releases) |
-| [golangci-lint](https://golangci-lint.run/welcome/install/) | `make lint` only (not required for the pre-commit golangci-lint hook) | `brew install golangci-lint` or upstream install docs |
-
-Wire hooks into your clone:
+Contributions **must** pass [pre-commit](https://pre-commit.com). Install hooks once:
 
 ```bash
 make pre-commit-install
 ```
 
-This installs hooks for both the `pre-commit` and `commit-msg` stages.
+Without Homebrew, install [`pre-commit`](https://pre-commit.com/#install) yourself first if `make pre-commit-install` cannot put it on your `PATH`.
+
+**`brew bundle install`** puts **`pre-commit`**, **`gitleaks`**, and **`golangci-lint`** on your **`PATH`**. **`gitleaks`** is required for the secrets hook. The golangci-lint hook manages its own binary; **`make lint`** still expects **`golangci-lint`** on your **`PATH`**.
+
+The `no-commit-to-branch` hook blocks commits on **`main`**—use a feature branch.
 
 | Hook | Stage | Description |
 |------|-------|-------------|
@@ -80,17 +63,11 @@ This installs hooks for both the `pre-commit` and `commit-msg` stages.
 | `end-of-file-fixer` | pre-commit | Ensures files end with a newline |
 | `check-yaml` | pre-commit | Validates YAML syntax |
 | `no-commit-to-branch` | pre-commit | Prevents direct commits to `main` |
-| `conventional-pre-commit` | commit-msg | Enforces [Conventional Commits](https://www.conventionalcommits.org/) (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`) |
-| `golangci-lint` | pre-commit | Runs configured lint on Go files (aligned with `make lint`) |
-| `gitleaks` | pre-commit | Scans for secrets |
+| `conventional-pre-commit` | commit-msg | [Conventional Commits](https://www.conventionalcommits.org/) (`feat`, `fix`, `docs`, …) |
+| `golangci-lint` | pre-commit | Go lint ([.golangci.yaml](.golangci.yaml)) |
+| `gitleaks` | pre-commit | Secret scan |
 
-To match CI before you push:
-
-```bash
-pre-commit run --show-diff-on-failure --color always --all-files
-```
-
-If a hook fails, fix the findings or let the hook auto-fix what it can, then commit again.
+If a hook fails, fix or auto-fix, then commit again.
 
 ## Pull requests
 
