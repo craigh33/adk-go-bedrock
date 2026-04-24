@@ -1,0 +1,53 @@
+name: Bug report
+description: Report incorrect behavior, crashes, or regressions
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please include enough detail to reproduce the problem.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong in one or two sentences?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Code snippet, CLI commands, model ID / region if relevant (redact secrets).
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Go version (`go version`), module version or commit, AWS region / model ID if relevant.
+      render: markdown
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or errors
+      description: Paste relevant output (redact credentials and tokens).
+      render: markdown
+    validations:
+      required: false

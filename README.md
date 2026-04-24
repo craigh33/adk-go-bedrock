@@ -10,6 +10,8 @@
 
 [Amazon Bedrock](https://aws.amazon.com/bedrock/) **Converse** / **ConverseStream** implementation of the [`model.LLM`](https://pkg.go.dev/google.golang.org/adk/model#LLM) interface for [adk-go](https://github.com/google/adk-go), so you can run agents on Claude, Nova, and other Bedrock chat models with the same ADK APIs you use for Gemini.
 
+**Other providers:** [adk-go-ollama](https://github.com/craigh33/adk-go-ollama) · [adk-go-kronk](https://github.com/craigh33/adk-go-kronk)
+
 ## Requirements
 
 - **Go** 1.25+ (aligned with `google.golang.org/adk`)
@@ -19,7 +21,6 @@
 - IAM permission to call inference, for example:
   - `bedrock:InvokeModel` for `Converse`
   - `bedrock:InvokeModelWithResponseStream` for `ConverseStream` (when ADK uses SSE streaming)
-- **[golangci-lint](https://golangci-lint.run/welcome/install/)** if you run `make lint` (uses [.golangci.yaml](.golangci.yaml))
 
 ## Install
 
@@ -28,47 +29,6 @@ go get github.com/craigh33/adk-go-bedrock
 ```
 
 Replace the module path with your fork or published path if you rename the module in `go.mod`.
-
-## Makefile
-
-| Target | Description |
-|--------|-------------|
-| `make test` | Run unit tests |
-| `make build` | Compile all packages |
-| `make lint` | Run `golangci-lint run ./...` |
-| `make pre-commit-install` | Install pre-commit hooks |
-
-## Contributing / Development
-
-### Pre-commit hooks
-
-This project uses [pre-commit](https://pre-commit.com) to enforce code quality and commit hygiene. The following tools must be available on your `PATH` before installing the hooks:
-
-| Tool | Purpose | Install |
-|------|---------|---------|
-| [pre-commit](https://pre-commit.com) | Hook framework | `brew install pre-commit` |
-| [golangci-lint](https://golangci-lint.run/welcome/install/) | Go linter (runs `make lint`) | `brew install golangci-lint` |
-| [gitleaks](https://github.com/gitleaks/gitleaks) | Secret / credential scanner | `brew install gitleaks` |
-
-Once the tools are installed, wire the hooks into your local clone:
-
-```bash
-make pre-commit-install
-```
-
-This installs hooks for both the `pre-commit` stage and the `commit-msg` stage.
-
-#### What the hooks do
-
-| Hook | Stage | Description |
-|------|-------|-------------|
-| `trailing-whitespace` | pre-commit | Strips trailing whitespace |
-| `end-of-file-fixer` | pre-commit | Ensures files end with a newline |
-| `check-yaml` | pre-commit | Validates YAML syntax |
-| `no-commit-to-branch` | pre-commit | Prevents direct commits to `main` |
-| `conventional-pre-commit` | commit-msg | Enforces [Conventional Commits](https://www.conventionalcommits.org/) message format (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`) |
-| `golangci-lint` | pre-commit | Runs `make lint` against all Go files |
-| `gitleaks` | pre-commit | Scans staged diff for secrets/credentials |
 
 ## Usage
 
@@ -144,7 +104,12 @@ make -C examples/bedrock-stream run
 - **Provider surface mismatch**: Bedrock-specific features that require pre-provisioned AWS resources or have no generic ADK equivalent are exposed back through ADK-friendly `CustomMetadata`, but cannot always be reconstructed into first-class `genai` request fields.
 - **Unsupported tool types**: Tool variants not supported by Bedrock or the target model cause a request-time error with details about which variants are unsupported.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for Makefile targets, required pre-commit setup, commit message conventions, and pull request guidelines. For new issues, use the [bug report](https://github.com/craigh33/adk-go-bedrock/issues/new?template=bug_report.yml) or [feature request](https://github.com/craigh33/adk-go-bedrock/issues/new?template=feature_request.yml) templates.
 
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
+
+[Contributing](CONTRIBUTING.md) · [Issues](https://github.com/craigh33/adk-go-bedrock/issues) · [Security](https://github.com/craigh33/adk-go-bedrock/security)
