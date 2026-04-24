@@ -72,6 +72,7 @@ If a hook fails, fix or auto-fix, then commit again.
 ## Pull requests
 
 - Fill out the PR template and describe **what** changed and **why** (not only the diff).
+- Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages (`feat`, `fix`, `docs`, …). The `commit-msg` hook enforces allowed types when hooks are installed; use the same style if you commit without hooks so history stays consistent.
 - Add or update tests when behavior changes.
 - Update user-facing docs (for example `README.md` or example READMEs) when behavior or setup changes.
 - Add or update examples when behavior or setup changes. For new features, a small runnable example demonstrates usage and makes regressions easier to debug.
