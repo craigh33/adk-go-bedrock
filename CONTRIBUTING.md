@@ -74,6 +74,7 @@ If a hook fails, fix or auto-fix, then commit again.
 - Fill out the PR template and describe **what** changed and **why** (not only the diff).
 - Add or update tests when behavior changes.
 - Update user-facing docs (for example `README.md` or example READMEs) when behavior or setup changes.
+- Add or update examples when behavior or setup changes. For new features, a small runnable example demonstrates usage and makes regressions easier to debug.
 - Keep commits reasonably clean; maintainers may squash on merge when that helps history.
 
 ## Security
