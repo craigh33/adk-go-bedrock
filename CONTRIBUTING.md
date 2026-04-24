@@ -23,7 +23,7 @@ brew bundle install
 
 That installs **`make`**, **`go`**, **`pre-commit`**, **`gitleaks`**, **`golangci-lint`**, and **`goreleaser`**. For typical contributions you only need the first five; **`goreleaser`** is for maintainers releasing binaries.
 
-If you do not use macOS or Homebrew, install the equivalent tools yourself (see [Pre-commit](#pre-commit-required) for what pre-commit expects on your `PATH`).
+If you do not use macOS or Homebrew, install the equivalent tools yourself (see [Pre-commit](#pre-commit-required) for what must be on your `PATH` for hooks versus `make lint`).
 
 ### Makefile
 
@@ -34,9 +34,9 @@ The root [`Makefile`](Makefile) defines these targets:
 | `make test` | Run unit tests (`go test ./... -count=1`) |
 | `make build` | Compile all packages (`go build ./...`) |
 | `make lint` | Run `golangci-lint run ./...` (see [.golangci.yaml](.golangci.yaml)) |
-| `make pre-commit-install` | Install pre-commit and `commit-msg` hooks (requires `pre-commit` on your `PATH`; see [Pre-commit](#pre-commit-required)) |
+| `make pre-commit-install` | Install pre-commit and `commit-msg` hooks (delegates to `make pre-commit`; if `pre-commit` is missing, the Makefile runs `brew install pre-commit`. Without Homebrew, install `pre-commit` yourself first—see [Pre-commit](#pre-commit-required)) |
 
-`make pre-commit-install` delegates to `make pre-commit`. If `pre-commit` is missing, the current Makefile attempts to run `brew install pre-commit`, so automatic installation requires Homebrew to be available. On Linux, Windows, or macOS systems without Homebrew, install `pre-commit` manually before running `make pre-commit-install`.
+`make pre-commit-install` is the same as `make pre-commit` for hook installation; the only difference is naming. If `pre-commit` is not on your `PATH`, the Makefile attempts `brew install pre-commit`, which requires Homebrew. On systems without Homebrew, install `pre-commit` manually (for example from [pre-commit.com](https://pre-commit.com/#install)) before running either target.
 
 Run checks locally before pushing:
 
@@ -52,13 +52,19 @@ Contributions **must** pass [pre-commit](https://pre-commit.com) checks. Run `pr
 
 The `no-commit-to-branch` hook blocks commits when your checked-out branch is `main`; use a feature branch instead.
 
-If you already ran **`brew bundle install`** on macOS, `pre-commit`, `golangci-lint`, and `gitleaks` are on your `PATH`. Otherwise install these tools manually:
+If you already ran **`brew bundle install`** on macOS, `pre-commit`, `golangci-lint`, and `gitleaks` are on your `PATH`, which covers hooks and **`make lint`** in one step.
 
-| Tool | Purpose | Install |
-|------|---------|---------|
-| [pre-commit](https://pre-commit.com) | Hook framework | `brew install pre-commit` |
-| [golangci-lint](https://golangci-lint.run/welcome/install/) | Go linter (`make lint` mirrors the hook) | `brew install golangci-lint` |
-| [gitleaks](https://github.com/gitleaks/gitleaks) | Secret / credential scanner (also invoked by pre-commit) | `brew install gitleaks` |
+**Pre-commit hooks** need **`pre-commit`** on your `PATH`, plus **`gitleaks`**: the [gitleaks hook](.pre-commit-config.yaml) is a local `language: system` hook, so it does not bundle a binary. The **`golangci-lint`** hook uses the [golangci-lint pre-commit repo](https://github.com/golangci/golangci-lint), which installs a pinned linter for you—you do **not** need a separate system `golangci-lint` install for `pre-commit run` or git hooks.
+
+**`make lint`** runs `golangci-lint` from your shell, so that target **does** need **`golangci-lint`** installed and on your `PATH` (unless you rely on the hook or CI only).
+
+Manual installs (when not using Homebrew Bundle):
+
+| Tool | Needed for | Install (examples) |
+|------|------------|-------------------|
+| [pre-commit](https://pre-commit.com) | Hooks | `brew install pre-commit` or [other install methods](https://pre-commit.com/#install) |
+| [gitleaks](https://github.com/gitleaks/gitleaks) | Hooks (local hook) | `brew install gitleaks` or [release binaries](https://github.com/gitleaks/gitleaks/releases) |
+| [golangci-lint](https://golangci-lint.run/welcome/install/) | `make lint` only (not required for the pre-commit golangci-lint hook) | `brew install golangci-lint` or upstream install docs |
 
 Wire hooks into your clone:
 
