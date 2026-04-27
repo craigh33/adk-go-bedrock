@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest an idea or improvement for this library
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem you are solving and how this project could help.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What is hard, missing, or inconsistent today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: APIs, behavior, configuration, or documentation you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other ways to solve this, including workarounds you use today.
+    validations:
+      required: false
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope / compatibility notes
+      description: Bedrock models or regions involved, breaking-change concerns, links to AWS or ADK docs if helpful.
+    validations:
+      required: false
