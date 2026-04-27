@@ -10,6 +10,8 @@ import (
 	brdoc "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	"google.golang.org/genai"
+
+	"github.com/craigh33/adk-go-bedrock/tools/novagrounding"
 )
 
 const unsupportedToolVariantCount = 11
@@ -19,12 +21,13 @@ func toolConfigurationFromGenai(cfg *genai.GenerateContentConfig) (*types.ToolCo
 		return nil, nil //nolint:nilnil // optional ToolConfiguration: nil means no tools
 	}
 	var specs []types.Tool
+	var novaGroundingAdded bool
 	for _, t := range cfg.Tools {
 		if t == nil {
 			continue
 		}
 		var err error
-		specs, err = appendFunctionDeclarationSpecs(specs, t)
+		specs, novaGroundingAdded, err = appendFunctionDeclarationSpecs(specs, t, novaGroundingAdded)
 		if err != nil {
 			return nil, err
 		}
@@ -41,14 +44,27 @@ func toolConfigurationFromGenai(cfg *genai.GenerateContentConfig) (*types.ToolCo
 	return &types.ToolConfiguration{Tools: specs}, nil
 }
 
-func appendFunctionDeclarationSpecs(specs []types.Tool, t *genai.Tool) ([]types.Tool, error) {
+func appendFunctionDeclarationSpecs(
+	specs []types.Tool,
+	t *genai.Tool,
+	novaGroundingAdded bool,
+) ([]types.Tool, bool, error) {
 	for _, fd := range t.FunctionDeclarations {
 		if fd == nil || fd.Name == "" {
 			continue
 		}
+		if fd.Name == novagrounding.SentinelFunctionDeclarationName {
+			if !novaGroundingAdded {
+				specs = append(specs, &types.ToolMemberSystemTool{
+					Value: types.SystemTool{Name: aws.String(novagrounding.SystemToolName)},
+				})
+				novaGroundingAdded = true
+			}
+			continue
+		}
 		inputSchema, err := functionParametersToToolInputSchema(fd)
 		if err != nil {
-			return nil, fmt.Errorf("tool %q: %w", fd.Name, err)
+			return specs, novaGroundingAdded, fmt.Errorf("tool %q: %w", fd.Name, err)
 		}
 		specs = append(specs, &types.ToolMemberToolSpec{
 			Value: types.ToolSpecification{
@@ -58,7 +74,7 @@ func appendFunctionDeclarationSpecs(specs []types.Tool, t *genai.Tool) ([]types.
 			},
 		})
 	}
-	return specs, nil
+	return specs, novaGroundingAdded, nil
 }
 
 func unsupportedToolVariantsFromGenai(t *genai.Tool) []string {

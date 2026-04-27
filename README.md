@@ -62,6 +62,7 @@ Each example has its own `README.md` and `Makefile`:
 - [`examples/bedrock-mcp`](examples/bedrock-mcp): MCP support via ADK's `mcptoolset` with an in-memory MCP server ([MCP support](#mcp-support)).
 - [`examples/bedrock-tool-calling`](examples/bedrock-tool-calling): tool-calling agent example with function declarations.
 - [`examples/bedrock-image-gen`](examples/bedrock-image-gen): ADK runner with the [`imagegenerator`](tools/imagegenerator) tool—Nova Canvas image generation via Bedrock `InvokeModel` and artifact storage.
+- [`examples/bedrock-nova-grounding`](examples/bedrock-nova-grounding): Nova Web Grounding via [`tools/novagrounding`](tools/novagrounding); prints answers and `bedrock_citations` metadata (see [Nova Web Grounding](#nova-web-grounding)).
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
 - [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
 - [`examples/bedrock-multimodal`](examples/bedrock-multimodal): comprehensive image analysis, document processing, tool calling with rich media, and vision-based reasoning.
@@ -90,12 +91,52 @@ make -C examples/bedrock-stream run
 - **System instruction**: `GenerateContentConfig.SystemInstruction` is sent as Bedrock system content.
 - **Tools**: the mapper converts `GenerateContentConfig.Tools` entries:
   - `FunctionDeclarations` → Bedrock `ToolSpecification` (custom function tools)
+  - **Nova Web Grounding**: the reserved sentinel from [`tools/novagrounding`](tools/novagrounding) maps to Bedrock’s system tool `nova_grounding` (not a custom `ToolSpecification`; see [Amazon Nova Web Grounding](https://docs.aws.amazon.com/nova/latest/userguide/grounding.html))
   - Non-function ADK variants (Google Search, Code Execution, Retrieval, MCP Servers, Computer Use, File Search, Google Maps, URL Context, etc.) are rejected early with a clear provider error because they are not currently mapped to Bedrock Converse
   - MCP: use ADK `mcptoolset` so MCP tools become function declarations before they reach this provider ([MCP support](#mcp-support)). Other `genai.Tool` variants (Google Search, code execution, etc.) are not supported here.
 - **Multimodal parts**: ADK `Part` text, thoughts/reasoning, inline/file-backed images, audio, video, and documents are mapped on the Bedrock-compatible subset. Rich user media is sent as Bedrock content blocks; assistant reasoning is preserved as Bedrock reasoning content.
 - **Function responses**: JSON tool output still maps as before, and image/video/document `FunctionResponse.Parts` are preserved through Bedrock tool-result content blocks.
-- **Streaming**: When ADK uses SSE streaming, the provider calls `ConverseStream`, emits partial text responses, and buffers streamed tool calls, reasoning blocks, image blocks, usage, and guardrail metadata into the final `TurnComplete` response.
+- **Streaming**: When ADK uses SSE streaming, the provider calls `ConverseStream`, emits partial text responses, and buffers streamed tool calls, reasoning blocks, image blocks, citation deltas (for grounded responses), usage, and guardrail metadata into the final `TurnComplete` response.
 - **Guardrails / safety results**: Bedrock guardrail stop reasons and trace metadata are mapped back into ADK `FinishReason` and `CustomMetadata`, including synthesized `safety_ratings` derived from Bedrock guardrail assessments when available.
+
+## Nova Web Grounding
+
+Enable real-time web search for supported Nova models by adding [`novagrounding.Tool()`](tools/novagrounding/tool.go) to `GenerateContentConfig.Tools`. Use a **US** Bedrock region and an inference profile that supports Web Grounding (for example `us.amazon.nova-premier-v1:0`; see AWS docs for current model IDs). You may need `bedrock:InvokeTool` on the `amazon.nova_grounding` system tool resource if your IAM policy is not broad.
+
+```go
+import (
+    "context"
+
+    "google.golang.org/adk/model"
+    "google.golang.org/genai"
+
+    "github.com/craigh33/adk-go-bedrock/tools/novagrounding"
+)
+
+func groundedAsk(ctx context.Context, llm model.LLM, question string) (*model.LLMResponse, error) {
+    req := &model.LLMRequest{
+        Contents: []*genai.Content{
+            genai.NewContentFromText(question, genai.RoleUser),
+        },
+        Config: &genai.GenerateContentConfig{
+            Tools:           []*genai.Tool{novagrounding.Tool()},
+            MaxOutputTokens: 1024,
+        },
+    }
+    var last *model.LLMResponse
+    for resp, e := range llm.GenerateContent(ctx, req, false) {
+        if e != nil {
+            return nil, e
+        }
+        last = resp
+    }
+    return last, nil
+}
+```
+
+Grounded replies include citation payloads under `genai.Part.PartMetadata` with key `"bedrock_citations"` (each entry may include `location.url`, `location.domain`, etc.). Retain and surface those citations in user-facing output per AWS guidance.
+
+A runnable CLI lives at [`examples/bedrock-nova-grounding`](examples/bedrock-nova-grounding).
 
 ## Limitations
 

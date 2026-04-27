@@ -298,6 +298,7 @@ type streamState struct {
 	toolsBySlot       map[int32]*streamToolCall
 	imagesBySlot      map[int32]*streamImageBlock
 	reasonBySlot      map[int32]*streamReasoningBlock
+	citationsBySlot   map[int32][]map[string]any
 	slotOrder         []int32
 	lastUsage         *genai.GenerateContentResponseUsageMetadata
 	customMetadata    map[string]any
@@ -437,6 +438,17 @@ func (s *streamState) onContentBlockDelta(ev *types.ContentBlockDeltaEvent) (*mo
 			}
 		}
 		return nil, nil //nolint:nilnil // Tool input deltas are buffered until final response.
+	case *types.ContentBlockDeltaMemberCitation:
+		idx := *ev.ContentBlockIndex
+		s.rememberSlot(idx)
+		m := mappers.CitationsDeltaToMap(d.Value)
+		if len(m) > 0 {
+			if s.citationsBySlot == nil {
+				s.citationsBySlot = make(map[int32][]map[string]any)
+			}
+			s.citationsBySlot[idx] = append(s.citationsBySlot[idx], m)
+		}
+		return nil, nil //nolint:nilnil // Citation deltas are buffered until final response.
 	default:
 		return nil, nil //nolint:nilnil // Unsupported delta type is intentionally ignored.
 	}
@@ -531,6 +543,21 @@ func (s *streamState) finalParts() ([]*genai.Part, []string) { //nolint:gocognit
 		// Emit text for this slot
 		if text := s.textBySlot[idx]; text != nil && text.Text.Len() > 0 {
 			parts = append(parts, &genai.Part{Text: text.Text.String()})
+		}
+
+		// Emit streamed citation deltas accumulated for this slot (e.g. Nova Web Grounding).
+		if s.citationsBySlot != nil {
+			if cites := s.citationsBySlot[idx]; len(cites) > 0 {
+				out := make([]any, len(cites))
+				for i, c := range cites {
+					out[i] = c
+				}
+				parts = append(parts, &genai.Part{
+					PartMetadata: map[string]any{
+						mappers.PartMetadataKeyBedrockCitations: out,
+					},
+				})
+			}
 		}
 
 		// Emit reasoning for this slot

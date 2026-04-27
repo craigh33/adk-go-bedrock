@@ -103,6 +103,11 @@ func contentBlockToPart(b types.ContentBlock) (*genai.Part, error) { //nolint:go
 			return nil, errSkipPart
 		}
 		return &genai.Part{Text: v.Value}, nil
+	case *types.ContentBlockMemberCitationsContent:
+		if v == nil {
+			return nil, errSkipPart
+		}
+		return citationsContentBlockToPart(&v.Value)
 	case *types.ContentBlockMemberToolUse:
 		if v == nil {
 			return nil, errSkipPart
