@@ -48,9 +48,9 @@ func run() error {
 	modelID := os.Getenv("BEDROCK_MODEL_ID")
 	if modelID == "" {
 		log.Println(
-			"BEDROCK_MODEL_ID unset; using us.amazon.nova-premier-v1:0 (Nova Web Grounding requires a supported US inference profile)",
+			"BEDROCK_MODEL_ID unset; using us.amazon.nova-2-lite-v1:0",
 		)
-		modelID = "us.amazon.nova-premier-v1:0"
+		modelID = "us.amazon.nova-2-lite-v1:0"
 	}
 
 	prompt := "What is one timely news headline about renewable energy? Cite sources briefly."

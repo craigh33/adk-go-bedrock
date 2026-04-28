@@ -101,7 +101,7 @@ make -C examples/bedrock-stream run
 
 ## Nova Web Grounding
 
-Enable real-time web search for supported Nova models by adding [`novagrounding.Tool()`](tools/novagrounding/tool.go) to `GenerateContentConfig.Tools`. This tool is Bedrock-specific. Use a **US** Bedrock region and an inference profile that supports Web Grounding (for example `us.amazon.nova-premier-v1:0`; see AWS docs for current model IDs). For current regional availability, check [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/).
+Enable real-time web search for supported Nova models by adding [`novagrounding.Tool()`](tools/novagrounding/tool.go) to `GenerateContentConfig.Tools`. This tool is Bedrock-specific. Use an applicable Bedrock region and an inference profile that supports Web Grounding (for example `us.amazon.nova-2-lite-v1:0`; see AWS docs for current model IDs). For current regional availability, check [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/).
 Converse request payloads use SystemTool name `nova_grounding`, while IAM policies for `bedrock:InvokeTool` may reference the resource identifier `amazon.nova_grounding`.
 
 ```go
