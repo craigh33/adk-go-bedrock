@@ -3,6 +3,7 @@ package videogenerator
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -201,6 +202,51 @@ func TestProcessRequest_PacksDeclaration(t *testing.T) {
 	}
 }
 
+func TestProcessRequest_DuplicateError(t *testing.T) {
+	t.Parallel()
+	tl, _ := New(Config{API: &fakeAsyncAPI{}, S3OutputURI: "s3://b"})
+	gt := tl.(*videoGenTool)
+	req := &model.LLMRequest{}
+	_ = gt.ProcessRequest(newFakeToolCtx(&fakeArtifacts{}), req)
+	err := gt.ProcessRequest(newFakeToolCtx(&fakeArtifacts{}), req)
+	if err == nil {
+		t.Fatal("expected duplicate tool error")
+	}
+}
+
+func TestProviderForArgs_NonIntegerFloat(t *testing.T) {
+	t.Parallel()
+	base := NewReelProvider("", 99)
+	_, err := providerForArgs(base, map[string]any{"seed": 1.2})
+	if err == nil {
+		t.Fatal("expected error for non-integer float seed")
+	}
+}
+
+func TestProviderForArgs_IntegerFloat(t *testing.T) {
+	t.Parallel()
+	base := NewReelProvider("", 99)
+	p, err := providerForArgs(base, map[string]any{"seed": float64(1.0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Seed != 1 {
+		t.Fatalf("Seed = %d, want 1", p.Seed)
+	}
+}
+
+func TestProviderForArgs_JSONNumber(t *testing.T) {
+	t.Parallel()
+	base := NewReelProvider("", 99)
+	p, err := providerForArgs(base, map[string]any{"seed": json.Number("42")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Seed != 42 {
+		t.Fatalf("Seed = %d, want 42", p.Seed)
+	}
+}
+
 func TestRun_Success_WithS3Download(t *testing.T) {
 	t.Parallel()
 	arn := aws.String("arn:aws:bedrock:us-east-1:123:async-invoke/job1")
@@ -297,6 +343,44 @@ func TestRun_EmptyPrompt(t *testing.T) {
 	_, err := gt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{"prompt": ""})
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestRun_Failed_EmptyFailureMessage(t *testing.T) {
+	t.Parallel()
+	arn := "arn:aws:bedrock:us-east-1:123:async-invoke/failed-job"
+	api := &fakeAsyncAPI{
+		startOut: &bedrockruntime.StartAsyncInvokeOutput{
+			InvocationArn: aws.String(arn),
+		},
+		getOut: []*bedrockruntime.GetAsyncInvokeOutput{
+			{
+				InvocationArn:  aws.String(arn),
+				Status:         types.AsyncInvokeStatusFailed,
+				FailureMessage: nil,
+			},
+		},
+	}
+	tl, err := New(Config{
+		API:          api,
+		S3OutputURI:  "s3://b",
+		PollInterval: time.Millisecond,
+		MaxWait:      30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gt := tl.(*videoGenTool)
+	_, err = gt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{"prompt": "a prompt"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), arn) {
+		t.Errorf("error should mention invocation ARN: %v", err)
+	}
+	if strings.TrimSpace(strings.TrimPrefix(err.Error(), "video generation failed")) == "" ||
+		strings.HasSuffix(err.Error(), ": ") {
+		t.Errorf("unexpected empty or trailing-colon message: %q", err.Error())
 	}
 }
 

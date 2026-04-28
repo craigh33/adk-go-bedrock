@@ -2,9 +2,11 @@ package videogenerator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"time"
 
@@ -250,7 +252,16 @@ func providerForArgs(base *ReelProvider, m map[string]any) (*ReelProvider, error
 	if seedRaw, ok := m["seed"]; ok && seedRaw != nil {
 		switch v := seedRaw.(type) {
 		case float64:
+			if math.Trunc(v) != v {
+				return nil, fmt.Errorf("seed: must be an integer, got %v", seedRaw)
+			}
 			prov = NewReelProvider(base.ModelID(), int64(v))
+		case json.Number:
+			n, err := v.Int64()
+			if err != nil {
+				return nil, fmt.Errorf("seed: %w", err)
+			}
+			prov = NewReelProvider(base.ModelID(), n)
 		case int64:
 			prov = NewReelProvider(base.ModelID(), v)
 		case int:
@@ -355,6 +366,13 @@ func (t *videoGenTool) Run(ctx tool.Context, args any) (map[string]any, error) {
 		if final.FailureMessage != nil {
 			msg = *final.FailureMessage
 		}
+		msg = strings.TrimSpace(msg)
+		if msg == "" {
+			return nil, fmt.Errorf(
+				"video generation failed (no failure message from Bedrock; invocation %s)",
+				invocationArn,
+			)
+		}
 		return nil, fmt.Errorf("video generation failed: %s", msg)
 	}
 
@@ -379,6 +397,8 @@ func (t *videoGenTool) pollUntilTerminal(
 	ctx context.Context,
 	invocationArn string,
 ) (*bedrockruntime.GetAsyncInvokeOutput, error) {
+	ticker := time.NewTicker(t.pollInterval)
+	defer ticker.Stop()
 	deadline := time.Now().Add(t.maxWait)
 	for {
 		out, err := t.api.GetAsyncInvoke(ctx, &bedrockruntime.GetAsyncInvokeInput{
@@ -397,7 +417,7 @@ func (t *videoGenTool) pollUntilTerminal(
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(t.pollInterval):
+			case <-ticker.C:
 			}
 		}
 	}

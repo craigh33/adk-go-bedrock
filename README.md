@@ -55,16 +55,18 @@ The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conver
 
 ## Examples
 
-Each example has its own `README.md` and `Makefile`:
+These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat runners, tools, streaming, multimodal and document flows, guardrails, and provider-specific options. Each example has its own `README.md` and `Makefile`:
 
 - [`examples/bedrock-a2a`](examples/bedrock-a2a): A2A remote-agent example backed by Bedrock.
 - [`examples/bedrock-chat`](examples/bedrock-chat): runner-based chat example.
 - [`examples/bedrock-mcp`](examples/bedrock-mcp): MCP support via ADK's `mcptoolset` with an in-memory MCP server ([MCP support](#mcp-support)).
 - [`examples/bedrock-tool-calling`](examples/bedrock-tool-calling): tool-calling agent example with function declarations.
 - [`examples/bedrock-image-gen`](examples/bedrock-image-gen): ADK runner with the [`imagegenerator`](tools/imagegenerator) tool—Nova Canvas image generation via Bedrock `InvokeModel` and artifact storage.
+- [`examples/bedrock-video-gen`](examples/bedrock-video-gen): ADK runner with the [`videogenerator`](tools/videogenerator) tool—Nova Reel text-to-video via Bedrock async invoke, S3 output, and optional MP4 download into artifacts.
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
 - [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
 - [`examples/bedrock-multimodal`](examples/bedrock-multimodal): comprehensive image analysis, document processing, tool calling with rich media, and vision-based reasoning.
+- [`examples/bedrock-prompt-cache`](examples/bedrock-prompt-cache): `ModelOption` / Bedrock prompt caching for fewer repeated tokens (see AWS prompt caching docs).
 - [`examples/bedrock-document`](examples/bedrock-document): CLI to debug document uploads (`-dry-run` mapper check, optional `-combined` / `-stream`).
 - [`examples/bedrock-guardrails`](examples/bedrock-guardrails): safety assessments, content filtering, and guardrail metadata handling.
 - [`examples/bedrock-system-instruction`](examples/bedrock-system-instruction): system instructions for role definition, output formatting, and behavioral control.
