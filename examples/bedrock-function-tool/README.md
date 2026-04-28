@@ -4,7 +4,7 @@ This example runs an ADK `llmagent` with a `functiontool`-defined tool against t
 
 ## Prerequisites
 
-- `BEDROCK_MODEL_ID` set to a Bedrock model ID or inference profile ARN (must support tool use)
+- Optional: `BEDROCK_MODEL_ID` may be set to a Bedrock model ID or inference profile ARN that supports tool use; if unset, the example falls back to its default model ID
 - AWS credentials configured via the default chain
 - AWS region configured (for example `AWS_REGION=us-east-1`)
 
