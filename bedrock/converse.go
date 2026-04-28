@@ -540,24 +540,40 @@ func (s *streamState) finalParts() ([]*genai.Part, []string) { //nolint:gocognit
 
 	// Assemble all parts in strict slot order to preserve Bedrock block ordering
 	for _, idx := range s.sortedSlotOrder() {
-		// Emit text for this slot
+		var cites []map[string]any
+		if s.citationsBySlot != nil {
+			cites = s.citationsBySlot[idx]
+		}
+		hasText := false
+		var textStr string
 		if text := s.textBySlot[idx]; text != nil && text.Text.Len() > 0 {
-			parts = append(parts, &genai.Part{Text: text.Text.String()})
+			hasText = true
+			textStr = text.Text.String()
 		}
 
-		// Emit streamed citation deltas accumulated for this slot (e.g. Nova Web Grounding).
-		if s.citationsBySlot != nil {
-			if cites := s.citationsBySlot[idx]; len(cites) > 0 {
+		// Text + citations on one part when both exist (matches unary CitationsContentBlock mapping).
+		if hasText {
+			part := &genai.Part{Text: textStr}
+			if len(cites) > 0 {
 				out := make([]any, len(cites))
 				for i, c := range cites {
 					out[i] = c
 				}
-				parts = append(parts, &genai.Part{
-					PartMetadata: map[string]any{
-						mappers.PartMetadataKeyBedrockCitations: out,
-					},
-				})
+				part.PartMetadata = map[string]any{
+					mappers.PartMetadataKeyBedrockCitations: out,
+				}
 			}
+			parts = append(parts, part)
+		} else if len(cites) > 0 {
+			out := make([]any, len(cites))
+			for i, c := range cites {
+				out[i] = c
+			}
+			parts = append(parts, &genai.Part{
+				PartMetadata: map[string]any{
+					mappers.PartMetadataKeyBedrockCitations: out,
+				},
+			})
 		}
 
 		// Emit reasoning for this slot

@@ -164,6 +164,48 @@ func TestMessageToGenaiContent_citationsContent(t *testing.T) {
 	}
 }
 
+func TestMessageToGenaiContent_citationsSkipsEmptyCitationRows(t *testing.T) {
+	t.Parallel()
+	url := "https://example.com/article"
+	msg := &types.Message{
+		Role: types.ConversationRoleAssistant,
+		Content: []types.ContentBlock{
+			&types.ContentBlockMemberCitationsContent{
+				Value: types.CitationsContentBlock{
+					Content: []types.CitationGeneratedContent{
+						&types.CitationGeneratedContentMemberText{Value: "Grounded text."},
+					},
+					Citations: []types.Citation{
+						{}, // no fields populated — should not appear in bedrock_citations
+						{
+							Location: &types.CitationLocationMemberWeb{
+								Value: types.WebLocation{
+									Url: aws.String(url),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	c, err := MessageToGenaiContent(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Parts) != 1 {
+		t.Fatalf("expected one part, got %d", len(c.Parts))
+	}
+	raw, ok := c.Parts[0].PartMetadata[PartMetadataKeyBedrockCitations].([]any)
+	if !ok || len(raw) != 1 {
+		t.Fatalf("expected one citation row, got %+v", c.Parts[0].PartMetadata)
+	}
+	loc, ok := raw[0].(map[string]any)["location"].(map[string]any)
+	if !ok || loc["url"] != url {
+		t.Fatalf("citation location: %+v", raw[0])
+	}
+}
+
 func TestCitationsDeltaToMap_webLocation(t *testing.T) {
 	t.Parallel()
 	d := types.CitationsDelta{
@@ -182,6 +224,23 @@ func TestCitationsDeltaToMap_webLocation(t *testing.T) {
 	loc, ok := m["location"].(map[string]any)
 	if !ok || loc["url"] != "https://a.test/x" {
 		t.Fatalf("location: %+v", m)
+	}
+}
+
+func TestCitationsDeltaToMap_sourceContentSlices(t *testing.T) {
+	t.Parallel()
+	a := "chunk-a"
+	b := "chunk-b"
+	d := types.CitationsDelta{
+		SourceContent: []types.CitationSourceContentDelta{
+			{Text: &a},
+			{Text: &b},
+		},
+	}
+	m := CitationsDeltaToMap(d)
+	raw, ok := m["sourceContent"].([]string)
+	if !ok || len(raw) != 2 || raw[0] != a || raw[1] != b {
+		t.Fatalf("sourceContent: want []string{%q,%q}, got %+v", a, b, m["sourceContent"])
 	}
 }
 

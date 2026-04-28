@@ -220,6 +220,74 @@ func TestConverse_GenerateContent_streamCitationDelta(t *testing.T) {
 	}
 }
 
+func TestConverse_GenerateContent_streamTextAndCitationSameSlot(t *testing.T) {
+	t.Parallel()
+	idx := int32(0)
+	ch := make(chan types.ConverseStreamOutput, 8)
+	ch <- &types.ConverseStreamOutputMemberContentBlockDelta{
+		Value: types.ContentBlockDeltaEvent{
+			ContentBlockIndex: &idx,
+			Delta:             &types.ContentBlockDeltaMemberText{Value: "Hello"},
+		},
+	}
+	ch <- &types.ConverseStreamOutputMemberContentBlockDelta{
+		Value: types.ContentBlockDeltaEvent{
+			ContentBlockIndex: &idx,
+			Delta: &types.ContentBlockDeltaMemberCitation{
+				Value: types.CitationsDelta{
+					Title: aws.String("Story"),
+					Location: &types.CitationLocationMemberWeb{
+						Value: types.WebLocation{
+							Url:    aws.String("https://news.example/item"),
+							Domain: aws.String("news.example"),
+						},
+					},
+				},
+			},
+		},
+	}
+	ch <- &types.ConverseStreamOutputMemberMessageStop{
+		Value: types.MessageStopEvent{StopReason: types.StopReasonEndTurn},
+	}
+	close(ch)
+
+	api := &fakeAPI{stream: &fakeStream{ch: ch}}
+	m, err := NewWithAPI("mid", api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("hi", "user")},
+		Config:   &genai.GenerateContentConfig{},
+	}
+
+	var final *model.LLMResponse
+	for r, err := range m.GenerateContent(context.Background(), req, true) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !r.Partial {
+			final = r
+		}
+	}
+	if final == nil || final.Content == nil || len(final.Content.Parts) != 1 {
+		t.Fatalf("final: %+v", final)
+	}
+	p := final.Content.Parts[0]
+	if p.Text != "Hello" {
+		t.Fatalf("text: got %q", p.Text)
+	}
+	meta := p.PartMetadata
+	raw, ok := meta[mappers.PartMetadataKeyBedrockCitations].([]any)
+	if !ok || len(raw) != 1 {
+		t.Fatalf("citations metadata: %+v", meta)
+	}
+	cm, ok := raw[0].(map[string]any)
+	if !ok || cm["title"] != "Story" {
+		t.Fatalf("citation row: %+v", raw[0])
+	}
+}
+
 func TestConverse_GenerateContent_streamToolCalls_parseAndRawArgs(t *testing.T) {
 	t.Parallel()
 

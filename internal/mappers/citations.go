@@ -26,7 +26,11 @@ func citationsContentBlockToPart(b *types.CitationsContentBlock) (*genai.Part, e
 	}
 	cites := make([]any, 0, len(b.Citations))
 	for i := range b.Citations {
-		cites = append(cites, citationToMap(&b.Citations[i]))
+		row := citationToMap(&b.Citations[i])
+		if len(row) == 0 {
+			continue
+		}
+		cites = append(cites, row)
 	}
 	if len(cites) == 0 {
 		if text.String() != "" {
@@ -114,14 +118,14 @@ func CitationsDeltaToMap(d types.CitationsDelta) map[string]any {
 	if loc := citationLocationToMap(d.Location); len(loc) > 0 {
 		m["location"] = loc
 	}
-	var srcText strings.Builder
+	var sourceTexts []string
 	for _, sc := range d.SourceContent {
 		if sc.Text != nil {
-			srcText.WriteString(*sc.Text)
+			sourceTexts = append(sourceTexts, *sc.Text)
 		}
 	}
-	if srcText.Len() > 0 {
-		m["sourceContentText"] = srcText.String()
+	if len(sourceTexts) > 0 {
+		m["sourceContent"] = sourceTexts
 	}
 	return m
 }
