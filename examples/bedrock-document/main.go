@@ -149,7 +149,7 @@ func buildRequest(prompt string, data []byte, mime, displayName string, combined
 }
 
 func runDryRun(modelID string, req *model.LLMRequest) {
-	in, err := mappers.ConverseInputFromLLMRequest(modelID, req, false)
+	in, err := mappers.ConverseInputFromLLMRequest(modelID, req, false, nil)
 	if err != nil {
 		log.Fatalf("mapping failed (fix mapper or request): %v", err)
 	}

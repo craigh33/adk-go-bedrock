@@ -10,3 +10,14 @@ type ModelOption func(*Model)
 func WithCacheSystemPrompt() ModelOption {
 	return func(m *Model) { m.cacheSystemPrompt = true }
 }
+
+// WithGuardrail sets the default Bedrock guardrail for this model. Per-request
+// values override via [ContextWithGuardrail]. When a guardrail is in effect,
+// genai safety settings and model armor on the request are ignored (they are
+// not mapped to Bedrock).
+func WithGuardrail(cfg GuardrailConfig) ModelOption {
+	return func(m *Model) {
+		c := cfg
+		m.guardrail = &c
+	}
+}

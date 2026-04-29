@@ -154,6 +154,9 @@ var _ RuntimeAPI = (*runtimeAdapter)(nil)
 type Options struct {
 	// Region overrides AWS region (otherwise [config.LoadDefaultConfig] resolution is used).
 	Region string
+	// Guardrail, if set, applies a default Bedrock guardrail for every request
+	// (overridable per request with [ContextWithGuardrail]).
+	Guardrail *GuardrailConfig
 }
 
 // Model implements [model.LLM] using Amazon Bedrock Runtime Converse / ConverseStream.
@@ -161,6 +164,7 @@ type Model struct {
 	modelID           string
 	api               RuntimeAPI
 	cacheSystemPrompt bool
+	guardrail         *GuardrailConfig
 }
 
 // New creates a [Model] using the default AWS configuration chain and a new
@@ -177,7 +181,13 @@ func New(ctx context.Context, modelID string, opts *Options, modelOpts ...ModelO
 		cfg.Region = opts.Region
 	}
 	cli := bedrockruntime.NewFromConfig(cfg)
-	return NewWithAPI(modelID, NewRuntimeAPI(cli), modelOpts...)
+	var merged []ModelOption
+	if opts != nil && opts.Guardrail != nil {
+		g := *opts.Guardrail
+		merged = append(merged, WithGuardrail(g))
+	}
+	merged = append(merged, modelOpts...)
+	return NewWithAPI(modelID, NewRuntimeAPI(cli), merged...)
 }
 
 // NewWithAPI wires a Bedrock runtime implementation.
@@ -232,7 +242,12 @@ func (m *Model) generateUnary(
 	req *model.LLMRequest,
 ) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		in, err := mappers.ConverseInputFromLLMRequest(modelID, req, m.cacheSystemPrompt)
+		guardrail, err := resolveGuardrailConfig(ctx, m.guardrail)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		in, err := mappers.ConverseInputFromLLMRequest(modelID, req, m.cacheSystemPrompt, guardrail)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -254,7 +269,12 @@ func (m *Model) generateStream(
 	req *model.LLMRequest,
 ) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		in, err := mappers.ConverseStreamInputFromLLMRequest(modelID, req, m.cacheSystemPrompt)
+		guardrail, err := resolveGuardrailConfig(ctx, m.guardrail)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		in, err := mappers.ConverseStreamInputFromLLMRequest(modelID, req, m.cacheSystemPrompt, guardrail)
 		if err != nil {
 			yield(nil, err)
 			return
