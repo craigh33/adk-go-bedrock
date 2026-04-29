@@ -119,6 +119,131 @@ func TestMessageToGenaiContent_roundTrip(t *testing.T) {
 	}
 }
 
+func TestMessageToGenaiContent_citationsContent(t *testing.T) {
+	t.Parallel()
+	url := "https://example.com/article"
+	domain := "example.com"
+	msg := &types.Message{
+		Role: types.ConversationRoleAssistant,
+		Content: []types.ContentBlock{
+			&types.ContentBlockMemberCitationsContent{
+				Value: types.CitationsContentBlock{
+					Content: []types.CitationGeneratedContent{
+						&types.CitationGeneratedContentMemberText{Value: "Grounded text."},
+					},
+					Citations: []types.Citation{{
+						Location: &types.CitationLocationMemberWeb{
+							Value: types.WebLocation{
+								Url:    aws.String(url),
+								Domain: aws.String(domain),
+							},
+						},
+					}},
+				},
+			},
+		},
+	}
+	c, err := MessageToGenaiContent(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Parts) != 1 {
+		t.Fatalf("expected one part, got %d", len(c.Parts))
+	}
+	p := c.Parts[0]
+	if p.Text != "Grounded text." {
+		t.Fatalf("text: got %q", p.Text)
+	}
+	raw, ok := p.PartMetadata[PartMetadataKeyBedrockCitations].([]any)
+	if !ok || len(raw) != 1 {
+		t.Fatalf("citations metadata: %+v", p.PartMetadata)
+	}
+	loc, ok := raw[0].(map[string]any)["location"].(map[string]any)
+	if !ok || loc["url"] != url || loc["domain"] != domain {
+		t.Fatalf("citation location: %+v", raw[0])
+	}
+}
+
+func TestMessageToGenaiContent_citationsSkipsEmptyCitationRows(t *testing.T) {
+	t.Parallel()
+	url := "https://example.com/article"
+	msg := &types.Message{
+		Role: types.ConversationRoleAssistant,
+		Content: []types.ContentBlock{
+			&types.ContentBlockMemberCitationsContent{
+				Value: types.CitationsContentBlock{
+					Content: []types.CitationGeneratedContent{
+						&types.CitationGeneratedContentMemberText{Value: "Grounded text."},
+					},
+					Citations: []types.Citation{
+						{}, // no fields populated — should not appear in bedrock_citations
+						{
+							Location: &types.CitationLocationMemberWeb{
+								Value: types.WebLocation{
+									Url: aws.String(url),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	c, err := MessageToGenaiContent(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Parts) != 1 {
+		t.Fatalf("expected one part, got %d", len(c.Parts))
+	}
+	raw, ok := c.Parts[0].PartMetadata[PartMetadataKeyBedrockCitations].([]any)
+	if !ok || len(raw) != 1 {
+		t.Fatalf("expected one citation row, got %+v", c.Parts[0].PartMetadata)
+	}
+	loc, ok := raw[0].(map[string]any)["location"].(map[string]any)
+	if !ok || loc["url"] != url {
+		t.Fatalf("citation location: %+v", raw[0])
+	}
+}
+
+func TestCitationsDeltaToMap_webLocation(t *testing.T) {
+	t.Parallel()
+	d := types.CitationsDelta{
+		Title: aws.String("t"),
+		Location: &types.CitationLocationMemberWeb{
+			Value: types.WebLocation{
+				Url:    aws.String("https://a.test/x"),
+				Domain: aws.String("a.test"),
+			},
+		},
+	}
+	m := CitationsDeltaToMap(d)
+	if m["title"] != "t" {
+		t.Fatalf("title: %+v", m)
+	}
+	loc, ok := m["location"].(map[string]any)
+	if !ok || loc["url"] != "https://a.test/x" {
+		t.Fatalf("location: %+v", m)
+	}
+}
+
+func TestCitationsDeltaToMap_sourceContentSlices(t *testing.T) {
+	t.Parallel()
+	a := "chunk-a"
+	b := "chunk-b"
+	d := types.CitationsDelta{
+		SourceContent: []types.CitationSourceContentDelta{
+			{Text: &a},
+			{Text: &b},
+		},
+	}
+	m := CitationsDeltaToMap(d)
+	raw, ok := m["sourceContent"].([]string)
+	if !ok || len(raw) != 2 || raw[0] != a || raw[1] != b {
+		t.Fatalf("sourceContent: want []string{%q,%q}, got %+v", a, b, m["sourceContent"])
+	}
+}
+
 func TestMessageToGenaiContent_multimodalAndReasoning(t *testing.T) {
 	t.Parallel()
 	reasonText := "thinking"

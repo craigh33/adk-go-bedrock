@@ -76,7 +76,7 @@ func MessageToGenaiContent(m *types.Message) (*genai.Content, error) {
 	return &genai.Content{Role: role, Parts: parts}, nil
 }
 
-func contentBlockToPart(b types.ContentBlock) (*genai.Part, error) { //nolint:gocognit
+func contentBlockToPart(b types.ContentBlock) (*genai.Part, error) {
 	switch v := b.(type) {
 	case *types.ContentBlockMemberAudio:
 		if v == nil {
@@ -103,29 +103,13 @@ func contentBlockToPart(b types.ContentBlock) (*genai.Part, error) { //nolint:go
 			return nil, errSkipPart
 		}
 		return &genai.Part{Text: v.Value}, nil
-	case *types.ContentBlockMemberToolUse:
+	case *types.ContentBlockMemberCitationsContent:
 		if v == nil {
 			return nil, errSkipPart
 		}
-		args, err := documentToMap(v.Value.Input)
-		if err != nil {
-			return nil, fmt.Errorf("tool use input: %w", err)
-		}
-		id := ""
-		if v.Value.ToolUseId != nil {
-			id = *v.Value.ToolUseId
-		}
-		name := ""
-		if v.Value.Name != nil {
-			name = *v.Value.Name
-		}
-		return &genai.Part{
-			FunctionCall: &genai.FunctionCall{
-				ID:   id,
-				Name: name,
-				Args: args,
-			},
-		}, nil
+		return citationsContentBlockToPart(&v.Value)
+	case *types.ContentBlockMemberToolUse:
+		return toolUseContentBlockToPart(v)
 	case *types.ContentBlockMemberToolResult:
 		if v == nil {
 			return nil, errSkipPart
@@ -143,6 +127,31 @@ func contentBlockToPart(b types.ContentBlock) (*genai.Part, error) { //nolint:go
 	default:
 		return nil, errSkipPart
 	}
+}
+
+func toolUseContentBlockToPart(v *types.ContentBlockMemberToolUse) (*genai.Part, error) {
+	if v == nil {
+		return nil, errSkipPart
+	}
+	args, err := documentToMap(v.Value.Input)
+	if err != nil {
+		return nil, fmt.Errorf("tool use input: %w", err)
+	}
+	id := ""
+	if v.Value.ToolUseId != nil {
+		id = *v.Value.ToolUseId
+	}
+	name := ""
+	if v.Value.Name != nil {
+		name = *v.Value.Name
+	}
+	return &genai.Part{
+		FunctionCall: &genai.FunctionCall{
+			ID:   id,
+			Name: name,
+			Args: args,
+		},
+	}, nil
 }
 
 func audioBlockToPart(b *types.AudioBlock) (*genai.Part, error) {
