@@ -39,6 +39,36 @@ const (
 	maxExactIntegerFloat = 9007199254740991 // 2^53 - 1
 )
 
+// validateS3OutputURI ensures cfg uses an S3 URI suitable for Bedrock async output (s3://bucket[/prefix]).
+func validateS3OutputURI(uri string) error {
+	s := strings.TrimSpace(uri)
+	if s == "" {
+		return errors.New("videogenerator: S3OutputURI is required")
+	}
+	const prefix = "s3://"
+	if !strings.HasPrefix(s, prefix) {
+		return fmt.Errorf(
+			"videogenerator: S3OutputURI must use scheme %q (e.g. s3://my-bucket/prefix), got %q",
+			prefix,
+			uri,
+		)
+	}
+	rest := strings.TrimPrefix(s, prefix)
+	rest = strings.TrimLeft(rest, "/")
+	if rest == "" {
+		return errors.New(
+			"videogenerator: S3OutputURI must include a bucket name after s3:// (e.g. s3://my-bucket/prefix)",
+		)
+	}
+	bucket, _, _ := strings.Cut(rest, "/")
+	if strings.TrimSpace(bucket) == "" {
+		return errors.New(
+			"videogenerator: S3OutputURI must include a bucket name after s3:// (e.g. s3://my-bucket/prefix)",
+		)
+	}
+	return nil
+}
+
 // AsyncInvokeAPI is the Bedrock Runtime subset needed for Nova Reel (async-only).
 type AsyncInvokeAPI interface {
 	StartAsyncInvoke(
@@ -152,8 +182,8 @@ func New(cfg Config) (tool.Tool, error) {
 	if cfg.API == nil {
 		return nil, errors.New("videogenerator: API is required")
 	}
-	if strings.TrimSpace(cfg.S3OutputURI) == "" {
-		return nil, errors.New("videogenerator: S3OutputURI is required")
+	if err := validateS3OutputURI(cfg.S3OutputURI); err != nil {
+		return nil, err
 	}
 	prov := cfg.Provider
 	if prov == nil {
@@ -282,6 +312,9 @@ func providerForArgs(base *ReelProvider, m map[string]any) (*ReelProvider, error
 }
 
 func floatSeedToInt64(v float64) (int64, error) {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, errors.New("seed: must be a finite number")
+	}
 	if math.Abs(v) > maxExactIntegerFloat {
 		return 0, fmt.Errorf(
 			"seed: magnitude too large for safe conversion from float (max abs is %d)",

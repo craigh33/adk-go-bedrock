@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -172,6 +173,27 @@ func TestNew_EmptyS3OutputURI(t *testing.T) {
 	}
 }
 
+func TestNew_InvalidS3OutputURI_Scheme(t *testing.T) {
+	t.Parallel()
+	_, err := New(Config{API: &fakeAsyncAPI{}, S3OutputURI: "my-bucket/prefix"})
+	if err == nil {
+		t.Fatal("expected error for non-s3 scheme")
+	}
+}
+
+func TestNew_InvalidS3OutputURI_NoBucket(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{"s3://", "s3:///"} {
+		t.Run(raw, func(t *testing.T) {
+			t.Parallel()
+			_, err := New(Config{API: &fakeAsyncAPI{}, S3OutputURI: raw})
+			if err == nil {
+				t.Fatal("expected error when bucket is missing")
+			}
+		})
+	}
+}
+
 func TestNew_OK(t *testing.T) {
 	t.Parallel()
 	tl, err := New(Config{API: &fakeAsyncAPI{}, S3OutputURI: "s3://bucket"})
@@ -253,6 +275,27 @@ func TestProviderForArgs_FloatMagnitudeTooLarge(t *testing.T) {
 	_, err := providerForArgs(base, map[string]any{"seed": 1e20})
 	if err == nil {
 		t.Fatal("expected error for float seed magnitude past safe integer range")
+	}
+}
+
+func TestProviderForArgs_FloatNonFinite(t *testing.T) {
+	t.Parallel()
+	base := NewReelProvider("", 99)
+	for _, tc := range []struct {
+		name string
+		v    float64
+	}{
+		{"nan", math.NaN()},
+		{"pos_inf", math.Inf(1)},
+		{"neg_inf", math.Inf(-1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := providerForArgs(base, map[string]any{"seed": tc.v})
+			if err == nil {
+				t.Fatal("expected error for non-finite float seed")
+			}
+		})
 	}
 }
 
