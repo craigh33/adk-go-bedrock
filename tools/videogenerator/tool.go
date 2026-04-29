@@ -37,6 +37,9 @@ const (
 
 	maxNovaReelSeed int64 = 2147483646
 
+	// defaultMaxArtifactBytes caps S3 download size when persisting MP4 artifacts (RAM bounded).
+	defaultMaxArtifactBytes int64 = 512 << 20 // 512 MiB
+
 	// maxExactIntegerFloat is the largest integer magnitude where every integer
 	// in [-N, N] is exactly representable as float64 (IEEE 754 doubles).
 	maxExactIntegerFloat int64 = 9007199254740991 // 2^53 - 1
@@ -123,11 +126,11 @@ func NewReelProvider(modelID string, seed int64) *ReelProvider {
 	return &ReelProvider{modelID: modelID, Seed: seed}
 }
 
-// clampNovaReelSeed maps seeds into Nova’s usable range. Negative values yield 0 (defensive);
-// positive values land in [1, maxNovaReelSeed] when reduced (never 0 from positive input).
+// clampNovaReelSeed maps seeds into Nova’s usable range. Values <= 0 match [NewReelProvider]
+// (random in-range seed). Values above max are reduced; positive values never become 0.
 func clampNovaReelSeed(s int64) int64 {
-	if s < 0 {
-		return 0
+	if s <= 0 {
+		return randomNovaReelSeed()
 	}
 	if s <= maxNovaReelSeed {
 		return s
@@ -180,15 +183,20 @@ type Config struct {
 	PollInterval time.Duration
 	// MaxWait is the maximum time to wait for job completion. Zero defaults to 30m.
 	MaxWait time.Duration
+
+	// MaxArtifactBytes is the maximum S3 object size to read into memory when saving an MP4 artifact.
+	// Zero defaults to defaultMaxArtifactBytes. Must not be negative.
+	MaxArtifactBytes int64
 }
 
 type videoGenTool struct {
-	api          AsyncInvokeAPI
-	s3           S3GetObjectAPI
-	s3OutputURI  string
-	provider     *ReelProvider
-	pollInterval time.Duration
-	maxWait      time.Duration
+	api              AsyncInvokeAPI
+	s3               S3GetObjectAPI
+	s3OutputURI      string
+	provider         *ReelProvider
+	pollInterval     time.Duration
+	maxWait          time.Duration
+	maxArtifactBytes int64
 }
 
 // New creates an ADK tool that generates video via Nova Reel async invoke.
@@ -213,13 +221,21 @@ func New(cfg Config) (tool.Tool, error) {
 	if maxWait <= 0 {
 		maxWait = 30 * time.Minute
 	}
+	if cfg.MaxArtifactBytes < 0 {
+		return nil, errors.New("videogenerator: MaxArtifactBytes cannot be negative")
+	}
+	maxArt := cfg.MaxArtifactBytes
+	if maxArt == 0 {
+		maxArt = defaultMaxArtifactBytes
+	}
 	return &videoGenTool{
-		api:          cfg.API,
-		s3:           cfg.S3,
-		s3OutputURI:  strings.TrimSpace(cfg.S3OutputURI),
-		provider:     prov,
-		pollInterval: poll,
-		maxWait:      maxWait,
+		api:              cfg.API,
+		s3:               cfg.S3,
+		s3OutputURI:      strings.TrimSpace(cfg.S3OutputURI),
+		provider:         prov,
+		pollInterval:     poll,
+		maxWait:          maxWait,
+		maxArtifactBytes: maxArt,
 	}, nil
 }
 
@@ -282,6 +298,9 @@ func (t *videoGenTool) ProcessRequest(_ tool.Context, req *model.LLMRequest) err
 		req.Config = &genai.GenerateContentConfig{}
 	}
 	decl := t.Declaration()
+	if decl == nil {
+		return nil
+	}
 
 	var funcTool *genai.Tool
 	for _, gt := range req.Config.Tools {
@@ -343,6 +362,40 @@ func floatSeedToInt64(v float64) (int64, error) {
 	return int64(v), nil
 }
 
+// readArtifactBytes reads rc fully subject to maxBytes, using ContentLength for an early size check when present.
+func readArtifactBytes(rc io.ReadCloser, contentLength *int64, maxBytes int64) ([]byte, error) {
+	if rc == nil {
+		return nil, errors.New("videogenerator: S3 GetObject returned nil body")
+	}
+	defer rc.Close()
+	if maxBytes == math.MaxInt64 {
+		return nil, errors.New(
+			"videogenerator: maximum artifact size overflows safe single read limit; use a slightly smaller MaxArtifactBytes",
+		)
+	}
+	if contentLength != nil && *contentLength >= 0 && *contentLength > maxBytes {
+		return nil, fmt.Errorf(
+			"video object size (%d bytes) exceeds maximum artifact size (%d bytes); "+
+				"raise videogenerator.Config.MaxArtifactBytes if appropriate, or verify the S3 object is the expected MP4",
+			*contentLength,
+			maxBytes,
+		)
+	}
+	limited := io.LimitReader(rc, maxBytes+1) // +1 so exactly maxBytes bytes still succeeds; overflow ruled out above
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, fmt.Errorf("read video body: %w", err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf(
+			"video download exceeds maximum artifact size (%d bytes); "+
+				"object may be larger than allowed or Content-Length was unavailable",
+			maxBytes,
+		)
+	}
+	return data, nil
+}
+
 func (t *videoGenTool) appendArtifactFromS3(
 	ctx tool.Context,
 	fileName, videoS3URI string,
@@ -363,10 +416,9 @@ func (t *videoGenTool) appendArtifactFromS3(
 	if err != nil {
 		return fmt.Errorf("s3 get object s3://%s/%s: %w", bucket, key, err)
 	}
-	defer gobj.Body.Close()
-	videoBytes, err := io.ReadAll(gobj.Body)
+	videoBytes, err := readArtifactBytes(gobj.Body, gobj.ContentLength, t.maxArtifactBytes)
 	if err != nil {
-		return fmt.Errorf("read video body: %w", err)
+		return err
 	}
 
 	part := &genai.Part{
@@ -408,7 +460,11 @@ func (t *videoGenTool) Run(ctx tool.Context, args any) (map[string]any, error) {
 		return nil, err
 	}
 
-	invocationArn, err := t.startAsyncJob(ctx, prov, prompt)
+	clientToken := strings.TrimSpace(ctx.FunctionCallID())
+	if clientToken == "" {
+		clientToken = uuid.NewString()
+	}
+	invocationArn, err := t.startAsyncJob(ctx, prov, prompt, clientToken)
 	if err != nil {
 		return nil, err
 	}
@@ -433,16 +489,18 @@ func (t *videoGenTool) Run(ctx tool.Context, args any) (map[string]any, error) {
 		"video_s3_uri": videoS3URI,
 	}
 	if err := t.appendArtifactFromS3(ctx, fileName, videoS3URI, out); err != nil {
-		return nil, err
+		return out, err
 	}
 	return out, nil
 }
 
 // startAsyncJob calls Bedrock StartAsyncInvoke and returns the invocation ARN.
+// clientRequestToken should be stable per ADK function call (e.g. ctx.FunctionCallID()) so retries dedupe.
 func (t *videoGenTool) startAsyncJob(
 	ctx tool.Context,
 	prov *ReelProvider,
 	prompt string,
+	clientRequestToken string,
 ) (string, error) {
 	startOut, err := t.api.StartAsyncInvoke(ctx, &bedrockruntime.StartAsyncInvokeInput{
 		ModelId:    aws.String(prov.ModelID()),
@@ -452,7 +510,7 @@ func (t *videoGenTool) startAsyncJob(
 				S3Uri: aws.String(t.s3OutputURI),
 			},
 		},
-		ClientRequestToken: aws.String(uuid.NewString()),
+		ClientRequestToken: aws.String(clientRequestToken),
 	})
 	if err != nil {
 		return "", fmt.Errorf("start async invoke %s: %w", prov.ModelID(), err)

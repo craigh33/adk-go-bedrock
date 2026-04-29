@@ -35,6 +35,8 @@ type fakeAsyncAPI struct {
 	startOut *bedrockruntime.StartAsyncInvokeOutput
 	startErr error
 
+	lastClientRequestToken *string
+
 	getCalls int
 	getOut   []*bedrockruntime.GetAsyncInvokeOutput
 	getErr   []error
@@ -42,9 +44,10 @@ type fakeAsyncAPI struct {
 
 func (f *fakeAsyncAPI) StartAsyncInvoke(
 	_ context.Context,
-	_ *bedrockruntime.StartAsyncInvokeInput,
+	in *bedrockruntime.StartAsyncInvokeInput,
 	_ ...func(*bedrockruntime.Options),
 ) (*bedrockruntime.StartAsyncInvokeOutput, error) {
+	f.lastClientRequestToken = in.ClientRequestToken
 	if f.startErr != nil {
 		return nil, f.startErr
 	}
@@ -68,8 +71,9 @@ func (f *fakeAsyncAPI) GetAsyncInvoke(
 }
 
 type fakeS3 struct {
-	body []byte
-	err  error
+	body          []byte
+	contentLength *int64
+	err           error
 }
 
 func (f *fakeS3) GetObject(
@@ -80,9 +84,13 @@ func (f *fakeS3) GetObject(
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &s3.GetObjectOutput{
+	out := &s3.GetObjectOutput{
 		Body: io.NopCloser(bytes.NewReader(f.body)),
-	}, nil
+	}
+	if f.contentLength != nil {
+		out.ContentLength = f.contentLength
+	}
+	return out, nil
 }
 
 type fakeArtifacts struct {
@@ -193,6 +201,18 @@ func TestNew_InvalidS3OutputURI_NoBucket(t *testing.T) {
 				t.Fatal("expected error when bucket is missing")
 			}
 		})
+	}
+}
+
+func TestNew_MaxArtifactBytesNegative(t *testing.T) {
+	t.Parallel()
+	_, err := New(Config{
+		API:              &fakeAsyncAPI{},
+		S3OutputURI:      "s3://b/p",
+		MaxArtifactBytes: -1,
+	})
+	if err == nil {
+		t.Fatal("expected error for negative MaxArtifactBytes")
 	}
 }
 
@@ -359,6 +379,140 @@ func TestProviderForArgs_FloatNonFinite(t *testing.T) {
 				t.Fatal("expected error for non-finite float seed")
 			}
 		})
+	}
+}
+
+func TestRun_ArtifactTooLarge_ContentLength(t *testing.T) {
+	t.Parallel()
+	arn := aws.String("arn:aws:bedrock:us-east-1:123:async-invoke/job-big")
+	huge := defaultMaxArtifactBytes + int64(1)
+	api := &fakeAsyncAPI{
+		startOut: &bedrockruntime.StartAsyncInvokeOutput{InvocationArn: arn},
+		getOut: []*bedrockruntime.GetAsyncInvokeOutput{
+			completedInvokeOutput("s3://out-bucket/prefix"),
+		},
+	}
+	s3api := &fakeS3{
+		body:          []byte("x"),
+		contentLength: aws.Int64(huge),
+	}
+	tl, err := New(Config{
+		API:          api,
+		S3OutputURI:  "s3://staging/prefix",
+		S3:           s3api,
+		PollInterval: time.Millisecond,
+		MaxWait:      30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gt := tl.(*videoGenTool)
+	_, err = gt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{"prompt": "short"})
+	if err == nil {
+		t.Fatal("expected error for oversized ContentLength")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum artifact size") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRun_ArtifactTooLarge_Stream(t *testing.T) {
+	t.Parallel()
+	arn := aws.String("arn:aws:bedrock:us-east-1:123:async-invoke/job-stream")
+	api := &fakeAsyncAPI{
+		startOut: &bedrockruntime.StartAsyncInvokeOutput{InvocationArn: arn},
+		getOut: []*bedrockruntime.GetAsyncInvokeOutput{
+			completedInvokeOutput("s3://out-bucket/prefix"),
+		},
+	}
+	const maxSmall int64 = 10
+	longBody := bytes.Repeat([]byte("x"), int(maxSmall+50))
+	s3api := &fakeS3{body: longBody}
+	tl, err := New(Config{
+		API:              api,
+		S3OutputURI:      "s3://staging/prefix",
+		S3:               s3api,
+		PollInterval:     time.Millisecond,
+		MaxWait:          30 * time.Second,
+		MaxArtifactBytes: maxSmall,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gt := tl.(*videoGenTool)
+	_, err = gt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{"prompt": "short"})
+	if err == nil {
+		t.Fatal("expected error when stream exceeds limit")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum artifact size") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRun_ArtifactSaveFails_ReturnsPartialResult(t *testing.T) {
+	t.Parallel()
+	arn := aws.String("arn:aws:bedrock:us-east-1:123:async-invoke/job-save-fail")
+	api := &fakeAsyncAPI{
+		startOut: &bedrockruntime.StartAsyncInvokeOutput{InvocationArn: arn},
+		getOut: []*bedrockruntime.GetAsyncInvokeOutput{
+			completedInvokeOutput("s3://out-bucket/jobs/prefix"),
+		},
+	}
+	tl, err := New(Config{
+		API:          api,
+		S3OutputURI:  "s3://staging/prefix",
+		S3:           &fakeS3{body: []byte("x")},
+		PollInterval: time.Millisecond,
+		MaxWait:      30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gt := tl.(*videoGenTool)
+	wantURI := "s3://out-bucket/jobs/prefix/output.mp4"
+	saveErr := errors.New("artifact store unavailable")
+	result, err := gt.Run(newFakeToolCtx(&fakeArtifacts{saveErr: saveErr}), map[string]any{
+		"prompt": "waves",
+	})
+	if err == nil || !errors.Is(err, saveErr) {
+		t.Fatalf("Run err = %v, want %v", err, saveErr)
+	}
+	if result == nil {
+		t.Fatal("expected partial result map")
+	}
+	if result["video_s3_uri"] != wantURI {
+		t.Errorf("video_s3_uri = %v, want %q", result["video_s3_uri"], wantURI)
+	}
+	if result["status"] != "success" {
+		t.Errorf("status = %v", result["status"])
+	}
+}
+
+func TestRun_StartAsyncInvoke_ClientRequestTokenMatchesFunctionCallID(t *testing.T) {
+	t.Parallel()
+	arn := aws.String("arn:aws:bedrock:us-east-1:123:async-invoke/token-test")
+	api := &fakeAsyncAPI{
+		startOut: &bedrockruntime.StartAsyncInvokeOutput{InvocationArn: arn},
+		getOut: []*bedrockruntime.GetAsyncInvokeOutput{
+			completedInvokeOutput("s3://out/prefix"),
+		},
+	}
+	tl, err := New(Config{
+		API:          api,
+		S3OutputURI:  "s3://staging/prefix",
+		PollInterval: time.Millisecond,
+		MaxWait:      30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gt := tl.(*videoGenTool)
+	_, err = gt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{"prompt": "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.lastClientRequestToken == nil || *api.lastClientRequestToken != "test-call-id" {
+		t.Fatalf("ClientRequestToken = %v, want test-call-id", api.lastClientRequestToken)
 	}
 }
 
