@@ -9,6 +9,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -36,7 +37,7 @@ const (
 
 	// maxExactIntegerFloat is the largest integer magnitude where every integer
 	// in [-N, N] is exactly representable as float64 (IEEE 754 doubles).
-	maxExactIntegerFloat = 9007199254740991 // 2^53 - 1
+	maxExactIntegerFloat int64 = 9007199254740991 // 2^53 - 1
 )
 
 // validateS3OutputURI ensures cfg uses an S3 URI suitable for Bedrock async output (s3://bucket[/prefix]).
@@ -120,6 +121,8 @@ func NewReelProvider(modelID string, seed int64) *ReelProvider {
 	return &ReelProvider{modelID: modelID, Seed: seed}
 }
 
+// clampNovaReelSeed maps seeds into Nova’s usable range. Negative values yield 0 (defensive);
+// positive values land in [1, maxNovaReelSeed] when reduced (never 0 from positive input).
 func clampNovaReelSeed(s int64) int64 {
 	if s < 0 {
 		return 0
@@ -127,7 +130,7 @@ func clampNovaReelSeed(s int64) int64 {
 	if s <= maxNovaReelSeed {
 		return s
 	}
-	return s % (maxNovaReelSeed + 1)
+	return 1 + (s % maxNovaReelSeed)
 }
 
 func randomNovaReelSeed() int64 {
@@ -325,7 +328,7 @@ func floatSeedToInt64(v float64) (int64, error) {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return 0, errors.New("seed: must be a finite number")
 	}
-	if math.Abs(v) > maxExactIntegerFloat {
+	if math.Abs(v) > float64(maxExactIntegerFloat) {
 		return 0, fmt.Errorf(
 			"seed: magnitude too large for safe conversion from float (max abs is %d)",
 			maxExactIntegerFloat,
@@ -385,7 +388,7 @@ func (t *videoGenTool) Run(ctx tool.Context, args any) (map[string]any, error) {
 	if prompt == "" {
 		return nil, errors.New("prompt is required")
 	}
-	if len([]rune(prompt)) > maxNovaReelPromptRunes {
+	if utf8.RuneCountInString(prompt) > maxNovaReelPromptRunes {
 		return nil, fmt.Errorf("prompt exceeds %d characters", maxNovaReelPromptRunes)
 	}
 
@@ -465,8 +468,6 @@ func (t *videoGenTool) pollUntilTerminal(
 	ctx context.Context,
 	invocationArn string,
 ) (*bedrockruntime.GetAsyncInvokeOutput, error) {
-	ticker := time.NewTicker(t.pollInterval)
-	defer ticker.Stop()
 	deadline := time.Now().Add(t.maxWait)
 	for {
 		if time.Now().After(deadline) {
@@ -482,14 +483,23 @@ func (t *videoGenTool) pollUntilTerminal(
 			out.Status == types.AsyncInvokeStatusFailed {
 			return out, nil
 		}
-		// IN_PROGRESS, unknown future statuses, or empty string: fixed-interval wait then poll again.
+		// IN_PROGRESS, unknown future statuses, or empty string: wait up to PollInterval or remaining MaxWait.
 		if time.Now().After(deadline) {
 			return nil, errVideoGenPollTimeout(t.maxWait)
 		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, errVideoGenPollTimeout(t.maxWait)
+		}
+		wait := min(t.pollInterval, remaining)
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
 			return nil, ctx.Err()
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }
@@ -513,11 +523,18 @@ func joinS3Key(s3URI, filename string) string {
 
 func parseS3URI(uri string) (string, string, error) {
 	s := strings.TrimSpace(uri)
-	s = strings.TrimPrefix(s, "s3://")
-	if s == "" {
+	const prefix = "s3://"
+	if !strings.HasPrefix(s, prefix) {
+		return "", "", fmt.Errorf("expected s3:// URI for object download, got %q", uri)
+	}
+	rest := strings.TrimPrefix(s, prefix)
+	if strings.HasPrefix(rest, "/") {
+		return "", "", fmt.Errorf("invalid s3 URI %q (no '/' immediately after s3://)", uri)
+	}
+	if rest == "" {
 		return "", "", errors.New("empty s3 uri")
 	}
-	before, after, ok := strings.Cut(s, "/")
+	before, after, ok := strings.Cut(rest, "/")
 	if !ok {
 		return "", "", errors.New("s3 uri missing object key")
 	}

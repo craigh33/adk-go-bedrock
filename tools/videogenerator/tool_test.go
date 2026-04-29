@@ -7,9 +7,11 @@ import (
 	"errors"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -597,6 +599,37 @@ func TestParseS3URI(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for uri without key")
 	}
+
+	_, _, err = parseS3URI("https://my-bucket.s3.amazonaws.com/key")
+	if err == nil {
+		t.Fatal("expected error for non-s3 scheme")
+	}
+
+	_, _, err = parseS3URI("s3:///my-bucket/key")
+	if err == nil {
+		t.Fatal("expected error for s3:///… form")
+	}
+}
+
+func TestClampNovaReelSeed_PositiveNeverZero(t *testing.T) {
+	t.Parallel()
+	cases := []int64{
+		maxNovaReelSeed + 1,
+		maxNovaReelSeed * 2,
+		math.MaxInt64,
+	}
+	for _, s := range cases {
+		t.Run(strconv.FormatInt(s, 10), func(t *testing.T) {
+			t.Parallel()
+			got := clampNovaReelSeed(s)
+			if got == 0 {
+				t.Fatalf("clampNovaReelSeed(%d) = 0", s)
+			}
+			if got < 1 || got > maxNovaReelSeed {
+				t.Fatalf("clampNovaReelSeed(%d) = %d, want [1,%d]", s, got, maxNovaReelSeed)
+			}
+		})
+	}
 }
 
 func TestJoinS3Key(t *testing.T) {
@@ -617,7 +650,7 @@ func TestRun_PromptTooLong(t *testing.T) {
 	gt := tl.(*videoGenTool)
 
 	prompt := strings.Repeat("あ", maxNovaReelPromptRunes+1)
-	if len([]rune(prompt)) <= maxNovaReelPromptRunes {
+	if utf8.RuneCountInString(prompt) <= maxNovaReelPromptRunes {
 		t.Fatal("test setup: prompt should exceed rune limit")
 	}
 
