@@ -90,7 +90,11 @@ func unsupportedToolVariantsFromGenai(t *genai.Tool) []string {
 
 func functionParametersToToolInputSchema(fd *genai.FunctionDeclaration) (types.ToolInputSchema, error) {
 	if fd.ParametersJsonSchema != nil {
-		return &types.ToolInputSchemaMemberJson{Value: brdoc.NewLazyDocument(fd.ParametersJsonSchema)}, nil
+		schema, err := normalizeSchema(fd.ParametersJsonSchema)
+		if err != nil {
+			return nil, err
+		}
+		return &types.ToolInputSchemaMemberJson{Value: brdoc.NewLazyDocument(schema)}, nil
 	}
 	if fd.Parameters == nil {
 		return &types.ToolInputSchemaMemberJson{
@@ -132,5 +136,27 @@ func normalizeSchemaTypes(v any) {
 		for _, item := range m {
 			normalizeSchemaTypes(item)
 		}
+	}
+}
+
+// normalizeSchema turns ParametersJsonSchema into a JSON object map for Bedrock Converse.
+// ADK FunctionTool supplies this field as arbitrary JSON (often a struct or other non-map
+// value after decoding). Bedrock's document layer expects a map[string]any; passing the
+// raw value through can fail or encode incorrectly, so we round-trip through JSON when
+// the value is not already map[string]any.
+func normalizeSchema(schema any) (map[string]any, error) {
+	switch s := schema.(type) {
+	case map[string]any:
+		return s, nil
+	default:
+		bytes, err := json.Marshal(s)
+		if err != nil {
+			return nil, fmt.Errorf("bedrock: failed to marshal schema: %w", err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(bytes, &m); err != nil {
+			return nil, fmt.Errorf("bedrock: failed to unmarshal schema: %w", err)
+		}
+		return m, nil
 	}
 }
