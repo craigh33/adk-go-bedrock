@@ -1,6 +1,6 @@
 # bedrock-video-gen example
 
-This example runs an ADK agent that uses the `videogenerator` tool to generate short videos via Amazon Nova Reel (`amazon.nova-reel-v1:1` by default). Bedrock writes async output to the S3 location you configure; the tool polls until completion, then downloads `output.mp4` into the artifact service.
+This example runs an ADK agent that uses the `videogenerator` tool to generate short videos via Amazon Nova Reel (`amazon.nova-reel-v1:0` by default). Bedrock writes async output to the S3 location you configure; the tool polls until completion, then downloads `output.mp4` into the artifact service.
 
 ## Prerequisites
 
