@@ -33,6 +33,10 @@ const (
 	maxNovaReelPromptRunes = 512
 
 	maxNovaReelSeed int64 = 2147483646
+
+	// maxExactIntegerFloat is the largest integer magnitude where every integer
+	// in [-N, N] is exactly representable as float64 (IEEE 754 doubles).
+	maxExactIntegerFloat = 9007199254740991 // 2^53 - 1
 )
 
 // AsyncInvokeAPI is the Bedrock Runtime subset needed for Nova Reel (async-only).
@@ -255,7 +259,11 @@ func providerForArgs(base *ReelProvider, m map[string]any) (*ReelProvider, error
 			if math.Trunc(v) != v {
 				return nil, fmt.Errorf("seed: must be an integer, got %v", seedRaw)
 			}
-			prov = NewReelProvider(base.ModelID(), int64(v))
+			n, err := floatSeedToInt64(v)
+			if err != nil {
+				return nil, err
+			}
+			prov = NewReelProvider(base.ModelID(), n)
 		case json.Number:
 			n, err := v.Int64()
 			if err != nil {
@@ -273,13 +281,22 @@ func providerForArgs(base *ReelProvider, m map[string]any) (*ReelProvider, error
 	return prov, nil
 }
 
+func floatSeedToInt64(v float64) (int64, error) {
+	if math.Abs(v) > maxExactIntegerFloat {
+		return 0, fmt.Errorf(
+			"seed: magnitude too large for safe conversion from float (max abs is %d)",
+			maxExactIntegerFloat,
+		)
+	}
+	return int64(v), nil
+}
+
 func (t *videoGenTool) appendArtifactFromS3(
 	ctx tool.Context,
 	fileName, videoS3URI string,
 	out map[string]any,
 ) error {
 	if t.s3 == nil {
-		out["artifact"] = "skipped (no S3 client configured for download)"
 		return nil
 	}
 
@@ -373,7 +390,11 @@ func (t *videoGenTool) Run(ctx tool.Context, args any) (map[string]any, error) {
 				invocationArn,
 			)
 		}
-		return nil, fmt.Errorf("video generation failed: %s", msg)
+		return nil, fmt.Errorf(
+			"video generation failed: %s (invocation %s)",
+			msg,
+			invocationArn,
+		)
 	}
 
 	s3Base, ok := extractOutputS3URI(final.OutputDataConfig)
@@ -407,18 +428,18 @@ func (t *videoGenTool) pollUntilTerminal(
 		if err != nil {
 			return nil, fmt.Errorf("get async invoke (poll): %w", err)
 		}
-		switch out.Status {
-		case types.AsyncInvokeStatusCompleted, types.AsyncInvokeStatusFailed:
+		if out.Status == types.AsyncInvokeStatusCompleted ||
+			out.Status == types.AsyncInvokeStatusFailed {
 			return out, nil
-		case types.AsyncInvokeStatusInProgress:
-			if time.Now().After(deadline) {
-				return nil, fmt.Errorf("video generation timed out after %v", t.maxWait)
-			}
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-ticker.C:
-			}
+		}
+		// IN_PROGRESS, unknown future statuses, or empty string: poll with backoff.
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("video generation timed out after %v", t.maxWait)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
 		}
 	}
 }

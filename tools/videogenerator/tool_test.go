@@ -247,6 +247,15 @@ func TestProviderForArgs_JSONNumber(t *testing.T) {
 	}
 }
 
+func TestProviderForArgs_FloatMagnitudeTooLarge(t *testing.T) {
+	t.Parallel()
+	base := NewReelProvider("", 99)
+	_, err := providerForArgs(base, map[string]any{"seed": 1e20})
+	if err == nil {
+		t.Fatal("expected error for float seed magnitude past safe integer range")
+	}
+}
+
 func TestRun_Success_WithS3Download(t *testing.T) {
 	t.Parallel()
 	arn := aws.String("arn:aws:bedrock:us-east-1:123:async-invoke/job1")
@@ -333,6 +342,54 @@ func TestRun_Success_NoS3Download(t *testing.T) {
 	if _, ok := result["file_name"]; ok {
 		t.Error("did not expect file_name without S3 download")
 	}
+	if _, ok := result["artifact"]; ok {
+		t.Error("did not expect artifact key without S3 client")
+	}
+}
+
+func TestRun_Success_UnknownStatusThenCompleted(t *testing.T) {
+	t.Parallel()
+	arn := "arn:aws:bedrock:us-east-1:123:async-invoke/unknown-then-ok"
+	api := &fakeAsyncAPI{
+		startOut: &bedrockruntime.StartAsyncInvokeOutput{
+			InvocationArn: aws.String(arn),
+		},
+		getOut: []*bedrockruntime.GetAsyncInvokeOutput{
+			{
+				InvocationArn: aws.String(arn),
+				Status:        types.AsyncInvokeStatus("FutureOrUnknownStatus"),
+			},
+			{
+				InvocationArn: aws.String(arn),
+				Status:        types.AsyncInvokeStatusCompleted,
+				OutputDataConfig: &types.AsyncInvokeOutputDataConfigMemberS3OutputDataConfig{
+					Value: types.AsyncInvokeS3OutputDataConfig{
+						S3Uri: aws.String("s3://out-bucket/prefix"),
+					},
+				},
+			},
+		},
+	}
+	tl, err := New(Config{
+		API:          api,
+		S3OutputURI:  "s3://staging",
+		S3:           &fakeS3{body: []byte("x")},
+		PollInterval: time.Millisecond,
+		MaxWait:      30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gt := tl.(*videoGenTool)
+	result, err := gt.Run(newFakeToolCtx(&fakeArtifacts{version: 1}), map[string]any{
+		"prompt": "test",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result["video_s3_uri"] != "s3://out-bucket/prefix/output.mp4" {
+		t.Errorf("video_s3_uri = %v", result["video_s3_uri"])
+	}
 }
 
 func TestRun_EmptyPrompt(t *testing.T) {
@@ -381,6 +438,44 @@ func TestRun_Failed_EmptyFailureMessage(t *testing.T) {
 	if strings.TrimSpace(strings.TrimPrefix(err.Error(), "video generation failed")) == "" ||
 		strings.HasSuffix(err.Error(), ": ") {
 		t.Errorf("unexpected empty or trailing-colon message: %q", err.Error())
+	}
+}
+
+func TestRun_Failed_WithFailureMessage(t *testing.T) {
+	t.Parallel()
+	arn := "arn:aws:bedrock:us-east-1:123:async-invoke/failed-with-msg"
+	msg := "quota exceeded"
+	api := &fakeAsyncAPI{
+		startOut: &bedrockruntime.StartAsyncInvokeOutput{
+			InvocationArn: aws.String(arn),
+		},
+		getOut: []*bedrockruntime.GetAsyncInvokeOutput{
+			{
+				InvocationArn:  aws.String(arn),
+				Status:         types.AsyncInvokeStatusFailed,
+				FailureMessage: aws.String(msg),
+			},
+		},
+	}
+	tl, err := New(Config{
+		API:          api,
+		S3OutputURI:  "s3://b",
+		PollInterval: time.Millisecond,
+		MaxWait:      30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gt := tl.(*videoGenTool)
+	_, err = gt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{"prompt": "x"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), arn) {
+		t.Errorf("error should mention invocation ARN: %v", err)
+	}
+	if !strings.Contains(err.Error(), msg) {
+		t.Errorf("error should mention Bedrock message: %v", err)
 	}
 }
 
