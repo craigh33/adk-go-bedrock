@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand/v2"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -27,11 +28,12 @@ import (
 const DefaultReelModelID = "amazon.nova-reel-v1:1"
 
 const (
-	defaultDurationSeconds = 6
-	defaultFPS             = 24
-	defaultDimension       = "1280x720"
-	novaReelOutputKey      = "output.mp4"
-	maxNovaReelPromptRunes = 512
+	defaultDurationSeconds  = 6
+	defaultFPS              = 24
+	defaultDimension        = "1280x720"
+	novaReelOutputKey       = "output.mp4"
+	maxNovaReelPromptRunes  = 512
+	defaultArtifactFileName = "generated_video.mp4"
 
 	maxNovaReelSeed int64 = 2147483646
 
@@ -133,12 +135,13 @@ func clampNovaReelSeed(s int64) int64 {
 	return 1 + (s % maxNovaReelSeed)
 }
 
+// randomNovaReelSeed returns a pseudo-random seed in [1, maxNovaReelSeed].
+// math/rand/v2 is auto-seeded per process, avoiding collisions when called
+// in quick succession (which a [time.Now]-derived seed would suffer).
+//
+//nolint:gosec // G404: non-cryptographic seed for Bedrock Nova Reel.
 func randomNovaReelSeed() int64 {
-	n := time.Now().UnixNano()
-	if n < 0 {
-		n = -n
-	}
-	return 1 + (n % maxNovaReelSeed)
+	return 1 + rand.Int64N(maxNovaReelSeed)
 }
 
 func (p *ReelProvider) ModelID() string { return p.modelID }
@@ -242,12 +245,18 @@ func (t *videoGenTool) Declaration() *genai.FunctionDeclaration {
 			Type: "OBJECT",
 			Properties: map[string]*genai.Schema{
 				"prompt": {
-					Type:        "STRING",
-					Description: "Text prompt describing the video (English, max 512 characters for single-shot)",
+					Type: "STRING",
+					Description: fmt.Sprintf(
+						"Text prompt describing the video (English, max %d characters for single-shot)",
+						maxNovaReelPromptRunes,
+					),
 				},
 				"file_name": {
-					Type:        "STRING",
-					Description: "Artifact filename for the downloaded MP4 (e.g. 'clip.mp4'). Defaults to 'generated_video.mp4'.",
+					Type: "STRING",
+					Description: fmt.Sprintf(
+						"Artifact filename for the downloaded MP4 (e.g. 'clip.mp4'). Defaults to %q.",
+						defaultArtifactFileName,
+					),
 				},
 				"seed": {
 					Type:        "INTEGER",
@@ -273,9 +282,6 @@ func (t *videoGenTool) ProcessRequest(_ tool.Context, req *model.LLMRequest) err
 		req.Config = &genai.GenerateContentConfig{}
 	}
 	decl := t.Declaration()
-	if decl == nil {
-		return nil
-	}
 
 	var funcTool *genai.Tool
 	for _, gt := range req.Config.Tools {
@@ -394,7 +400,7 @@ func (t *videoGenTool) Run(ctx tool.Context, args any) (map[string]any, error) {
 
 	fileName, _ := m["file_name"].(string)
 	if fileName == "" {
-		fileName = "generated_video.mp4"
+		fileName = defaultArtifactFileName
 	}
 
 	prov, err := providerForArgs(t.provider, m)
@@ -402,49 +408,21 @@ func (t *videoGenTool) Run(ctx tool.Context, args any) (map[string]any, error) {
 		return nil, err
 	}
 
-	startOut, err := t.api.StartAsyncInvoke(ctx, &bedrockruntime.StartAsyncInvokeInput{
-		ModelId:    aws.String(prov.ModelID()),
-		ModelInput: document.NewLazyDocument(prov.modelInput(prompt)),
-		OutputDataConfig: &types.AsyncInvokeOutputDataConfigMemberS3OutputDataConfig{
-			Value: types.AsyncInvokeS3OutputDataConfig{
-				S3Uri: aws.String(t.s3OutputURI),
-			},
-		},
-		ClientRequestToken: aws.String(uuid.NewString()),
-	})
+	invocationArn, err := t.startAsyncJob(ctx, prov, prompt)
 	if err != nil {
-		return nil, fmt.Errorf("start async invoke %s: %w", prov.ModelID(), err)
+		return nil, err
 	}
-	if startOut.InvocationArn == nil || *startOut.InvocationArn == "" {
-		return nil, errors.New("start async invoke: empty invocation ARN")
-	}
-	invocationArn := aws.ToString(startOut.InvocationArn)
 
 	final, err := t.pollUntilTerminal(ctx, invocationArn)
 	if err != nil {
 		return nil, err
 	}
 	if final.Status == types.AsyncInvokeStatusFailed {
-		msg := ""
-		if final.FailureMessage != nil {
-			msg = *final.FailureMessage
-		}
-		msg = strings.TrimSpace(msg)
-		if msg == "" {
-			return nil, fmt.Errorf(
-				"video generation failed (no failure message from Bedrock; invocation %s)",
-				invocationArn,
-			)
-		}
-		return nil, fmt.Errorf(
-			"video generation failed: %s (invocation %s)",
-			msg,
-			invocationArn,
-		)
+		return nil, failureError(invocationArn, final.FailureMessage)
 	}
 
-	s3Base, ok := extractOutputS3URI(final.OutputDataConfig)
-	if !ok || s3Base == "" {
+	s3Base := extractOutputS3URI(final.OutputDataConfig)
+	if s3Base == "" {
 		return nil, errors.New("completed job missing S3 output location")
 	}
 	videoS3URI := joinS3Key(s3Base, novaReelOutputKey)
@@ -458,6 +436,47 @@ func (t *videoGenTool) Run(ctx tool.Context, args any) (map[string]any, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// startAsyncJob calls Bedrock StartAsyncInvoke and returns the invocation ARN.
+func (t *videoGenTool) startAsyncJob(
+	ctx tool.Context,
+	prov *ReelProvider,
+	prompt string,
+) (string, error) {
+	startOut, err := t.api.StartAsyncInvoke(ctx, &bedrockruntime.StartAsyncInvokeInput{
+		ModelId:    aws.String(prov.ModelID()),
+		ModelInput: document.NewLazyDocument(prov.modelInput(prompt)),
+		OutputDataConfig: &types.AsyncInvokeOutputDataConfigMemberS3OutputDataConfig{
+			Value: types.AsyncInvokeS3OutputDataConfig{
+				S3Uri: aws.String(t.s3OutputURI),
+			},
+		},
+		ClientRequestToken: aws.String(uuid.NewString()),
+	})
+	if err != nil {
+		return "", fmt.Errorf("start async invoke %s: %w", prov.ModelID(), err)
+	}
+	arn := aws.ToString(startOut.InvocationArn)
+	if arn == "" {
+		return "", errors.New("start async invoke: empty invocation ARN")
+	}
+	return arn, nil
+}
+
+// failureError formats a Bedrock-failure error including the invocation ARN; messages with only whitespace are treated as empty.
+func failureError(invocationArn string, raw *string) error {
+	msg := ""
+	if raw != nil {
+		msg = strings.TrimSpace(*raw)
+	}
+	if msg == "" {
+		return fmt.Errorf(
+			"video generation failed (no failure message from Bedrock; invocation %s)",
+			invocationArn,
+		)
+	}
+	return fmt.Errorf("video generation failed: %s (invocation %s)", msg, invocationArn)
 }
 
 func errVideoGenPollTimeout(maxWait time.Duration) error {
@@ -483,37 +502,42 @@ func (t *videoGenTool) pollUntilTerminal(
 			out.Status == types.AsyncInvokeStatusFailed {
 			return out, nil
 		}
-		// IN_PROGRESS, unknown future statuses, or empty string: wait up to PollInterval or remaining MaxWait.
-		if time.Now().After(deadline) {
-			return nil, errVideoGenPollTimeout(t.maxWait)
-		}
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			return nil, errVideoGenPollTimeout(t.maxWait)
-		}
-		wait := min(t.pollInterval, remaining)
-		timer := time.NewTimer(wait)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
-			return nil, ctx.Err()
-		case <-timer.C:
+		if err := waitForNextPoll(ctx, deadline, t.pollInterval, t.maxWait); err != nil {
+			return nil, err
 		}
 	}
 }
 
-func extractOutputS3URI(cfg types.AsyncInvokeOutputDataConfig) (string, bool) {
-	switch v := cfg.(type) {
-	case *types.AsyncInvokeOutputDataConfigMemberS3OutputDataConfig:
-		if v == nil {
-			return "", false
-		}
-		return aws.ToString(v.Value.S3Uri), true
-	default:
-		return "", false
+// waitForNextPoll sleeps up to pollInterval, capped at the remaining time until deadline.
+// Returns ctx.Err() if the context is cancelled, or errVideoGenPollTimeout if the deadline has passed.
+func waitForNextPoll(
+	ctx context.Context,
+	deadline time.Time,
+	pollInterval, maxWait time.Duration,
+) error {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return errVideoGenPollTimeout(maxWait)
 	}
+	wait := min(pollInterval, remaining)
+	timer := time.NewTimer(wait)
+	select {
+	case <-ctx.Done():
+		if !timer.Stop() {
+			<-timer.C
+		}
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func extractOutputS3URI(cfg types.AsyncInvokeOutputDataConfig) string {
+	v, ok := cfg.(*types.AsyncInvokeOutputDataConfigMemberS3OutputDataConfig)
+	if !ok || v == nil {
+		return ""
+	}
+	return aws.ToString(v.Value.S3Uri)
 }
 
 func joinS3Key(s3URI, filename string) string {
