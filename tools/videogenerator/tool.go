@@ -25,7 +25,7 @@ import (
 
 // DefaultReelModelID is the Bedrock model for [ReelProvider] when modelID is empty.
 // See https://docs.aws.amazon.com/nova/latest/userguide/video-generation.html
-const DefaultReelModelID = "amazon.nova-reel-v1:1"
+const DefaultReelModelID = "amazon.nova-reel-v1:0"
 
 const (
 	defaultDurationSeconds  = 6
