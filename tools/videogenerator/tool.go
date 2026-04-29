@@ -100,12 +100,13 @@ type ReelProvider struct {
 }
 
 // NewReelProvider returns a single-shot text-to-video provider.
-// Pass an empty modelID to use [DefaultReelModelID]. Seed 0 selects a random seed in-range.
+// Pass an empty modelID to use [DefaultReelModelID].
+// Seed <= 0 (including zero and negatives) selects a random in-range seed; positive seeds are clamped to Nova’s allowed range.
 func NewReelProvider(modelID string, seed int64) *ReelProvider {
 	if modelID == "" {
 		modelID = DefaultReelModelID
 	}
-	if seed == 0 {
+	if seed <= 0 {
 		seed = randomNovaReelSeed()
 	} else {
 		seed = clampNovaReelSeed(seed)
@@ -238,7 +239,7 @@ func (t *videoGenTool) Declaration() *genai.FunctionDeclaration {
 				},
 				"seed": {
 					Type:        "INTEGER",
-					Description: "Optional seed for reproducibility; omit for random.",
+					Description: "Optional positive integer seed for reproducibility; omit, zero, or non-positive values select a random seed.",
 				},
 			},
 			Required: []string{"prompt"},
@@ -455,6 +456,9 @@ func (t *videoGenTool) pollUntilTerminal(
 	defer ticker.Stop()
 	deadline := time.Now().Add(t.maxWait)
 	for {
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("video generation timed out after %v", t.maxWait)
+		}
 		out, err := t.api.GetAsyncInvoke(ctx, &bedrockruntime.GetAsyncInvokeInput{
 			InvocationArn: aws.String(invocationArn),
 		})
@@ -465,7 +469,7 @@ func (t *videoGenTool) pollUntilTerminal(
 			out.Status == types.AsyncInvokeStatusFailed {
 			return out, nil
 		}
-		// IN_PROGRESS, unknown future statuses, or empty string: poll with backoff.
+		// IN_PROGRESS, unknown future statuses, or empty string: fixed-interval wait then poll again.
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("video generation timed out after %v", t.maxWait)
 		}

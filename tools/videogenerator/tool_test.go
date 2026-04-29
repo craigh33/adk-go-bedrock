@@ -208,6 +208,17 @@ func TestNew_OK(t *testing.T) {
 	}
 }
 
+func TestNewReelProvider_NegativeSeed_IsRandomInRange(t *testing.T) {
+	t.Parallel()
+	p := NewReelProvider("", -1)
+	if p.Seed == 0 {
+		t.Fatal("negative seed should not produce deterministic 0")
+	}
+	if p.Seed < 1 || p.Seed > maxNovaReelSeed {
+		t.Fatalf("Seed = %d, want [1,%d]", p.Seed, maxNovaReelSeed)
+	}
+}
+
 func TestProcessRequest_PacksDeclaration(t *testing.T) {
 	t.Parallel()
 	tl, _ := New(Config{API: &fakeAsyncAPI{}, S3OutputURI: "s3://b"})
@@ -254,6 +265,21 @@ func TestProviderForArgs_IntegerFloat(t *testing.T) {
 	}
 	if p.Seed != 1 {
 		t.Fatalf("Seed = %d, want 1", p.Seed)
+	}
+}
+
+func TestProviderForArgs_NegativeSeed_IsRandomInRange(t *testing.T) {
+	t.Parallel()
+	base := NewReelProvider("", 99)
+	p, err := providerForArgs(base, map[string]any{"seed": -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Seed == 0 {
+		t.Fatal("negative seed should not produce deterministic 0")
+	}
+	if p.Seed < 1 || p.Seed > maxNovaReelSeed {
+		t.Fatalf("Seed = %d, want [1,%d]", p.Seed, maxNovaReelSeed)
 	}
 }
 
