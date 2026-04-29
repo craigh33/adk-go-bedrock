@@ -8,7 +8,96 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	"google.golang.org/adk/model"
 	"google.golang.org/genai"
+
+	"github.com/craigh33/adk-go-bedrock/tools/novagrounding"
 )
+
+func TestToolConfigurationFromGenai_NovaGroundingSentinelMapsToSystemTool(t *testing.T) {
+	t.Parallel()
+	cfg := &genai.GenerateContentConfig{
+		Tools: []*genai.Tool{novagrounding.Tool()},
+	}
+	in, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("x", "user")},
+		Config:   cfg,
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.ToolConfig == nil || len(in.ToolConfig.Tools) != 1 {
+		t.Fatalf("expected one tool, got: %+v", in.ToolConfig)
+	}
+	st, ok := in.ToolConfig.Tools[0].(*types.ToolMemberSystemTool)
+	if !ok || st.Value.Name == nil || *st.Value.Name != novagrounding.SystemToolName {
+		t.Fatalf("expected system tool nova_grounding, got: %+v", in.ToolConfig.Tools[0])
+	}
+}
+
+func TestToolConfigurationFromGenai_NovaGroundingWithOtherFunctionDeclarations(t *testing.T) {
+	t.Parallel()
+	cfg := &genai.GenerateContentConfig{
+		Tools: []*genai.Tool{{
+			FunctionDeclarations: []*genai.FunctionDeclaration{
+				{
+					Name:        novagrounding.SentinelFunctionDeclarationName,
+					Description: "grounding",
+					Parameters: &genai.Schema{
+						Type:       "object",
+						Properties: map[string]*genai.Schema{},
+					},
+				},
+				{
+					Name:        "get_weather",
+					Description: "weather",
+					Parameters: &genai.Schema{
+						Type: "object",
+						Properties: map[string]*genai.Schema{
+							"city": {Type: "string"},
+						},
+					},
+				},
+			},
+		}},
+	}
+	in, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("x", "user")},
+		Config:   cfg,
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.ToolConfig == nil || len(in.ToolConfig.Tools) != 2 {
+		t.Fatalf("expected system tool + function tool, got: %+v", in.ToolConfig)
+	}
+	if _, ok := in.ToolConfig.Tools[0].(*types.ToolMemberSystemTool); !ok {
+		t.Fatalf("expected first tool system tool, got %T", in.ToolConfig.Tools[0])
+	}
+	ts, ok := in.ToolConfig.Tools[1].(*types.ToolMemberToolSpec)
+	if !ok || ts.Value.Name == nil || *ts.Value.Name != "get_weather" {
+		t.Fatalf("expected get_weather tool spec, got %+v", in.ToolConfig.Tools[1])
+	}
+}
+
+func TestToolConfigurationFromGenai_NovaGroundingDedupedAcrossToolEntries(t *testing.T) {
+	t.Parallel()
+	cfg := &genai.GenerateContentConfig{
+		Tools: []*genai.Tool{novagrounding.Tool(), novagrounding.Tool()},
+	}
+	in, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("x", "user")},
+		Config:   cfg,
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.ToolConfig == nil || len(in.ToolConfig.Tools) != 1 {
+		t.Fatalf("expected single deduped system tool, got: %+v", in.ToolConfig)
+	}
+	st, ok := in.ToolConfig.Tools[0].(*types.ToolMemberSystemTool)
+	if !ok || st.Value.Name == nil || *st.Value.Name != novagrounding.SystemToolName {
+		t.Fatalf("expected system tool nova_grounding, got: %+v", in.ToolConfig.Tools[0])
+	}
+}
 
 func TestToolConfigurationFromGenai(t *testing.T) {
 	t.Parallel()

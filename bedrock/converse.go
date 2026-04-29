@@ -298,6 +298,7 @@ type streamState struct {
 	toolsBySlot       map[int32]*streamToolCall
 	imagesBySlot      map[int32]*streamImageBlock
 	reasonBySlot      map[int32]*streamReasoningBlock
+	citationsBySlot   map[int32][]map[string]any
 	slotOrder         []int32
 	lastUsage         *genai.GenerateContentResponseUsageMetadata
 	customMetadata    map[string]any
@@ -437,6 +438,17 @@ func (s *streamState) onContentBlockDelta(ev *types.ContentBlockDeltaEvent) (*mo
 			}
 		}
 		return nil, nil //nolint:nilnil // Tool input deltas are buffered until final response.
+	case *types.ContentBlockDeltaMemberCitation:
+		idx := *ev.ContentBlockIndex
+		s.rememberSlot(idx)
+		m := mappers.CitationsDeltaToMap(d.Value)
+		if len(m) > 0 {
+			if s.citationsBySlot == nil {
+				s.citationsBySlot = make(map[int32][]map[string]any)
+			}
+			s.citationsBySlot[idx] = append(s.citationsBySlot[idx], m)
+		}
+		return nil, nil //nolint:nilnil // Citation deltas are buffered until final response.
 	default:
 		return nil, nil //nolint:nilnil // Unsupported delta type is intentionally ignored.
 	}
@@ -528,9 +540,40 @@ func (s *streamState) finalParts() ([]*genai.Part, []string) { //nolint:gocognit
 
 	// Assemble all parts in strict slot order to preserve Bedrock block ordering
 	for _, idx := range s.sortedSlotOrder() {
-		// Emit text for this slot
+		var cites []map[string]any
+		if s.citationsBySlot != nil {
+			cites = s.citationsBySlot[idx]
+		}
+		hasText := false
+		var textStr string
 		if text := s.textBySlot[idx]; text != nil && text.Text.Len() > 0 {
-			parts = append(parts, &genai.Part{Text: text.Text.String()})
+			hasText = true
+			textStr = text.Text.String()
+		}
+
+		// Text + citations on one part when both exist (matches unary CitationsContentBlock mapping).
+		if hasText {
+			part := &genai.Part{Text: textStr}
+			if len(cites) > 0 {
+				out := make([]any, len(cites))
+				for i, c := range cites {
+					out[i] = c
+				}
+				part.PartMetadata = map[string]any{
+					mappers.PartMetadataKeyBedrockCitations: out,
+				}
+			}
+			parts = append(parts, part)
+		} else if len(cites) > 0 {
+			out := make([]any, len(cites))
+			for i, c := range cites {
+				out[i] = c
+			}
+			parts = append(parts, &genai.Part{
+				PartMetadata: map[string]any{
+					mappers.PartMetadataKeyBedrockCitations: out,
+				},
+			})
 		}
 
 		// Emit reasoning for this slot
