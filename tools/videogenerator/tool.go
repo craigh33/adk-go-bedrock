@@ -94,6 +94,16 @@ func validateS3OutputURI(uri string) error {
 	return nil
 }
 
+// bedrockClientRequestToken adapts ADK FunctionCallID for Bedrock StartAsyncInvoke's ClientRequestToken.
+// ADK IDs use underscores (e.g. tooluse_…); Bedrock rejects those characters for this field.
+func bedrockClientRequestToken(functionCallID string) string {
+	s := strings.TrimSpace(strings.ReplaceAll(functionCallID, "_", "-"))
+	if s == "" {
+		return uuid.NewString()
+	}
+	return s
+}
+
 // AsyncInvokeAPI is the Bedrock Runtime subset needed for Nova Reel (async-only).
 type AsyncInvokeAPI interface {
 	StartAsyncInvoke(
@@ -492,10 +502,7 @@ func (t *videoGenTool) Run(ctx tool.Context, args any) (map[string]any, error) {
 		return nil, err
 	}
 
-	clientToken := strings.TrimSpace(ctx.FunctionCallID())
-	if clientToken == "" {
-		clientToken = uuid.NewString()
-	}
+	clientToken := bedrockClientRequestToken(ctx.FunctionCallID())
 	invocationArn, err := t.startAsyncJob(ctx, prov, prompt, clientToken)
 	if err != nil {
 		return nil, err

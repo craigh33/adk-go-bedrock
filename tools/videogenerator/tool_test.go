@@ -836,6 +836,15 @@ func TestClampNovaReelSeed_PositiveNeverZero(t *testing.T) {
 	}
 }
 
+func TestBedrockClientRequestToken_UnderscoresBecomeHyphens(t *testing.T) {
+	t.Parallel()
+	in := "tooluse_B4uve78V0K9kJJr2v4hA1L"
+	want := "tooluse-B4uve78V0K9kJJr2v4hA1L"
+	if got := bedrockClientRequestToken(in); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestJoinS3Key(t *testing.T) {
 	t.Parallel()
 	got := joinS3Key("s3://bucket/prefix/", "output.mp4")
