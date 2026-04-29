@@ -54,7 +54,13 @@ func validateS3OutputURI(uri string) error {
 		)
 	}
 	rest := strings.TrimPrefix(s, prefix)
-	rest = strings.TrimLeft(rest, "/")
+	if strings.HasPrefix(rest, "/") {
+		return fmt.Errorf(
+			"videogenerator: S3OutputURI must be s3://bucket or s3://bucket/prefix (no '/' immediately after %q), got %q",
+			prefix,
+			uri,
+		)
+	}
 	if rest == "" {
 		return errors.New(
 			"videogenerator: S3OutputURI must include a bucket name after s3:// (e.g. s3://my-bucket/prefix)",
@@ -158,6 +164,7 @@ type Config struct {
 	S3OutputURI string
 
 	// Provider builds model input; if nil, a default [NewReelProvider]("", 0) is used.
+	// If non-nil with Seed <= 0, [New] replaces it with [NewReelProvider](ModelID(), 0) so the payload gets a random in-range seed.
 	Provider *ReelProvider
 
 	// S3 downloads output.mp4 after the job completes. If nil, Run returns video_s3_uri only (no artifact).
@@ -189,6 +196,8 @@ func New(cfg Config) (tool.Tool, error) {
 	prov := cfg.Provider
 	if prov == nil {
 		prov = NewReelProvider("", 0)
+	} else if prov.Seed <= 0 {
+		prov = NewReelProvider(prov.ModelID(), 0)
 	}
 	poll := cfg.PollInterval
 	if poll <= 0 {
@@ -448,6 +457,10 @@ func (t *videoGenTool) Run(ctx tool.Context, args any) (map[string]any, error) {
 	return out, nil
 }
 
+func errVideoGenPollTimeout(maxWait time.Duration) error {
+	return fmt.Errorf("video generation timed out after %v", maxWait)
+}
+
 func (t *videoGenTool) pollUntilTerminal(
 	ctx context.Context,
 	invocationArn string,
@@ -457,7 +470,7 @@ func (t *videoGenTool) pollUntilTerminal(
 	deadline := time.Now().Add(t.maxWait)
 	for {
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("video generation timed out after %v", t.maxWait)
+			return nil, errVideoGenPollTimeout(t.maxWait)
 		}
 		out, err := t.api.GetAsyncInvoke(ctx, &bedrockruntime.GetAsyncInvokeInput{
 			InvocationArn: aws.String(invocationArn),
@@ -471,7 +484,7 @@ func (t *videoGenTool) pollUntilTerminal(
 		}
 		// IN_PROGRESS, unknown future statuses, or empty string: fixed-interval wait then poll again.
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("video generation timed out after %v", t.maxWait)
+			return nil, errVideoGenPollTimeout(t.maxWait)
 		}
 		select {
 		case <-ctx.Done():

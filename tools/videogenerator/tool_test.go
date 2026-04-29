@@ -194,6 +194,41 @@ func TestNew_InvalidS3OutputURI_NoBucket(t *testing.T) {
 	}
 }
 
+func TestNew_InvalidS3OutputURI_LeadingSlashAfterScheme(t *testing.T) {
+	t.Parallel()
+	_, err := New(Config{API: &fakeAsyncAPI{}, S3OutputURI: "s3:///my-bucket/out"})
+	if err == nil {
+		t.Fatal("expected error for s3:///… (slash immediately after scheme)")
+	}
+}
+
+func TestNew_NormalizesProviderNonPositiveSeed(t *testing.T) {
+	t.Parallel()
+	prov := &ReelProvider{modelID: DefaultReelModelID, Seed: 0}
+	tl, err := New(Config{
+		API:         &fakeAsyncAPI{},
+		S3OutputURI: "s3://bucket",
+		Provider:    prov,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gt := tl.(*videoGenTool)
+	if gt.provider.Seed <= 0 || gt.provider.Seed > maxNovaReelSeed {
+		t.Fatalf("expected randomized positive seed, got %d", gt.provider.Seed)
+	}
+
+	neg := &ReelProvider{modelID: DefaultReelModelID, Seed: -3}
+	tl2, err := New(Config{API: &fakeAsyncAPI{}, S3OutputURI: "s3://bucket", Provider: neg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gt2 := tl2.(*videoGenTool)
+	if gt2.provider.Seed <= 0 || gt2.provider.Seed > maxNovaReelSeed {
+		t.Fatalf("expected randomized positive seed, got %d", gt2.provider.Seed)
+	}
+}
+
 func TestNew_OK(t *testing.T) {
 	t.Parallel()
 	tl, err := New(Config{API: &fakeAsyncAPI{}, S3OutputURI: "s3://bucket"})
