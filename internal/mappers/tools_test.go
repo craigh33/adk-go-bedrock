@@ -187,10 +187,10 @@ func TestToolConfigurationFromGenai_MultipleToolVariantsReturnUnsupportedError(t
 	}
 }
 
-func TestNormalizaSchema_MapPassthrough(t *testing.T) {
+func TestNormalizeSchema_MapPassthrough(t *testing.T) {
 	t.Parallel()
 	in := map[string]any{"type": "object", "properties": map[string]any{"x": map[string]any{"type": "string"}}}
-	got, err := normalizaSchema(in)
+	got, err := normalizeSchema(in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestNormalizaSchema_MapPassthrough(t *testing.T) {
 	delete(in, "_probe")
 }
 
-func TestNormalizaSchema_StructRoundTripsToMap(t *testing.T) {
+func TestNormalizeSchema_StructRoundTripsToMap(t *testing.T) {
 	t.Parallel()
 	// Simulates ADK FunctionTool / genai where parametersJsonSchema is not map[string]any.
 	type nested struct {
@@ -221,7 +221,7 @@ func TestNormalizaSchema_StructRoundTripsToMap(t *testing.T) {
 			"n": {Type: "NUMBER", Nested: nested{Min: 1}, Ignored: "skip"},
 		},
 	}
-	got, err := normalizaSchema(schema)
+	got, err := normalizeSchema(schema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,10 +248,10 @@ func TestNormalizaSchema_StructRoundTripsToMap(t *testing.T) {
 	}
 }
 
-func TestNormalizaSchema_UnmarshalableJSONReturnsError(t *testing.T) {
+func TestNormalizeSchema_UnmarshalableJSONReturnsError(t *testing.T) {
 	t.Parallel()
 	ch := make(chan int)
-	_, err := normalizaSchema(ch)
+	_, err := normalizeSchema(ch)
 	if err == nil || !strings.Contains(err.Error(), "marshal") {
 		t.Fatalf("expected marshal error, got: %v", err)
 	}
