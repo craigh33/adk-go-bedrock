@@ -216,6 +216,18 @@ func TestNew_MaxArtifactBytesNegative(t *testing.T) {
 	}
 }
 
+func TestNew_MaxPollIntervalNegative(t *testing.T) {
+	t.Parallel()
+	_, err := New(Config{
+		API:             &fakeAsyncAPI{},
+		S3OutputURI:     "s3://b/p",
+		MaxPollInterval: -1 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected error for negative MaxPollInterval")
+	}
+}
+
 func TestNew_InvalidS3OutputURI_LeadingSlashAfterScheme(t *testing.T) {
 	t.Parallel()
 	_, err := New(Config{API: &fakeAsyncAPI{}, S3OutputURI: "s3:///my-bucket/out"})
@@ -262,6 +274,50 @@ func TestNew_OK(t *testing.T) {
 	}
 	if !tl.IsLongRunning() {
 		t.Error("IsLongRunning should be true")
+	}
+}
+
+func TestDeclaration_ReturnsSamePointer(t *testing.T) {
+	t.Parallel()
+	tl, err := New(Config{API: &fakeAsyncAPI{}, S3OutputURI: "s3://bucket"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gt := tl.(*videoGenTool)
+	d1 := gt.Declaration()
+	d2 := gt.Declaration()
+	if d1 == nil || d2 == nil {
+		t.Fatal("expected non-nil declaration")
+	}
+	if d1 != d2 {
+		t.Fatal("Declaration() should return the same cached *genai.FunctionDeclaration")
+	}
+}
+
+func TestNextPollBackoff(t *testing.T) {
+	t.Parallel()
+	maxPoll := 30 * time.Second
+	if g := nextPollBackoff(5*time.Second, maxPoll); g != 10*time.Second {
+		t.Fatalf("nextPollBackoff(5s) = %v, want 10s", g)
+	}
+	if g := nextPollBackoff(16*time.Second, maxPoll); g != maxPoll {
+		t.Fatalf("nextPollBackoff(16s) = %v, want 30s cap", g)
+	}
+	if g := nextPollBackoff(30*time.Second, maxPoll); g != maxPoll {
+		t.Fatalf("nextPollBackoff(30s) = %v, want 30s", g)
+	}
+}
+
+func TestJitterPollDelay_Range(t *testing.T) {
+	t.Parallel()
+	base := time.Second
+	for range 500 {
+		got := jitterPollDelay(base)
+		low := time.Duration(int64(base) * 80 / 100)
+		high := time.Duration(int64(base) * 120 / 100)
+		if got < low || got > high {
+			t.Fatalf("jitterPollDelay(%v) = %v, want [%v,%v]", base, got, low, high)
+		}
 	}
 }
 
@@ -607,7 +663,7 @@ func TestRun_Success_NoS3Download(t *testing.T) {
 	}
 }
 
-func TestRun_Success_UnknownStatusThenCompleted(t *testing.T) {
+func TestRun_UnexpectedAsyncInvokeStatus_FailsFast(t *testing.T) {
 	t.Parallel()
 	arn := "arn:aws:bedrock:us-east-1:123:async-invoke/unknown-then-ok"
 	api := &fakeAsyncAPI{
@@ -618,15 +674,6 @@ func TestRun_Success_UnknownStatusThenCompleted(t *testing.T) {
 			{
 				InvocationArn: aws.String(arn),
 				Status:        types.AsyncInvokeStatus("FutureOrUnknownStatus"),
-			},
-			{
-				InvocationArn: aws.String(arn),
-				Status:        types.AsyncInvokeStatusCompleted,
-				OutputDataConfig: &types.AsyncInvokeOutputDataConfigMemberS3OutputDataConfig{
-					Value: types.AsyncInvokeS3OutputDataConfig{
-						S3Uri: aws.String("s3://out-bucket/prefix"),
-					},
-				},
 			},
 		},
 	}
@@ -641,14 +688,17 @@ func TestRun_Success_UnknownStatusThenCompleted(t *testing.T) {
 		t.Fatal(err)
 	}
 	gt := tl.(*videoGenTool)
-	result, err := gt.Run(newFakeToolCtx(&fakeArtifacts{version: 1}), map[string]any{
+	_, err = gt.Run(newFakeToolCtx(&fakeArtifacts{version: 1}), map[string]any{
 		"prompt": "test",
 	})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
+	if err == nil {
+		t.Fatal("expected error for unexpected async invoke status")
 	}
-	if result["video_s3_uri"] != "s3://out-bucket/prefix/output.mp4" {
-		t.Errorf("video_s3_uri = %v", result["video_s3_uri"])
+	if !strings.Contains(err.Error(), "FutureOrUnknownStatus") || !strings.Contains(err.Error(), arn) {
+		t.Fatalf("error should mention status and invocation ARN: %v", err)
+	}
+	if api.getCalls != 1 {
+		t.Fatalf("GetAsyncInvoke calls = %d, want 1 (fail fast)", api.getCalls)
 	}
 }
 

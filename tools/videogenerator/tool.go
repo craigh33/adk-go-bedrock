@@ -28,6 +28,11 @@ import (
 const DefaultReelModelID = "amazon.nova-reel-v1:0"
 
 const (
+	videoGenToolName        = "generate_video"
+	videoGenToolDescription = `Generates a short video from a text prompt using Amazon Nova Reel (Bedrock async invoke), stores output in your configured S3 location, and saves the MP4 as an artifact when S3 download is configured.
+
+NOTE: This is a long-running operation (often minutes). Do not call this tool again for the same request until it returns.`
+
 	defaultDurationSeconds  = 6
 	defaultFPS              = 24
 	defaultDimension        = "1280x720"
@@ -39,6 +44,14 @@ const (
 
 	// defaultMaxArtifactBytes caps S3 download size when persisting MP4 artifacts (RAM bounded).
 	defaultMaxArtifactBytes int64 = 512 << 20 // 512 MiB
+
+	// defaultMaxPollInterval caps exponential backoff between GetAsyncInvoke polls.
+	defaultMaxPollInterval = 30 * time.Second
+
+	// jitterPercentRange is the argument to [rand.IntN]; added to jitterPercentFloor yields up to 120 (%).
+	jitterPercentRange   = 41
+	jitterPercentFloor   = 80
+	jitterPercentDivisor = 100
 
 	// maxExactIntegerFloat is the largest integer magnitude where every integer
 	// in [-N, N] is exactly representable as float64 (IEEE 754 doubles).
@@ -179,8 +192,10 @@ type Config struct {
 	// S3 downloads output.mp4 after the job completes. If nil, Run returns video_s3_uri only (no artifact).
 	S3 S3GetObjectAPI
 
-	// PollInterval is the delay between GetAsyncInvoke polls. Zero defaults to 5s.
+	// PollInterval is the initial delay before the first sleep while status is InProgress; backoff doubles until MaxPollInterval. Zero defaults to 5s.
 	PollInterval time.Duration
+	// MaxPollInterval is the maximum delay between GetAsyncInvoke polls under exponential backoff. Zero defaults to defaultMaxPollInterval.
+	MaxPollInterval time.Duration
 	// MaxWait is the maximum time to wait for job completion. Zero defaults to 30m.
 	MaxWait time.Duration
 
@@ -195,8 +210,10 @@ type videoGenTool struct {
 	s3OutputURI      string
 	provider         *ReelProvider
 	pollInterval     time.Duration
+	maxPollInterval  time.Duration
 	maxWait          time.Duration
 	maxArtifactBytes int64
+	decl             *genai.FunctionDeclaration
 }
 
 // New creates an ADK tool that generates video via Nova Reel async invoke.
@@ -217,6 +234,16 @@ func New(cfg Config) (tool.Tool, error) {
 	if poll <= 0 {
 		poll = 5 * time.Second
 	}
+	if cfg.MaxPollInterval < 0 {
+		return nil, errors.New("videogenerator: MaxPollInterval cannot be negative")
+	}
+	maxPoll := cfg.MaxPollInterval
+	if maxPoll == 0 {
+		maxPoll = defaultMaxPollInterval
+	}
+	if poll > maxPoll {
+		poll = maxPoll
+	}
 	maxWait := cfg.MaxWait
 	if maxWait <= 0 {
 		maxWait = 30 * time.Minute
@@ -234,29 +261,26 @@ func New(cfg Config) (tool.Tool, error) {
 		s3OutputURI:      strings.TrimSpace(cfg.S3OutputURI),
 		provider:         prov,
 		pollInterval:     poll,
+		maxPollInterval:  maxPoll,
 		maxWait:          maxWait,
 		maxArtifactBytes: maxArt,
+		decl:             newFunctionDeclaration(),
 	}, nil
 }
 
 func (t *videoGenTool) Name() string {
-	return "generate_video"
+	return videoGenToolName
 }
 
 func (t *videoGenTool) Description() string {
-	return `Generates a short video from a text prompt using Amazon Nova Reel (Bedrock async invoke), stores output in your configured S3 location, and saves the MP4 as an artifact when S3 download is configured.
-
-NOTE: This is a long-running operation (often minutes). Do not call this tool again for the same request until it returns.`
+	return videoGenToolDescription
 }
 
-func (t *videoGenTool) IsLongRunning() bool {
-	return true
-}
-
-func (t *videoGenTool) Declaration() *genai.FunctionDeclaration {
+// newFunctionDeclaration builds the tool schema once; [videoGenTool.decl] reuses this pointer.
+func newFunctionDeclaration() *genai.FunctionDeclaration {
 	return &genai.FunctionDeclaration{
-		Name:        t.Name(),
-		Description: t.Description(),
+		Name:        videoGenToolName,
+		Description: videoGenToolDescription,
 		Parameters: &genai.Schema{
 			Type: "OBJECT",
 			Properties: map[string]*genai.Schema{
@@ -282,6 +306,14 @@ func (t *videoGenTool) Declaration() *genai.FunctionDeclaration {
 			Required: []string{"prompt"},
 		},
 	}
+}
+
+func (t *videoGenTool) IsLongRunning() bool {
+	return true
+}
+
+func (t *videoGenTool) Declaration() *genai.FunctionDeclaration {
+	return t.decl
 }
 
 func (t *videoGenTool) ProcessRequest(_ tool.Context, req *model.LLMRequest) error {
@@ -541,11 +573,34 @@ func errVideoGenPollTimeout(maxWait time.Duration) error {
 	return fmt.Errorf("video generation timed out after %v", maxWait)
 }
 
+// nextPollBackoff returns min(prev*2, maxPoll), handling overflow and cap.
+func nextPollBackoff(prev, maxPoll time.Duration) time.Duration {
+	if prev >= maxPoll {
+		return maxPoll
+	}
+	doubled := prev * 2
+	if doubled < prev || doubled > maxPoll {
+		return maxPoll
+	}
+	return doubled
+}
+
+// jitterPollDelay returns d scaled to [80%,120%] to reduce aligned retries.
+func jitterPollDelay(d time.Duration) time.Duration {
+	if d <= 0 {
+		return d
+	}
+	//nolint:gosec // G404: non-cryptographic jitter for poll spacing only.
+	p := jitterPercentFloor + rand.IntN(jitterPercentRange)
+	return time.Duration(int64(d) * int64(p) / jitterPercentDivisor)
+}
+
 func (t *videoGenTool) pollUntilTerminal(
 	ctx context.Context,
 	invocationArn string,
 ) (*bedrockruntime.GetAsyncInvokeOutput, error) {
 	deadline := time.Now().Add(t.maxWait)
+	sleepDur := t.pollInterval
 	for {
 		if time.Now().After(deadline) {
 			return nil, errVideoGenPollTimeout(t.maxWait)
@@ -556,28 +611,35 @@ func (t *videoGenTool) pollUntilTerminal(
 		if err != nil {
 			return nil, fmt.Errorf("get async invoke (poll): %w", err)
 		}
-		if out.Status == types.AsyncInvokeStatusCompleted ||
-			out.Status == types.AsyncInvokeStatusFailed {
+		switch out.Status {
+		case types.AsyncInvokeStatusCompleted, types.AsyncInvokeStatusFailed:
 			return out, nil
-		}
-		if err := waitForNextPoll(ctx, deadline, t.pollInterval, t.maxWait); err != nil {
-			return nil, err
+		case types.AsyncInvokeStatusInProgress:
+			if err := t.sleepPollBackoff(ctx, deadline, sleepDur); err != nil {
+				return nil, err
+			}
+			sleepDur = nextPollBackoff(sleepDur, t.maxPollInterval)
+		default:
+			return nil, fmt.Errorf(
+				"unexpected async invoke status %q (invocation %s)",
+				out.Status,
+				invocationArn,
+			)
 		}
 	}
 }
 
-// waitForNextPoll sleeps up to pollInterval, capped at the remaining time until deadline.
+// sleepPollBackoff sleeps up to jittered sleepDur, capped by remaining time until deadline.
 // Returns ctx.Err() if the context is cancelled, or errVideoGenPollTimeout if the deadline has passed.
-func waitForNextPoll(
-	ctx context.Context,
-	deadline time.Time,
-	pollInterval, maxWait time.Duration,
-) error {
+func (t *videoGenTool) sleepPollBackoff(ctx context.Context, deadline time.Time, sleepDur time.Duration) error {
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
-		return errVideoGenPollTimeout(maxWait)
+		return errVideoGenPollTimeout(t.maxWait)
 	}
-	wait := min(pollInterval, remaining)
+	wait := min(jitterPollDelay(sleepDur), remaining)
+	if wait <= 0 {
+		return errVideoGenPollTimeout(t.maxWait)
+	}
 	timer := time.NewTimer(wait)
 	select {
 	case <-ctx.Done():
