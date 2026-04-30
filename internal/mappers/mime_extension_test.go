@@ -16,6 +16,14 @@ func TestMIMETypeFromExtension(t *testing.T) {
 		{"a.png", mimeImagePNG},
 		{"b.JPEG", mimeImageJPEG},
 		{"clip.mp4", mimeVideoMP4},
+		{"data.json", mimeApplicationJSON},
+		{"trace.har", mimeApplicationJSON},
+		{"out.log", mimeTextPlain},
+		{"k8s.yaml", mimeTextYAML},
+		{"app.xml", mimeApplicationXML},
+		{"cfg.toml", mimeApplicationTOML},
+		{"main.go", mimeTextPlain},
+		{"lib.rs", mimeTextPlain},
 		{"unknown.xyz", mimeApplicationOctetStream},
 		{"noext", mimeApplicationOctetStream},
 	}
@@ -35,5 +43,13 @@ func TestInferDocumentMIMEFromFilename_usesMIMETypeFromExtension(t *testing.T) {
 	_, ok = inferDocumentMIMEFromFilename("photo.png")
 	if ok {
 		t.Fatal("expected no document inference for .png")
+	}
+	m, ok = inferDocumentMIMEFromFilename("/tmp/a/data.json")
+	if !ok || m != mimeApplicationJSON {
+		t.Fatalf("infer .json: got %q, ok=%v", m, ok)
+	}
+	m, ok = inferDocumentMIMEFromFilename("errors.log")
+	if !ok || m != mimeTextPlain {
+		t.Fatalf("infer .log: got %q, ok=%v", m, ok)
 	}
 }
