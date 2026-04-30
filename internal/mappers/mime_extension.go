@@ -105,9 +105,11 @@ var mimeTypeByExtension = map[string]string{
 	".dart":    mimeTextPlain,
 }
 
-// MIMETypeFromExtension returns an IANA media type inferred from the path's filename extension
-// (case-insensitive). The mapping covers types commonly used with Bedrock Converse (documents,
-// images, audio, video). Unrecognized extensions return application/octet-stream.
+// MIMETypeFromExtension returns a media type from the path's filename extension
+// (case-insensitive) using a Bedrock-oriented, best-effort mapping. The mapping covers types
+// commonly used with Bedrock Converse (documents, images, audio, video) and intentionally
+// maps many textual/source-code extensions to text/plain for compatibility. Unrecognized
+// extensions return application/octet-stream.
 //
 // This is a best-effort hint for clients that only know the file path (e.g. local uploads);
 // prefer an explicit MIME from the source (browser File.type, HTTP Content-Type) when available.
