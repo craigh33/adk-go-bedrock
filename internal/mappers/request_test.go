@@ -231,6 +231,7 @@ func TestPartsToContentBlocks_octetStreamJSONHARLogByFilename(t *testing.T) {
 		{"trace.har", types.DocumentFormatTxt},
 		{"app.log", types.DocumentFormatTxt},
 	} {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			blocks, err := PartsToContentBlocks([]*genai.Part{{

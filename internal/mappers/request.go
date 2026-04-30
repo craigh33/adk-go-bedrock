@@ -517,7 +517,7 @@ func isTextualApplicationDocumentMIME(mime string) bool {
 		mimeApplicationXML, "application/xhtml+xml", "application/atom+xml",
 		"application/javascript", "application/x-javascript",
 		"application/typescript",
-		mimeTextYAML, "application/yaml", "application/x-yaml",
+		"application/yaml", "application/x-yaml",
 		"application/sql",
 		"application/graphql",
 		mimeApplicationTOML, "application/x-toml",
