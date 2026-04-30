@@ -36,6 +36,26 @@ func MIMETypeFromExtension(path string) string {
 		return mimeTextPlain
 	case ".md":
 		return mimeTextMarkdown
+	case ".json", ".har":
+		return mimeApplicationJSON
+	case ".log":
+		return mimeTextPlain
+	case ".yaml", ".yml":
+		return mimeTextYAML
+	case ".xml":
+		return mimeApplicationXML
+	case ".toml":
+		return mimeApplicationTOML
+	// Source, markup, and shell (Bedrock document format txt)
+	case ".go", ".rs", ".py", ".pyw", ".pyi", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte",
+		".java", ".kt", ".kts", ".swift", ".rb", ".rbw", ".php", ".cs", ".fs", ".fsx", ".fsi",
+		".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", ".ino",
+		".sh", ".bash", ".zsh", ".fish", ".ps1", ".psm1",
+		".sql", ".graphql", ".gql",
+		".css", ".scss", ".less",
+		".r", ".lua", ".pl", ".pm", ".vim",
+		".scala", ".clj", ".cljs", ".ex", ".exs", ".erl", ".hrl", ".dart":
+		return mimeTextPlain
 	case ".ppt":
 		return mimeApplicationPPT
 	case ".pptx":

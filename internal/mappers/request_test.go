@@ -200,6 +200,101 @@ func TestPartsToContentBlocks_docxAsApplicationZip(t *testing.T) {
 	}
 }
 
+func TestPartsToContentBlocks_applicationJSONInline(t *testing.T) {
+	t.Parallel()
+	blocks, err := PartsToContentBlocks([]*genai.Part{{
+		InlineData: &genai.Blob{
+			Data:        []byte(`{"ok":true}`),
+			MIMEType:    "application/json",
+			DisplayName: "payload.json",
+		},
+	}}, types.ConversationRoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, ok := blocks[0].(*types.ContentBlockMemberDocument)
+	if !ok {
+		t.Fatalf("want document block, got %T", blocks[0])
+	}
+	if doc.Value.Format != types.DocumentFormatTxt {
+		t.Fatalf("format: %v", doc.Value.Format)
+	}
+}
+
+func TestPartsToContentBlocks_octetStreamJSONHARLogByFilename(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		want types.DocumentFormat
+	}{
+		{"report.json", types.DocumentFormatTxt},
+		{"trace.har", types.DocumentFormatTxt},
+		{"app.log", types.DocumentFormatTxt},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			blocks, err := PartsToContentBlocks([]*genai.Part{{
+				InlineData: &genai.Blob{
+					Data:        []byte("content"),
+					MIMEType:    "application/octet-stream",
+					DisplayName: tt.name,
+				},
+			}}, types.ConversationRoleUser)
+			if err != nil {
+				t.Fatal(err)
+			}
+			doc, ok := blocks[0].(*types.ContentBlockMemberDocument)
+			if !ok {
+				t.Fatalf("want document block, got %T", blocks[0])
+			}
+			if doc.Value.Format != tt.want {
+				t.Fatalf("format: %v", doc.Value.Format)
+			}
+		})
+	}
+}
+
+func TestPartsToContentBlocks_textJavaScriptToTxt(t *testing.T) {
+	t.Parallel()
+	blocks, err := PartsToContentBlocks([]*genai.Part{{
+		InlineData: &genai.Blob{
+			Data:        []byte("console.log(1)"),
+			MIMEType:    "text/javascript",
+			DisplayName: "main.js",
+		},
+	}}, types.ConversationRoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, ok := blocks[0].(*types.ContentBlockMemberDocument)
+	if !ok {
+		t.Fatalf("want document block, got %T", blocks[0])
+	}
+	if doc.Value.Format != types.DocumentFormatTxt {
+		t.Fatalf("format: %v", doc.Value.Format)
+	}
+}
+
+func TestPartsToContentBlocks_fileDataOctetStreamInferredFromS3Key(t *testing.T) {
+	t.Parallel()
+	blocks, err := PartsToContentBlocks([]*genai.Part{{
+		FileData: &genai.FileData{
+			FileURI:  "s3://bucket/prefix/payload.json",
+			MIMEType: "application/octet-stream",
+		},
+	}}, types.ConversationRoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, ok := blocks[0].(*types.ContentBlockMemberDocument)
+	if !ok {
+		t.Fatalf("want document block, got %T", blocks[0])
+	}
+	if doc.Value.Format != types.DocumentFormatTxt {
+		t.Fatalf("format: %v", doc.Value.Format)
+	}
+}
+
 func TestPartsToContentBlocks_thoughtReasoning(t *testing.T) {
 	t.Parallel()
 	blocks, err := PartsToContentBlocks([]*genai.Part{{

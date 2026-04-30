@@ -454,6 +454,10 @@ const (
 	mimeTextHTML        = "text/html"
 	mimeTextPlain       = "text/plain"
 	mimeTextMarkdown    = "text/markdown"
+	mimeApplicationJSON = "application/json"
+	mimeApplicationXML  = "application/xml"
+	mimeTextYAML        = "text/yaml"
+	mimeApplicationTOML = "application/toml"
 )
 
 // ErrBedrockPowerPointNotSupported is returned when mapping a PowerPoint document to Converse:
@@ -498,8 +502,32 @@ func classifyNormalizedMIME(mime string) mediaKind {
 			mimeApplicationPPTX:
 			return mediaKindDocument
 		}
+		if isTextualApplicationDocumentMIME(mime) {
+			return mediaKindDocument
+		}
 	}
 	return mediaKindUnknown
+}
+
+// isTextualApplicationDocumentMIME reports application/* types that Bedrock Converse maps to
+// DocumentFormatTxt (no native json/xml/yaml format on the wire).
+func isTextualApplicationDocumentMIME(mime string) bool {
+	switch mime {
+	case mimeApplicationJSON, "application/ld+json",
+		mimeApplicationXML, "application/xhtml+xml", "application/atom+xml",
+		"application/javascript", "application/x-javascript",
+		"application/typescript",
+		mimeTextYAML, "application/yaml", "application/x-yaml",
+		"application/sql",
+		"application/graphql",
+		mimeApplicationTOML, "application/x-toml",
+		"application/x-sh", "application/x-csh",
+		"application/x-httpd-php",
+		"application/rtf":
+		return true
+	default:
+		return false
+	}
 }
 
 func inferDocumentMIMEFromFilename(name string) (string, bool) {
@@ -654,7 +682,8 @@ func videoFormatFromMIME(mime string) (types.VideoFormat, error) {
 }
 
 func documentFormatFromMIME(mime string) (types.DocumentFormat, error) {
-	switch normalizeMIME(mime) {
+	m := normalizeMIME(mime)
+	switch m {
 	case mimeApplicationPPT, mimeApplicationPPTX:
 		return "", ErrBedrockPowerPointNotSupported
 	case mimeApplicationPDF:
@@ -675,9 +704,14 @@ func documentFormatFromMIME(mime string) (types.DocumentFormat, error) {
 		return types.DocumentFormatTxt, nil
 	case mimeTextMarkdown, "text/x-markdown":
 		return types.DocumentFormatMd, nil
-	default:
-		return "", fmt.Errorf("unsupported document mime type for Bedrock: %q", mime)
 	}
+	if isTextualApplicationDocumentMIME(m) {
+		return types.DocumentFormatTxt, nil
+	}
+	if strings.HasPrefix(m, "text/") {
+		return types.DocumentFormatTxt, nil
+	}
+	return "", fmt.Errorf("unsupported document mime type for Bedrock: %q", mime)
 }
 
 func functionCallToToolUse(fc *genai.FunctionCall) (types.ContentBlock, error) {
