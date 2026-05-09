@@ -24,7 +24,7 @@ func TestConverseInputFromLLMRequest_basicUserMessage(t *testing.T) {
 			MaxOutputTokens:   100,
 		},
 	}
-	in, err := ConverseInputFromLLMRequest("model-id", req, false)
+	in, err := ConverseInputFromLLMRequest("model-id", req, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +384,7 @@ func TestConverseInputFromLLMRequest_emptyUserParts(t *testing.T) {
 	_, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
 		Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{}}},
 		Config:   &genai.GenerateContentConfig{},
-	}, false)
+	}, false, nil)
 	if err == nil {
 		t.Fatal("expected error for empty user message with no mappable parts")
 	}
@@ -400,9 +400,38 @@ func TestConverseInputFromLLMRequest_safetySettingsFailFast(t *testing.T) {
 				Threshold: genai.HarmBlockThresholdBlockMediumAndAbove,
 			}},
 		},
-	}, false)
+	}, false, nil)
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestConverseInputFromLLMRequest_explicitGuardrailAllowsSafetySettings(t *testing.T) {
+	t.Parallel()
+	g := &types.GuardrailConfiguration{
+		GuardrailIdentifier: aws.String("gr-id"),
+		GuardrailVersion:    aws.String("v1"),
+		Trace:               types.GuardrailTraceEnabled,
+	}
+	in, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("hi", "user")},
+		Config: &genai.GenerateContentConfig{
+			SafetySettings: []*genai.SafetySetting{{
+				Category:  genai.HarmCategoryHarassment,
+				Threshold: genai.HarmBlockThresholdBlockMediumAndAbove,
+			}},
+		},
+	}, false, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.GuardrailConfig == nil {
+		t.Fatal("expected GuardrailConfig")
+	}
+	if aws.ToString(in.GuardrailConfig.GuardrailIdentifier) != "gr-id" ||
+		aws.ToString(in.GuardrailConfig.GuardrailVersion) != "v1" ||
+		in.GuardrailConfig.Trace != types.GuardrailTraceEnabled {
+		t.Fatalf("guardrail: %+v", in.GuardrailConfig)
 	}
 }
 
@@ -484,7 +513,7 @@ func TestConverseInputFromLLMRequest_cachePointAfterAllSystemBlocks(t *testing.T
 			SystemInstruction: genai.NewContentFromText("base instruction", "system"),
 		},
 	}
-	in, err := ConverseInputFromLLMRequest("mid", req, true)
+	in, err := ConverseInputFromLLMRequest("mid", req, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -511,7 +540,7 @@ func TestConverseInputFromLLMRequest_cachePointNotAddedWithoutSystemBlocks(t *te
 		},
 		Config: &genai.GenerateContentConfig{},
 	}
-	in, err := ConverseInputFromLLMRequest("mid", req, true)
+	in, err := ConverseInputFromLLMRequest("mid", req, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +559,7 @@ func TestConverseInputFromLLMRequest_cachePointNotAddedWhenDisabled(t *testing.T
 			SystemInstruction: genai.NewContentFromText("be helpful", "system"),
 		},
 	}
-	in, err := ConverseInputFromLLMRequest("mid", req, false)
+	in, err := ConverseInputFromLLMRequest("mid", req, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,7 +582,7 @@ func TestConverseInputFromLLMRequest_cachePointOnlyFromContentsSystem(t *testing
 		},
 		Config: &genai.GenerateContentConfig{},
 	}
-	in, err := ConverseInputFromLLMRequest("mid", req, true)
+	in, err := ConverseInputFromLLMRequest("mid", req, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

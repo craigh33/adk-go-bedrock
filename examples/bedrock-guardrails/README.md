@@ -59,15 +59,18 @@ Each safety rating includes:
   - `FinishReasonBlocklist`: Word or phrase filter match
   - `FinishReasonProhibitedContent`: Topic-based prohibition
 
-## Using Custom Guardrails
+## Request-side configuration (this module)
 
-To enable a pre-configured Bedrock guardrail in your applications:
+Pre-provision a guardrail in AWS, then pass its identifier and version to the `bedrock` model:
 
-1. Create a guardrail in AWS Bedrock console
-2. Note its Identifier and Version
-3. Use the Bedrock Runtime API directly to pass guardrail configuration:
-   - The current ADK interface doesn't support request-side guardrail configuration
-   - See [Bedrock documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) for details
+- **Model default** — set `bedrock.GuardrailConfig` on [`bedrock.Options`](https://pkg.go.dev/github.com/craigh33/adk-go-bedrock/bedrock#Options) when calling [`bedrock.New`](https://pkg.go.dev/github.com/craigh33/adk-go-bedrock/bedrock#New), or use [`bedrock.WithGuardrail`](https://pkg.go.dev/github.com/craigh33/adk-go-bedrock/bedrock#WithGuardrail) with [`bedrock.NewWithAPI`](https://pkg.go.dev/github.com/craigh33/adk-go-bedrock/bedrock#NewWithAPI).
+- **Per-request override** — wrap `context.Context` with [`bedrock.ContextWithGuardrail`](https://pkg.go.dev/github.com/craigh33/adk-go-bedrock/bedrock#ContextWithGuardrail); it takes precedence over the model default.
+
+Optional field `Trace` maps to Bedrock’s guardrail trace behavior (`enabled`, `disabled`, `enabled_full`).
+
+Genai `SafetySettings` / `ModelArmorConfig` are **not** translated into Bedrock policies. When a resolved Bedrock guardrail is active, those genai fields are ignored for this provider. If they are set and no Bedrock guardrail is configured, the mapper still errors (same as before).
+
+See [Bedrock guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) for creating guardrails in AWS.
 
 ## Example: Extracting Safety Ratings
 
@@ -87,10 +90,9 @@ for resp := range llm.GenerateContent(ctx, request, false) {
 
 ## Limitations
 
-- Bedrock guardrails require pre-provisioned AWS resources (guardrail ID and version)
-- ADK's generic `SafetySettings` cannot be automatically mapped to Bedrock guardrails
-- Guardrail metadata is available on response, but request-side configuration requires Bedrock-native APIs
-- Only function-based tools are supported; other tool types are ignored
+- Bedrock guardrails require pre-provisioned AWS resources (guardrail ID and version).
+- Genai `SafetySettings` / `ModelArmorConfig` are not mapped to Bedrock; use `bedrock.GuardrailConfig` instead (see above).
+- Only function-based tools are supported in this example’s tooling notes; other tool types may be unsupported by Bedrock or this mapper (see main README).
 
 ## More Resources
 

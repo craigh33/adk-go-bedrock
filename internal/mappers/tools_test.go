@@ -20,7 +20,7 @@ func TestToolConfigurationFromGenai_NovaGroundingSentinelMapsToSystemTool(t *tes
 	in, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
 		Contents: []*genai.Content{genai.NewContentFromText("x", "user")},
 		Config:   cfg,
-	}, false)
+	}, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestToolConfigurationFromGenai_NovaGroundingWithOtherFunctionDeclarations(t
 	in, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
 		Contents: []*genai.Content{genai.NewContentFromText("x", "user")},
 		Config:   cfg,
-	}, false)
+	}, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestToolConfigurationFromGenai_NovaGroundingDedupedAcrossToolEntries(t *tes
 	in, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
 		Contents: []*genai.Content{genai.NewContentFromText("x", "user")},
 		Config:   cfg,
-	}, false)
+	}, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestToolConfigurationFromGenai(t *testing.T) {
 	in, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
 		Contents: []*genai.Content{genai.NewContentFromText("x", "user")},
 		Config:   cfg,
-	}, false)
+	}, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestToolConfigurationFromGenai_FunctionDeclarationDoesNotMapTypedNilVariant
 	in, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
 		Contents: []*genai.Content{genai.NewContentFromText("x", "user")},
 		Config:   &genai.GenerateContentConfig{Tools: []*genai.Tool{tool}},
-	}, false)
+	}, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestToolConfigurationFromGenai_GoogleSearchReturnsUnsupportedError(t *testi
 	_, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
 		Contents: []*genai.Content{genai.NewContentFromText("x", "user")},
 		Config:   cfg,
-	}, false)
+	}, false, nil)
 	if err == nil || !strings.Contains(err.Error(), "GoogleSearch") {
 		t.Fatalf("expected unsupported GoogleSearch error, got: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestToolConfigurationFromGenai_MixedToolList_MapsOnlyFunctionDeclarations(t
 	in, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
 		Contents: []*genai.Content{genai.NewContentFromText("x", "user")},
 		Config:   cfg,
-	}, false)
+	}, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestToolConfigurationFromGenai_MixedFunctionAndUnsupportedVariantReturnsErr
 	_, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
 		Contents: []*genai.Content{genai.NewContentFromText("x", "user")},
 		Config:   cfg,
-	}, false)
+	}, false, nil)
 	if err == nil || !strings.Contains(err.Error(), "GoogleSearch") {
 		t.Fatalf("expected mixed unsupported variant error mentioning GoogleSearch, got: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestToolConfigurationFromGenai_MCPServersReturnUnsupportedError(t *testing.
 	_, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
 		Contents: []*genai.Content{genai.NewContentFromText("x", "user")},
 		Config:   cfg,
-	}, false)
+	}, false, nil)
 	if err == nil || !strings.Contains(err.Error(), "MCPServers") {
 		t.Fatalf("expected unsupported MCPServers error, got: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestToolConfigurationFromGenai_MultipleToolVariantsReturnUnsupportedError(t
 	_, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
 		Contents: []*genai.Content{genai.NewContentFromText("x", "user")},
 		Config:   cfg,
-	}, false)
+	}, false, nil)
 	if err == nil {
 		t.Fatal("expected unsupported tool variants error")
 	}

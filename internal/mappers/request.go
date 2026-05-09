@@ -39,10 +39,12 @@ func MaybeAppendUserContent(contents []*genai.Content) []*genai.Content {
 }
 
 // ConverseInputFromLLMRequest builds a Bedrock [bedrockruntime.ConverseInput] from an ADK request.
+// If guardrail is non-nil, it is used as Converse GuardrailConfig.
 func ConverseInputFromLLMRequest(
 	modelID string,
 	req *model.LLMRequest,
 	cacheSystemPrompt bool,
+	guardrail *types.GuardrailConfiguration,
 ) (*bedrockruntime.ConverseInput, error) {
 	if req == nil {
 		return nil, errors.New("nil LLMRequest")
@@ -77,7 +79,7 @@ func ConverseInputFromLLMRequest(
 		in.InferenceConfig = inf
 	}
 
-	guardrailCfg, err := guardrailConfigFromGenai(cfg)
+	guardrailCfg, err := guardrailConfigForRequest(cfg, guardrail)
 	if err != nil {
 		return nil, err
 	}
@@ -101,8 +103,9 @@ func ConverseStreamInputFromLLMRequest(
 	modelID string,
 	req *model.LLMRequest,
 	cacheSystemPrompt bool,
+	guardrail *types.GuardrailConfiguration,
 ) (*bedrockruntime.ConverseStreamInput, error) {
-	conv, err := ConverseInputFromLLMRequest(modelID, req, cacheSystemPrompt)
+	conv, err := ConverseInputFromLLMRequest(modelID, req, cacheSystemPrompt, guardrail)
 	if err != nil {
 		return nil, err
 	}
@@ -950,10 +953,13 @@ func isASCIILetterOrDigit(r rune) bool {
 	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
 }
 
-//nolint:unparam // signature mirrors other config mappers and leaves room for future Bedrock guardrail mapping.
-func guardrailConfigFromGenai(
+func guardrailConfigForRequest(
 	cfg *genai.GenerateContentConfig,
+	explicit *types.GuardrailConfiguration,
 ) (*types.GuardrailConfiguration, error) {
+	if explicit != nil {
+		return explicit, nil
+	}
 	if cfg == nil {
 		return nil, nil //nolint:nilnil // Optional config.
 	}

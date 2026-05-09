@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -28,6 +29,9 @@ type fakeAPI struct {
 
 	stream    StreamReader
 	streamErr error
+
+	lastConverseParams *bedrockruntime.ConverseInput
+	lastStreamParams   *bedrockruntime.ConverseStreamInput
 }
 
 func (f *fakeAPI) Converse(
@@ -36,7 +40,7 @@ func (f *fakeAPI) Converse(
 	optFns ...func(*bedrockruntime.Options),
 ) (*bedrockruntime.ConverseOutput, error) {
 	_ = ctx
-	_ = params
+	f.lastConverseParams = params
 	_ = optFns
 	if f.converseErr != nil {
 		return nil, f.converseErr
@@ -50,7 +54,7 @@ func (f *fakeAPI) ConverseStream(
 	optFns ...func(*bedrockruntime.Options),
 ) (StreamReader, error) {
 	_ = ctx
-	_ = params
+	f.lastStreamParams = params
 	_ = optFns
 	if f.streamErr != nil {
 		return nil, f.streamErr
@@ -107,6 +111,129 @@ func TestConverse_GenerateContent_unary(t *testing.T) {
 	}
 	if got != 1 {
 		t.Fatalf("responses: %d", got)
+	}
+}
+
+func TestConverse_GenerateContent_guardrailModelOption(t *testing.T) {
+	t.Parallel()
+	api := &fakeAPI{
+		converseOut: &bedrockruntime.ConverseOutput{
+			Output: &types.ConverseOutputMemberMessage{
+				Value: types.Message{
+					Role: types.ConversationRoleAssistant,
+					Content: []types.ContentBlock{
+						&types.ContentBlockMemberText{Value: "ok"},
+					},
+				},
+			},
+			StopReason: types.StopReasonEndTurn,
+			Usage: &types.TokenUsage{
+				InputTokens:  aws.Int32(1),
+				OutputTokens: aws.Int32(1),
+				TotalTokens:  aws.Int32(2),
+			},
+		},
+	}
+	m, err := NewWithAPI("mid", api, WithGuardrail(GuardrailConfig{
+		Identifier: "gr-abc",
+		Version:    "1",
+		Trace:      types.GuardrailTraceEnabledFull,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("hi", "user")},
+		Config:   &genai.GenerateContentConfig{},
+	}
+	for range m.GenerateContent(context.Background(), req, false) {
+	}
+	if api.lastConverseParams == nil || api.lastConverseParams.GuardrailConfig == nil {
+		t.Fatal("expected guardrail on Converse input")
+	}
+	g := api.lastConverseParams.GuardrailConfig
+	if aws.ToString(g.GuardrailIdentifier) != "gr-abc" || aws.ToString(g.GuardrailVersion) != "1" {
+		t.Fatalf("ids: %+v", g)
+	}
+	if g.Trace != types.GuardrailTraceEnabledFull {
+		t.Fatalf("trace: %v", g.Trace)
+	}
+}
+
+func TestConverse_GenerateContent_guardrailContextOverridesModel(t *testing.T) {
+	t.Parallel()
+	api := &fakeAPI{
+		converseOut: &bedrockruntime.ConverseOutput{
+			Output: &types.ConverseOutputMemberMessage{
+				Value: types.Message{
+					Role: types.ConversationRoleAssistant,
+					Content: []types.ContentBlock{
+						&types.ContentBlockMemberText{Value: "ok"},
+					},
+				},
+			},
+			StopReason: types.StopReasonEndTurn,
+			Usage: &types.TokenUsage{
+				InputTokens:  aws.Int32(1),
+				OutputTokens: aws.Int32(1),
+				TotalTokens:  aws.Int32(2),
+			},
+		},
+	}
+	m, err := NewWithAPI("mid", api, WithGuardrail(GuardrailConfig{Identifier: "model-id", Version: "9"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("hi", "user")},
+		Config:   &genai.GenerateContentConfig{},
+	}
+	ctx := ContextWithGuardrail(context.Background(), &GuardrailConfig{Identifier: "ctx-id", Version: "2"})
+	for range m.GenerateContent(ctx, req, false) {
+	}
+	g := api.lastConverseParams.GuardrailConfig
+	if aws.ToString(g.GuardrailIdentifier) != "ctx-id" || aws.ToString(g.GuardrailVersion) != "2" {
+		t.Fatalf("want context guardrail, got %+v", g)
+	}
+}
+
+func TestConverse_GenerateContent_guardrailInvalidContextError(t *testing.T) {
+	t.Parallel()
+	api := &fakeAPI{
+		converseOut: &bedrockruntime.ConverseOutput{
+			Output: &types.ConverseOutputMemberMessage{
+				Value: types.Message{
+					Role: types.ConversationRoleAssistant,
+					Content: []types.ContentBlock{
+						&types.ContentBlockMemberText{Value: "ok"},
+					},
+				},
+			},
+			StopReason: types.StopReasonEndTurn,
+			Usage: &types.TokenUsage{
+				InputTokens:  aws.Int32(1),
+				OutputTokens: aws.Int32(1),
+				TotalTokens:  aws.Int32(2),
+			},
+		},
+	}
+	m, err := NewWithAPI("mid", api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("hi", "user")},
+		Config:   &genai.GenerateContentConfig{},
+	}
+	ctx := ContextWithGuardrail(context.Background(), &GuardrailConfig{Identifier: "only", Version: ""})
+	var sawErr error
+	for r, err := range m.GenerateContent(ctx, req, false) {
+		sawErr = err
+		_ = r
+		break
+	}
+	if sawErr == nil || !strings.Contains(sawErr.Error(), "guardrail") {
+		t.Fatalf("expected guardrail validation error, got %v", sawErr)
 	}
 }
 
