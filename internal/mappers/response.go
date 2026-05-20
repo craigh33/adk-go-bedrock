@@ -477,6 +477,31 @@ func FinishReasonFromStopReasonAndTrace(sr types.StopReason, trace *types.Guardr
 	}
 }
 
+// Nova Sonic stop-reason strings as they appear on contentEnd / completionEnd.
+const (
+	SonicStopReasonEndTurn     = "END_TURN"
+	SonicStopReasonPartialTurn = "PARTIAL_TURN"
+	SonicStopReasonInterrupted = "INTERRUPTED"
+	SonicStopReasonToolUse     = "TOOL_USE"
+)
+
+// FinishReasonFromSonicStop maps an Amazon Nova Sonic stop-reason string into
+// a genai.FinishReason. Sonic only emits a subset of Bedrock's stop reasons —
+// for INTERRUPTED, the [model.LLMResponse.Interrupted] field carries the
+// nuance, so the finish reason still surfaces as a normal stop. Intermediate
+// states (TOOL_USE, PARTIAL_TURN) shouldn't reach completionEnd; if they do,
+// we return Unspecified rather than fabricating a Stop reason.
+func FinishReasonFromSonicStop(stopReason string) genai.FinishReason {
+	switch stopReason {
+	case SonicStopReasonEndTurn, SonicStopReasonInterrupted:
+		return genai.FinishReasonStop
+	case SonicStopReasonToolUse, SonicStopReasonPartialTurn:
+		return genai.FinishReasonUnspecified
+	default:
+		return genai.FinishReasonUnspecified
+	}
+}
+
 // StreamMetadataToUsage extracts usage from a Converse stream metadata event.
 func StreamMetadataToUsage(meta *types.ConverseStreamMetadataEvent) *genai.GenerateContentResponseUsageMetadata {
 	if meta == nil {

@@ -279,7 +279,7 @@ func TestToolConfigurationFromGenai_MultipleToolVariantsReturnUnsupportedError(t
 func TestNormalizeSchema_MapPassthrough(t *testing.T) {
 	t.Parallel()
 	in := map[string]any{"type": "object", "properties": map[string]any{"x": map[string]any{"type": "string"}}}
-	got, err := normalizeSchema(in)
+	got, err := NormalizeSchema(in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestNormalizeSchema_StructRoundTripsToMap(t *testing.T) {
 			"n": {Type: "NUMBER", Nested: nested{Min: 1}, Ignored: "skip"},
 		},
 	}
-	got, err := normalizeSchema(schema)
+	got, err := NormalizeSchema(schema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +340,7 @@ func TestNormalizeSchema_StructRoundTripsToMap(t *testing.T) {
 func TestNormalizeSchema_UnmarshalableJSONReturnsError(t *testing.T) {
 	t.Parallel()
 	ch := make(chan int)
-	_, err := normalizeSchema(ch)
+	_, err := NormalizeSchema(ch)
 	if err == nil || !strings.Contains(err.Error(), "marshal") {
 		t.Fatalf("expected marshal error, got: %v", err)
 	}
@@ -380,5 +380,68 @@ func TestFunctionParametersToToolInputSchema_ParametersJsonSchemaStruct(t *testi
 	}
 	if items["type"] != "STRING" {
 		t.Fatalf("items.type: got %v", items["type"])
+	}
+}
+
+func TestFunctionArgsFromRawJSON(t *testing.T) {
+	t.Parallel()
+	if got := FunctionArgsFromRawJSON("not json"); got[RawFunctionArgsJSONKey] != "not json" {
+		t.Fatalf("fallback failed: %v", got)
+	}
+	parsed := FunctionArgsFromRawJSON(`{"a":1}`)
+	if parsed["a"].(float64) != 1 {
+		t.Fatalf("parsed = %v", parsed)
+	}
+	if got := FunctionArgsFromRawJSON(""); len(got) != 0 {
+		t.Fatalf("expected empty map, got %v", got)
+	}
+}
+
+func TestFunctionDeclarationSchema(t *testing.T) {
+	t.Parallel()
+	// Empty: returns {"type":"object","properties":{}}.
+	got, err := FunctionDeclarationSchema(&genai.FunctionDeclaration{Name: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["type"] != jsonSchemaObjectType {
+		t.Fatalf("empty: type = %v", got["type"])
+	}
+	// ParametersJsonSchema takes precedence over Parameters.
+	got, err = FunctionDeclarationSchema(&genai.FunctionDeclaration{
+		ParametersJsonSchema: map[string]any{"type": jsonSchemaObjectType, "x": 1},
+		Parameters:           &genai.Schema{Type: genai.TypeString},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["x"] != 1 {
+		t.Fatalf("ParametersJsonSchema should win: %v", got)
+	}
+	// Parameters fallback lowercases the type.
+	got, err = FunctionDeclarationSchema(&genai.FunctionDeclaration{
+		Parameters: &genai.Schema{
+			Type: genai.TypeObject,
+			Properties: map[string]*genai.Schema{
+				"q": {Type: genai.TypeString},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["type"] != jsonSchemaObjectType {
+		t.Fatalf("root type not lowercased: %v", got["type"])
+	}
+	props, ok := got["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties: %T", got["properties"])
+	}
+	q, ok := props["q"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties.q: %T", props["q"])
+	}
+	if q["type"] != "string" {
+		t.Fatalf("properties.q.type not lowercased: %v", q["type"])
 	}
 }

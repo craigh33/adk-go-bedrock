@@ -31,7 +31,7 @@ func toolConfigurationFromGenai(cfg *genai.GenerateContentConfig) (*types.ToolCo
 		if err != nil {
 			return nil, err
 		}
-		if unsupported := unsupportedToolVariantsFromGenai(t); len(unsupported) > 0 {
+		if unsupported := UnsupportedToolVariantsFromGenai(t); len(unsupported) > 0 {
 			return nil, fmt.Errorf(
 				"bedrock Converse does not support these genai tool variants: %s; use FunctionDeclarations instead",
 				strings.Join(unsupported, ", "),
@@ -77,7 +77,10 @@ func appendFunctionDeclarationSpecs(
 	return specs, novaGroundingAdded, nil
 }
 
-func unsupportedToolVariantsFromGenai(t *genai.Tool) []string {
+// UnsupportedToolVariantsFromGenai returns the names of [genai.Tool] variants
+// set on t that cannot be mapped to a Bedrock backend (Converse or Live). Used
+// to fail fast with a clear error rather than silently dropping tools.
+func UnsupportedToolVariantsFromGenai(t *genai.Tool) []string {
 	if t == nil {
 		return nil
 	}
@@ -105,20 +108,32 @@ func unsupportedToolVariantsFromGenai(t *genai.Tool) []string {
 }
 
 func functionParametersToToolInputSchema(fd *genai.FunctionDeclaration) (types.ToolInputSchema, error) {
+	schema, err := FunctionDeclarationSchema(fd)
+	if err != nil {
+		return nil, err
+	}
+	return &types.ToolInputSchemaMemberJson{Value: brdoc.NewLazyDocument(schema)}, nil
+}
+
+// FunctionDeclarationSchema extracts a canonical JSON-Schema map from a
+// [genai.FunctionDeclaration], honoring the ParametersJsonSchema → Parameters
+// → empty-object precedence and lowercasing Gemini-style uppercase type names.
+//
+// Exported for reuse by the Bedrock Live (Nova Sonic) backend, which serializes
+// the same map as a stringified JSON inside its toolSpec.inputSchema.json field.
+func FunctionDeclarationSchema(fd *genai.FunctionDeclaration) (map[string]any, error) {
+	if fd == nil {
+		return emptyObjectSchema(), nil
+	}
 	if fd.ParametersJsonSchema != nil {
-		schema, err := normalizeSchema(fd.ParametersJsonSchema)
+		schema, err := NormalizeSchema(fd.ParametersJsonSchema)
 		if err != nil {
 			return nil, err
 		}
-		return &types.ToolInputSchemaMemberJson{Value: brdoc.NewLazyDocument(schema)}, nil
+		return schema, nil
 	}
 	if fd.Parameters == nil {
-		return &types.ToolInputSchemaMemberJson{
-			Value: brdoc.NewLazyDocument(map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			}),
-		}, nil
+		return emptyObjectSchema(), nil
 	}
 	b, err := json.Marshal(fd.Parameters)
 	if err != nil {
@@ -128,15 +143,26 @@ func functionParametersToToolInputSchema(fd *genai.FunctionDeclaration) (types.T
 	if err := json.Unmarshal(b, &m); err != nil {
 		return nil, err
 	}
-	normalizeSchemaTypes(m)
-	return &types.ToolInputSchemaMemberJson{Value: brdoc.NewLazyDocument(m)}, nil
+	NormalizeSchemaTypes(m)
+	return m, nil
 }
 
-// normalizeSchemaTypes recursively lowercases every "type" field value in a JSON
+// jsonSchemaObjectType is the canonical JSON Schema "object" type literal.
+// Repeated often enough across tools mapping + tests to warrant a constant.
+const jsonSchemaObjectType = "object"
+
+func emptyObjectSchema() map[string]any {
+	return map[string]any{
+		"type":       jsonSchemaObjectType,
+		"properties": map[string]any{},
+	}
+}
+
+// NormalizeSchemaTypes recursively lowercases every "type" field value in a JSON
 // Schema map. genai.Schema marshals Gemini-style uppercase type names (e.g.
-// "STRING", "OBJECT", "ARRAY") but Bedrock Converse requires lowercase JSON
-// Schema type names (e.g. "string", "object", "array").
-func normalizeSchemaTypes(v any) {
+// "STRING", "OBJECT", "ARRAY") but JSON Schema (and Bedrock Converse / Nova
+// Sonic) require lowercase type names (e.g. "string", "object", "array").
+func NormalizeSchemaTypes(v any) {
 	switch m := v.(type) {
 	case map[string]any:
 		for k, val := range m {
@@ -145,22 +171,22 @@ func normalizeSchemaTypes(v any) {
 					m[k] = strings.ToLower(s)
 				}
 			} else {
-				normalizeSchemaTypes(val)
+				NormalizeSchemaTypes(val)
 			}
 		}
 	case []any:
 		for _, item := range m {
-			normalizeSchemaTypes(item)
+			NormalizeSchemaTypes(item)
 		}
 	}
 }
 
-// normalizeSchema turns ParametersJsonSchema into a JSON object map for Bedrock Converse.
-// ADK FunctionTool supplies this field as arbitrary JSON (often a struct or other non-map
-// value after decoding). Bedrock's document layer expects a map[string]any; passing the
-// raw value through can fail or encode incorrectly, so we round-trip through JSON when
-// the value is not already map[string]any.
-func normalizeSchema(schema any) (map[string]any, error) {
+// NormalizeSchema turns an arbitrary JSON value into a JSON object map. ADK's
+// FunctionTool supplies ParametersJsonSchema as arbitrary JSON (often a struct
+// or other non-map value after decoding); consumers that need a map[string]any
+// (Bedrock's document layer, or a stringified JSON for Nova Sonic) round-trip
+// it through JSON when the value is not already map[string]any.
+func NormalizeSchema(schema any) (map[string]any, error) {
 	switch s := schema.(type) {
 	case map[string]any:
 		return s, nil
@@ -175,4 +201,28 @@ func normalizeSchema(schema any) (map[string]any, error) {
 		}
 		return m, nil
 	}
+}
+
+// RawFunctionArgsJSONKey is the map key used by [FunctionArgsFromRawJSON] when
+// the raw blob is not parseable as a JSON object. The original bytes are
+// preserved under this key so callers can recover them.
+const RawFunctionArgsJSONKey = "rawArgsJson"
+
+// FunctionArgsFromRawJSON parses a stringified-JSON tool-arguments blob into a
+// map[string]any. Empty input returns an empty map. Unparseable input is
+// returned as a single-entry map keyed by [RawFunctionArgsJSONKey].
+//
+// Both Bedrock Converse (ConverseStream tool input deltas) and Nova Sonic
+// (toolUse.content) deliver tool arguments as stringified JSON, so both
+// backends share this parser.
+func FunctionArgsFromRawJSON(raw string) map[string]any {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return map[string]any{}
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+		return parsed
+	}
+	return map[string]any{RawFunctionArgsJSONKey: raw}
 }

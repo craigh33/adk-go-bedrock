@@ -21,6 +21,7 @@
 - IAM permission to call inference, for example:
   - `bedrock:InvokeModel` for `Converse`
   - `bedrock:InvokeModelWithResponseStream` for `ConverseStream` (when ADK uses SSE streaming)
+  - `bedrock:InvokeModelWithBidirectionalStream` for the Nova Sonic [Live API](#bidirectional-live-nova-2-sonic)
 
 ## Install
 
@@ -66,13 +67,16 @@ These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat 
 - [`examples/bedrock-video-gen`](examples/bedrock-video-gen): ADK runner with the [`videogenerator`](tools/videogenerator) tool—Nova Reel text-to-video via Bedrock async invoke, S3 output, and optional MP4 download into artifacts.
 - [`examples/bedrock-nova-grounding`](examples/bedrock-nova-grounding): Nova Web Grounding via [`tools/novagrounding`](tools/novagrounding); prints answers and `bedrock_citations` metadata (see [Nova Web Grounding](#nova-web-grounding)).
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
+- [`examples/bedrock-live`](examples/bedrock-live): bidirectional voice example using Amazon Nova 2 Sonic (see [Bidirectional Live](#bidirectional-live-nova-2-sonic)).
+- [`examples/bedrock-live-tool`](examples/bedrock-live-tool): bidirectional voice + tool example using `RunAgentLoop` (weather lookup round-trip).
 - [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
 - [`examples/bedrock-multimodal`](examples/bedrock-multimodal): comprehensive image analysis, document processing, tool calling with rich media, and vision-based reasoning.
 - [`examples/bedrock-prompt-cache`](examples/bedrock-prompt-cache): `ModelOption` / Bedrock prompt caching for fewer repeated tokens (see AWS prompt caching docs).
 - [`examples/bedrock-document`](examples/bedrock-document): CLI to debug document uploads (`-dry-run` mapper check, optional `-combined` / `-stream`).
 - [`examples/bedrock-guardrails`](examples/bedrock-guardrails): safety assessments, content filtering, and guardrail metadata handling.
 - [`examples/bedrock-system-instruction`](examples/bedrock-system-instruction): system instructions for role definition, output formatting, and behavioral control.
-- [`examples/bedrock-web-ui`](examples/bedrock-web-ui): ADK local web UI launcher.
+- [`examples/bedrock-web-ui`](examples/bedrock-web-ui): ADK local web UI launcher. Text-only Converse playground; works in any Bedrock chat-model region.
+- [`examples/bedrock-web-live`](examples/bedrock-web-live): ADK local web UI with the **mic button wired to Nova Sonic** via a custom `/run_live` sublauncher (see [docs/live.md](docs/live.md#running-the-adk-web-ui-mic-button-against-sonic)). Region-pinned to Sonic availability (`us-east-1`, `us-west-2`, `ap-northeast-1`).
 
 All examples load AWS configuration with [`config.LoadDefaultConfig`](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/config#LoadDefaultConfig) and require **`BEDROCK_MODEL_ID`** plus region configuration (`AWS_REGION` or profile region).
 
@@ -141,6 +145,68 @@ func groundedAsk(ctx context.Context, llm model.LLM, question string) (*model.LL
 Grounded replies include citation payloads under `genai.Part.PartMetadata` with key `"bedrock_citations"` (each entry may include `location.url`, `location.domain`, etc.). Retain and surface those citations in user-facing output per AWS guidance.
 
 A runnable CLI lives at [`examples/bedrock-nova-grounding`](examples/bedrock-nova-grounding).
+
+## Bidirectional Live (Nova 2 Sonic)
+
+[`bedrock/live`](bedrock/live) provides bidirectional ("Live") streaming against [Amazon Nova 2 Sonic](https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-getting-started.html) — speech-in / speech-out with barge-in, transcripts, and tool use. It exposes a [`Session`](bedrock/live/session.go) that implements adk-go's [`agent.LiveSession`](https://pkg.go.dev/google.golang.org/adk/agent#LiveSession), driven by Bedrock's `InvokeModelWithBidirectionalStream`. The default model ID is `amazon.nova-2-sonic-v1:0`; the original `amazon.nova-sonic-v1:0` is still wire-compatible but reaches EOL on 2026-09-14.
+
+```go
+import (
+    "github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+    "google.golang.org/adk/agent"
+    "google.golang.org/adk/session"
+    "google.golang.org/genai"
+
+    "github.com/craigh33/adk-go-bedrock/bedrock/live"
+)
+
+api := live.NewBidiRuntimeAPI(bedrockruntime.NewFromConfig(awsCfg))
+sess, events, err := live.Open(ctx, api, "", &agent.LiveRunConfig{
+    ResponseModalities: []genai.Modality{genai.ModalityText, genai.ModalityAudio},
+}, &live.OpenOptions{
+    SystemInstruction: "You are a friendly voice assistant.",
+    InputSampleRateHz: 16000,
+    Tools: map[string]any{
+        "get_weather": &genai.FunctionDeclaration{
+            Name:        "get_weather",
+            Description: "Get current weather for a location.",
+            ParametersJsonSchema: map[string]any{
+                "type":       "object",
+                "properties": map[string]any{"location": map[string]any{"type": "string"}},
+                "required":   []any{"location"},
+            },
+        },
+    },
+})
+defer sess.Close()
+
+// Stream audio asynchronously while RunAgentLoop drives the read side.
+go func() {
+    sess.Send(agent.LiveRequest{RealtimeInput: &genai.Blob{Data: pcmChunk}})
+    sess.Send(agent.LiveRequest{RealtimeInput: &genai.ActivityEnd{}})
+}()
+
+tools := live.ToolRegistry{
+    "get_weather": func(ctx context.Context, args map[string]any) (map[string]any, error) {
+        return map[string]any{"temp_f": 72, "condition": "sunny"}, nil
+    },
+}
+sess.RunAgentLoop(ctx, events, tools, func(ev *session.Event) {
+    // observe audio bytes, transcripts, tool calls
+})
+```
+
+For manual control, skip `RunAgentLoop` and iterate `events` directly — handle `FunctionCall` parts and call `sess.Send(agent.LiveRequest{Content: ...})` with a `FunctionResponse` yourself.
+
+Runnable examples: [`examples/bedrock-live`](examples/bedrock-live) (audio-only) and [`examples/bedrock-live-tool`](examples/bedrock-live-tool) (audio + tool round-trip). Internals and the Sonic event mapping are documented in [`docs/live.md`](docs/live.md).
+
+**Scope and limitations:**
+
+- Only `amazon.nova-2-sonic-v1:0` (default) and `amazon.nova-sonic-v1:0` (EOL 2026-09-14) support bidirectional streaming on Bedrock today. Regions: `us-east-1`, `us-west-2`, `ap-northeast-1` for Nova 2 Sonic; `us-east-1`, `eu-north-1`, `ap-northeast-1` for the original Nova Sonic.
+- Audio is raw LPCM end-to-end — input 16 kHz mono LE16, output 24 kHz mono LE16. The caller owns mic/speaker integration and any resampling.
+- This package does NOT plug into adk-go's [`Runner.RunLive`](https://pkg.go.dev/google.golang.org/adk/runner#Runner.RunLive) — that path hardcodes a `*genai.Client` Live connection (see [`docs/live.md`](docs/live.md) for details). Drive `Session` directly via `Open`/`Send`/`Close`.
+- Sessions are capped at 8 minutes by Sonic; transparent session resumption is not implemented yet.
+- Gemini-only Live features (proactivity, affective dialog, session resumption handles) are accepted in `LiveRunConfig` but ignored.
 
 ## Limitations
 

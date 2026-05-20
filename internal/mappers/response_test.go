@@ -430,3 +430,23 @@ func TestLLMResponseFromConverseOutput_guardrailMetadata(t *testing.T) {
 		t.Fatalf("rating: %+v", ratings[0])
 	}
 }
+
+func TestFinishReasonFromSonicStop(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in   string
+		want genai.FinishReason
+	}{
+		{SonicStopReasonEndTurn, genai.FinishReasonStop},
+		{SonicStopReasonInterrupted, genai.FinishReasonStop},
+		{SonicStopReasonToolUse, genai.FinishReasonUnspecified},
+		{SonicStopReasonPartialTurn, genai.FinishReasonUnspecified},
+		{"", genai.FinishReasonUnspecified},
+		{"SOMETHING_NEW", genai.FinishReasonUnspecified},
+	}
+	for _, tc := range cases {
+		if got := FinishReasonFromSonicStop(tc.in); got != tc.want {
+			t.Errorf("FinishReasonFromSonicStop(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
