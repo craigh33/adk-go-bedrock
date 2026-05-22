@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# Compiled example binaries
+bedrock-a2a
+
 # Test binary, built with `go test -c`
 *.test
 
