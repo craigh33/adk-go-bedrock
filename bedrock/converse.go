@@ -2,7 +2,6 @@ package bedrock
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -23,8 +22,6 @@ import (
 )
 
 var _ model.LLM = (*Model)(nil)
-
-const rawFunctionArgsJSONKey = "rawArgsJson"
 
 // StreamReader is the subset of Bedrock Converse stream API used by this package.
 type StreamReader interface {
@@ -609,7 +606,7 @@ func (s *streamState) finalParts() ([]*genai.Part, []string) { //nolint:gocognit
 			parts = append(parts, &genai.Part{FunctionCall: &genai.FunctionCall{
 				ID:   id,
 				Name: name,
-				Args: functionArgsFromRawJSON(call.input.String()),
+				Args: mappers.FunctionArgsFromRawJSON(call.input.String()),
 			}})
 		}
 	}
@@ -644,16 +641,4 @@ func streamImageMIMEFromFormat(f types.ImageFormat) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported Bedrock stream image format: %q", f)
 	}
-}
-
-func functionArgsFromRawJSON(raw string) map[string]any {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return map[string]any{}
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
-		return parsed
-	}
-	return map[string]any{rawFunctionArgsJSONKey: raw}
 }

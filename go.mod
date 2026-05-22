@@ -10,6 +10,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.51.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.101.0
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/mux v1.8.1
+	github.com/gorilla/websocket v1.5.3
 	github.com/modelcontextprotocol/go-sdk v1.6.0
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.43.0
@@ -52,8 +54,6 @@ require (
 	github.com/google/safehtml v0.1.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.15 // indirect
 	github.com/googleapis/gax-go/v2 v2.22.0 // indirect
-	github.com/gorilla/mux v1.8.1 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
