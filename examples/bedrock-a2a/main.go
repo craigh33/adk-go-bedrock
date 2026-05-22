@@ -10,17 +10,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/a2aproject/a2a-go/a2a"
-	"github.com/a2aproject/a2a-go/a2asrv"
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/agent/remoteagent"
+	"google.golang.org/adk/agent/remoteagent/v2"
 	"google.golang.org/adk/cmd/launcher"
 	"google.golang.org/adk/cmd/launcher/full"
 	"google.golang.org/adk/runner"
-	"google.golang.org/adk/server/adka2a"
+	"google.golang.org/adk/server/adka2a/v2"
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 
@@ -84,11 +84,12 @@ func startWeatherAgentServer(ctx context.Context, tp trace.TracerProvider) strin
 
 		agentPath := "/invoke"
 		agentCard := &a2a.AgentCard{
-			Name:               a.Name(),
-			Skills:             adka2a.BuildAgentSkills(a),
-			PreferredTransport: a2a.TransportProtocolJSONRPC,
-			URL:                baseURL.JoinPath(agentPath).String(),
-			Capabilities:       a2a.AgentCapabilities{Streaming: true},
+			Name:   a.Name(),
+			Skills: adka2a.BuildAgentSkills(a),
+			SupportedInterfaces: []*a2a.AgentInterface{
+				a2a.NewAgentInterface(baseURL.JoinPath(agentPath).String(), a2a.TransportProtocolJSONRPC),
+			},
+			Capabilities: a2a.AgentCapabilities{Streaming: true},
 		}
 
 		mux := http.NewServeMux()
@@ -131,8 +132,8 @@ func main() {
 	a2aServerAddress := startWeatherAgentServer(ctx, tp)
 
 	remoteAgent, err := remoteagent.NewA2A(remoteagent.A2AConfig{
-		Name:            "A2A Bedrock Weather agent",
-		AgentCardSource: a2aServerAddress,
+		Name:              "A2A Bedrock Weather agent",
+		AgentCardProvider: remoteagent.NewAgentCardProvider(a2aServerAddress),
 	})
 	if err != nil {
 		log.Panicf("create remote agent: %v", err)
