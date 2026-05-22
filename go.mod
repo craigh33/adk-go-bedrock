@@ -3,7 +3,7 @@ module github.com/craigh33/adk-go-bedrock
 go 1.25.0
 
 require (
-	github.com/a2aproject/a2a-go v0.3.15
+	github.com/a2aproject/a2a-go/v2 v2.3.1
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.17
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.16
@@ -25,7 +25,7 @@ require (
 	cloud.google.com/go/auth v0.20.0 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.31.0 // indirect
-	github.com/a2aproject/a2a-go/v2 v2.3.1 // indirect
+	github.com/a2aproject/a2a-go v0.3.15 // indirect
 	github.com/awalterschulze/gographviz v2.0.3+incompatible // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.10 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.23 // indirect
