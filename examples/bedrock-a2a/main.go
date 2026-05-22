@@ -84,10 +84,12 @@ func startWeatherAgentServer(ctx context.Context, tp trace.TracerProvider) strin
 
 		agentPath := "/invoke"
 		agentCard := &a2a.AgentCard{
-			Name:                a.Name(),
-			Skills:              adka2a.BuildAgentSkills(a),
-			SupportedInterfaces: []*a2a.AgentInterface{a2a.NewAgentInterface(baseURL.JoinPath(agentPath).String(), a2a.TransportProtocolJSONRPC)},
-			Capabilities:        a2a.AgentCapabilities{Streaming: true},
+			Name:   a.Name(),
+			Skills: adka2a.BuildAgentSkills(a),
+			SupportedInterfaces: []*a2a.AgentInterface{
+				a2a.NewAgentInterface(baseURL.JoinPath(agentPath).String(), a2a.TransportProtocolJSONRPC),
+			},
+			Capabilities: a2a.AgentCapabilities{Streaming: true},
 		}
 
 		mux := http.NewServeMux()
