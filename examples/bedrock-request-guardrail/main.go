@@ -72,6 +72,7 @@ func main() {
 		bedrock.WithGuardrail(guardrailID, guardrailVersion, types.GuardrailTraceEnabled),
 	)
 	if err != nil {
+		//nolint:gocritic // exitAfterDefer: example skips tracer shutdown on model setup failure
 		log.Fatalf("create bedrock model: %v", err)
 	}
 
