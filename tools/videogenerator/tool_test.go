@@ -22,7 +22,6 @@ import (
 	"google.golang.org/adk/memory"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/session"
-	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/toolconfirmation"
 	"google.golang.org/genai"
 )
@@ -145,7 +144,7 @@ func (f *fakeToolContext) AppName() string                                      
 func (f *fakeToolContext) SessionID() string                                    { return "session-1" }
 func (f *fakeToolContext) Branch() string                                       { return "" }
 
-var _ tool.Context = (*fakeToolContext)(nil)
+var _ agent.ToolContext = (*fakeToolContext)(nil)
 
 func newFakeToolCtx(arts *fakeArtifacts) *fakeToolContext {
 	return &fakeToolContext{Context: context.Background(), artifacts: arts}

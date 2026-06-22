@@ -45,7 +45,7 @@ type WeatherResult struct {
 // GetWeather simulates a weather API and returns structured data for the model.
 //
 //nolint:gosec // G404: math/rand for non-cryptographic fake weather only.
-func GetWeather(_ tool.Context, args WeatherArgs) (WeatherResult, error) {
+func GetWeather(_ agent.ToolContext, args WeatherArgs) (WeatherResult, error) {
 	temperatures := []int{-10, -5, 0, 5, 10, 15, 20, 25, 30, 35}
 	conditions := []string{"sunny", "cloudy", "rainy", "snowy", "windy"}
 
