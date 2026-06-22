@@ -25,9 +25,11 @@ import (
 type fakeAPI struct {
 	converseOut *bedrockruntime.ConverseOutput
 	converseErr error
+	converseIn  *bedrockruntime.ConverseInput
 
 	stream    StreamReader
 	streamErr error
+	streamIn  *bedrockruntime.ConverseStreamInput
 }
 
 func (f *fakeAPI) Converse(
@@ -36,8 +38,8 @@ func (f *fakeAPI) Converse(
 	optFns ...func(*bedrockruntime.Options),
 ) (*bedrockruntime.ConverseOutput, error) {
 	_ = ctx
-	_ = params
 	_ = optFns
+	f.converseIn = params
 	if f.converseErr != nil {
 		return nil, f.converseErr
 	}
@@ -50,8 +52,8 @@ func (f *fakeAPI) ConverseStream(
 	optFns ...func(*bedrockruntime.Options),
 ) (StreamReader, error) {
 	_ = ctx
-	_ = params
 	_ = optFns
+	f.streamIn = params
 	if f.streamErr != nil {
 		return nil, f.streamErr
 	}
@@ -66,6 +68,20 @@ type fakeStream struct {
 func (f *fakeStream) Events() <-chan types.ConverseStreamOutput { return f.ch }
 func (f *fakeStream) Close() error                              { return nil }
 func (f *fakeStream) Err() error                                { return f.err }
+
+func fakeTextOutput(text string) *bedrockruntime.ConverseOutput {
+	return &bedrockruntime.ConverseOutput{
+		Output: &types.ConverseOutputMemberMessage{
+			Value: types.Message{
+				Role: types.ConversationRoleAssistant,
+				Content: []types.ContentBlock{
+					&types.ContentBlockMemberText{Value: text},
+				},
+			},
+		},
+		StopReason: types.StopReasonEndTurn,
+	}
+}
 
 func TestConverse_GenerateContent_unary(t *testing.T) {
 	t.Parallel()
@@ -107,6 +123,56 @@ func TestConverse_GenerateContent_unary(t *testing.T) {
 	}
 	if got != 1 {
 		t.Fatalf("responses: %d", got)
+	}
+}
+
+func TestConverse_GenerateContent_unaryWithGuardrail(t *testing.T) {
+	t.Parallel()
+	api := &fakeAPI{converseOut: fakeTextOutput("ok")}
+	m, err := NewWithAPI("mid", api, WithGuardrail("guardrail-id", "DRAFT", types.GuardrailTraceEnabledFull))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("hi", "user")},
+		Config:   &genai.GenerateContentConfig{},
+	}
+	for _, err := range m.GenerateContent(context.Background(), req, false) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if api.converseIn == nil || api.converseIn.GuardrailConfig == nil {
+		t.Fatalf("missing guardrail config: %+v", api.converseIn)
+	}
+	cfg := api.converseIn.GuardrailConfig
+	if aws.ToString(cfg.GuardrailIdentifier) != "guardrail-id" ||
+		aws.ToString(cfg.GuardrailVersion) != "DRAFT" ||
+		cfg.Trace != types.GuardrailTraceEnabledFull {
+		t.Fatalf("guardrail config: %+v", cfg)
+	}
+}
+
+func TestNewWithAPI_WithGuardrailValidates(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		id      string
+		version string
+		trace   types.GuardrailTrace
+	}{
+		{"blank id", "", "1", types.GuardrailTraceEnabled},
+		{"blank version", "id", "", types.GuardrailTraceEnabled},
+		{"invalid trace", "id", "1", types.GuardrailTrace("bogus")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := NewWithAPI("mid", &fakeAPI{}, WithGuardrail(tt.id, tt.version, tt.trace))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+		})
 	}
 }
 
@@ -159,6 +225,35 @@ func TestConverse_GenerateContent_stream(t *testing.T) {
 	}
 	if partial < 1 || final != 1 {
 		t.Fatalf("partial=%d final=%d", partial, final)
+	}
+}
+
+func TestConverse_GenerateContent_streamWithGuardrail(t *testing.T) {
+	t.Parallel()
+	ch := make(chan types.ConverseStreamOutput)
+	close(ch)
+	api := &fakeAPI{stream: &fakeStream{ch: ch}}
+	m, err := NewWithAPI("mid", api, WithGuardrail("guardrail-id", "1", types.GuardrailTraceEnabled))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("hi", "user")},
+		Config:   &genai.GenerateContentConfig{},
+	}
+	for _, err := range m.GenerateContent(context.Background(), req, true) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if api.streamIn == nil || api.streamIn.GuardrailConfig == nil {
+		t.Fatalf("missing stream guardrail config: %+v", api.streamIn)
+	}
+	cfg := api.streamIn.GuardrailConfig
+	if aws.ToString(cfg.GuardrailIdentifier) != "guardrail-id" ||
+		aws.ToString(cfg.GuardrailVersion) != "1" ||
+		cfg.Trace != types.GuardrailTraceEnabled {
+		t.Fatalf("stream guardrail config: %+v", cfg)
 	}
 }
 

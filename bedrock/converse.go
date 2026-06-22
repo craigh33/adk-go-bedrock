@@ -158,9 +158,13 @@ type Options struct {
 
 // Model implements [model.LLM] using Amazon Bedrock Runtime Converse / ConverseStream.
 type Model struct {
-	modelID           string
-	api               RuntimeAPI
-	cacheSystemPrompt bool
+	modelID             string
+	api                 RuntimeAPI
+	cacheSystemPrompt   bool
+	guardrailConfigured bool
+	guardrailIdentifier string
+	guardrailVersion    string
+	guardrailTrace      types.GuardrailTrace
 }
 
 // New creates a [Model] using the default AWS configuration chain and a new
@@ -192,7 +196,48 @@ func NewWithAPI(modelID string, api RuntimeAPI, opts ...ModelOption) (*Model, er
 	for _, opt := range opts {
 		opt(m)
 	}
+	if err := m.validateGuardrail(); err != nil {
+		return nil, err
+	}
 	return m, nil
+}
+
+func (m *Model) validateGuardrail() error {
+	if !m.guardrailConfigured {
+		return nil
+	}
+	if m.guardrailIdentifier == "" {
+		return errors.New("bedrock guardrail identifier is required")
+	}
+	if m.guardrailVersion == "" {
+		return errors.New("bedrock guardrail version is required")
+	}
+	if !slices.Contains(types.GuardrailTrace("").Values(), m.guardrailTrace) {
+		return fmt.Errorf("unsupported bedrock guardrail trace: %q", m.guardrailTrace)
+	}
+	return nil
+}
+
+func (m *Model) guardrailConfig() *types.GuardrailConfiguration {
+	if !m.guardrailConfigured {
+		return nil
+	}
+	return &types.GuardrailConfiguration{
+		GuardrailIdentifier: &m.guardrailIdentifier,
+		GuardrailVersion:    &m.guardrailVersion,
+		Trace:               m.guardrailTrace,
+	}
+}
+
+func (m *Model) guardrailStreamConfig() *types.GuardrailStreamConfiguration {
+	if !m.guardrailConfigured {
+		return nil
+	}
+	return &types.GuardrailStreamConfiguration{
+		GuardrailIdentifier: &m.guardrailIdentifier,
+		GuardrailVersion:    &m.guardrailVersion,
+		Trace:               m.guardrailTrace,
+	}
 }
 
 // Name returns the configured model identifier (see [New]).
@@ -237,6 +282,7 @@ func (m *Model) generateUnary(
 			yield(nil, err)
 			return
 		}
+		in.GuardrailConfig = m.guardrailConfig()
 		out, err := m.api.Converse(ctx, in)
 		if err != nil {
 			yield(nil, err)
@@ -259,6 +305,7 @@ func (m *Model) generateStream(
 			yield(nil, err)
 			return
 		}
+		in.GuardrailConfig = m.guardrailStreamConfig()
 		stream, err := m.api.ConverseStream(ctx, in)
 		if err != nil {
 			yield(nil, err)
