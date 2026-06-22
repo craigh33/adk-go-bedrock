@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
+	"google.golang.org/adk/agent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/tool"
 	"google.golang.org/genai"
@@ -326,7 +327,7 @@ func (t *videoGenTool) Declaration() *genai.FunctionDeclaration {
 	return t.decl
 }
 
-func (t *videoGenTool) ProcessRequest(_ tool.Context, req *model.LLMRequest) error {
+func (t *videoGenTool) ProcessRequest(_ agent.ToolContext, req *model.LLMRequest) error {
 	if req.Tools == nil {
 		req.Tools = make(map[string]any)
 	}
@@ -439,7 +440,7 @@ func readArtifactBytes(rc io.ReadCloser, contentLength *int64, maxBytes int64) (
 }
 
 func (t *videoGenTool) appendArtifactFromS3(
-	ctx tool.Context,
+	ctx agent.ToolContext,
 	fileName, videoS3URI string,
 	out map[string]any,
 ) error {
@@ -478,7 +479,7 @@ func (t *videoGenTool) appendArtifactFromS3(
 	return nil
 }
 
-func (t *videoGenTool) Run(ctx tool.Context, args any) (map[string]any, error) {
+func (t *videoGenTool) Run(ctx agent.ToolContext, args any) (map[string]any, error) {
 	m, ok := args.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("unexpected args type: %T", args)
@@ -536,7 +537,7 @@ func (t *videoGenTool) Run(ctx tool.Context, args any) (map[string]any, error) {
 // startAsyncJob calls Bedrock StartAsyncInvoke and returns the invocation ARN.
 // clientRequestToken should be stable per ADK function call (e.g. ctx.FunctionCallID()) so retries dedupe.
 func (t *videoGenTool) startAsyncJob(
-	ctx tool.Context,
+	ctx agent.ToolContext,
 	prov *ReelProvider,
 	prompt string,
 	clientRequestToken string,
