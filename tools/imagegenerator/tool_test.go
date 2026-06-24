@@ -129,8 +129,8 @@ func TestNew_OK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if tl.Name() != "generate_image" {
-		t.Errorf("Name() = %q, want %q", tl.Name(), "generate_image")
+	if tl.Name() != imageToolName {
+		t.Errorf("Name() = %q, want %q", tl.Name(), imageToolName)
 	}
 	if tl.IsLongRunning() {
 		t.Error("IsLongRunning should be false")
@@ -149,7 +149,7 @@ func TestDeclaration(t *testing.T) {
 	if decl == nil {
 		t.Fatal("Declaration() returned nil")
 	}
-	if decl.Name != "generate_image" {
+	if decl.Name != imageToolName {
 		t.Errorf("declaration name = %q", decl.Name)
 	}
 	if decl.Parameters == nil || decl.Parameters.Properties["prompt"] == nil {
@@ -181,7 +181,7 @@ func TestProcessRequest_PacksDeclaration(t *testing.T) {
 	if len(req.Config.Tools[0].FunctionDeclarations) != 1 {
 		t.Fatal("expected one function declaration")
 	}
-	if req.Config.Tools[0].FunctionDeclarations[0].Name != "generate_image" {
+	if req.Config.Tools[0].FunctionDeclarations[0].Name != imageToolName {
 		t.Error("wrong declaration name")
 	}
 }

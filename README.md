@@ -71,6 +71,7 @@ These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat 
 - [`examples/bedrock-prompt-cache`](examples/bedrock-prompt-cache): `ModelOption` / Bedrock prompt caching for fewer repeated tokens (see AWS prompt caching docs).
 - [`examples/bedrock-document`](examples/bedrock-document): CLI to debug document uploads (`-dry-run` mapper check, optional `-combined` / `-stream`).
 - [`examples/bedrock-guardrails`](examples/bedrock-guardrails): safety assessments, content filtering, and guardrail metadata handling.
+- [`examples/bedrock-request-guardrail`](examples/bedrock-request-guardrail): request-side Bedrock guardrail configuration via `ModelOption`.
 - [`examples/bedrock-system-instruction`](examples/bedrock-system-instruction): system instructions for role definition, output formatting, and behavioral control.
 - [`examples/bedrock-web-ui`](examples/bedrock-web-ui): ADK local web UI launcher.
 

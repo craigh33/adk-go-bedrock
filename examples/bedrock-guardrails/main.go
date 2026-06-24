@@ -398,5 +398,5 @@ func main() {
 	fmt.Println("- FinishReason indicates if guardrails blocked the response")
 	fmt.Println("- Streaming accumulates guardrail metadata into final response")
 	fmt.Println("- Note: To use Bedrock guardrails, pre-configure a guardrail in AWS")
-	fmt.Println("  and pass its ID and version to the model via custom Bedrock APIs")
+	fmt.Println("  and pass its ID and version with bedrock.WithGuardrail")
 }

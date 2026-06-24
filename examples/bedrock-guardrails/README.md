@@ -65,9 +65,9 @@ To enable a pre-configured Bedrock guardrail in your applications:
 
 1. Create a guardrail in AWS Bedrock console
 2. Note its Identifier and Version
-3. Use the Bedrock Runtime API directly to pass guardrail configuration:
-   - The current ADK interface doesn't support request-side guardrail configuration
-   - See [Bedrock documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) for details
+3. Pass the guardrail to the Bedrock model with `bedrock.WithGuardrail(identifier, version, types.GuardrailTraceEnabled)`
+
+See [`examples/bedrock-request-guardrail`](../bedrock-request-guardrail) for a small request-side guardrail example.
 
 ## Example: Extracting Safety Ratings
 
@@ -89,7 +89,6 @@ for resp := range llm.GenerateContent(ctx, request, false) {
 
 - Bedrock guardrails require pre-provisioned AWS resources (guardrail ID and version)
 - ADK's generic `SafetySettings` cannot be automatically mapped to Bedrock guardrails
-- Guardrail metadata is available on response, but request-side configuration requires Bedrock-native APIs
 - Only function-based tools are supported; other tool types are ignored
 
 ## More Resources

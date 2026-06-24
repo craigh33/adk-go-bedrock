@@ -20,6 +20,7 @@ import (
 const DefaultCanvasModelID = "amazon.nova-canvas-v1:0"
 
 const (
+	imageToolName         = "generate_image"
 	defaultCanvasWidth    = 512
 	defaultCanvasHeight   = 512
 	defaultCanvasCfgScale = 8.0
@@ -89,7 +90,7 @@ func New(cfg Config) (tool.Tool, error) {
 }
 
 func (t *imageGenTool) Name() string {
-	return "generate_image"
+	return imageToolName
 }
 
 func (t *imageGenTool) Description() string {
