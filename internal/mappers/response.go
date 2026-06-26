@@ -58,7 +58,7 @@ func MessageToGenaiContent(m *types.Message) (*genai.Content, error) {
 	}
 	role := "model"
 	if m.Role == types.ConversationRoleUser {
-		role = "user"
+		role = genaiRoleUser
 	}
 	var parts []*genai.Part
 	for _, b := range m.Content {
@@ -884,7 +884,7 @@ func videoMIMEFromFormat(f types.VideoFormat) (string, error) {
 	case types.VideoFormatMov:
 		return "video/quicktime", nil
 	case types.VideoFormatMp4:
-		return "video/mp4", nil
+		return mimeVideoMP4, nil
 	case types.VideoFormatWebm:
 		return "video/webm", nil
 	case types.VideoFormatFlv:
