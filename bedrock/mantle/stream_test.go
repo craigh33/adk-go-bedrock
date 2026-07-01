@@ -12,10 +12,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
-	"google.golang.org/adk/model"
+	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 )
 
 // fakeDecoder replays a fixed list of SSE events for ssestream.NewStream.
@@ -187,13 +187,13 @@ func TestStreamingParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWithMessages: %v", err)
 	}
-	mantleLLM, err := bedrock.NewWithAPI("anthropic.claude-3-haiku", mantleClient)
+	mantleLLM, err := converse.NewWithAPI("anthropic.claude-3-haiku", mantleClient)
 	if err != nil {
 		t.Fatalf("NewWithAPI (mantle): %v", err)
 	}
 	mantleResp := lastStreamResponse(t, mantleLLM, req)
 
-	converseLLM, err := bedrock.NewWithAPI("anthropic.claude-3-haiku", &fakeConverseAPI{
+	converseLLM, err := converse.NewWithAPI("anthropic.claude-3-haiku", &fakeConverseAPI{
 		events: equivalentConverseEvents(),
 	})
 	if err != nil {
@@ -239,7 +239,7 @@ func assertSingleTextDelta(t *testing.T, got []types.ConverseStreamOutput, want 
 	}
 }
 
-func lastStreamResponse(t *testing.T, llm *bedrock.Model, req *model.LLMRequest) *model.LLMResponse {
+func lastStreamResponse(t *testing.T, llm *converse.Model, req *model.LLMRequest) *model.LLMResponse {
 	t.Helper()
 	var last *model.LLMResponse
 	for resp, err := range llm.GenerateContent(context.Background(), req, true) {
@@ -305,7 +305,7 @@ func messageStopEvent(sr types.StopReason) types.ConverseStreamOutput {
 	return &types.ConverseStreamOutputMemberMessageStop{Value: types.MessageStopEvent{StopReason: sr}}
 }
 
-// fakeConverseAPI is a bedrock.RuntimeAPI that streams a fixed set of native
+// fakeConverseAPI is a converse.RuntimeAPI that streams a fixed set of native
 // Converse events, used as the parity reference for the Mantle adapter.
 type fakeConverseAPI struct {
 	events []types.ConverseStreamOutput
@@ -323,7 +323,7 @@ func (f *fakeConverseAPI) ConverseStream(
 	context.Context,
 	*bedrockruntime.ConverseStreamInput,
 	...func(*bedrockruntime.Options),
-) (bedrock.StreamReader, error) {
+) (converse.StreamReader, error) {
 	ch := make(chan types.ConverseStreamOutput, len(f.events))
 	for _, ev := range f.events {
 		ch <- ev

@@ -10,7 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 )
 
 // Anthropic Messages streaming event type discriminators.
@@ -59,7 +59,7 @@ func MessageParamsFromConverseStreamInput(
 }
 
 // converseStream adapts an Anthropic Messages SSE stream to the Bedrock
-// [bedrock.StreamReader] contract, translating each Anthropic event into the
+// [converse.StreamReader] contract, translating each Anthropic event into the
 // [types.ConverseStreamOutput] variants that streamState.consumeEvent expects.
 type converseStream struct {
 	src       *ssestream.Stream[anthropic.MessageStreamEventUnion]
@@ -69,7 +69,7 @@ type converseStream struct {
 	err       error
 }
 
-var _ bedrock.StreamReader = (*converseStream)(nil)
+var _ converse.StreamReader = (*converseStream)(nil)
 
 func newConverseStream(src *ssestream.Stream[anthropic.MessageStreamEventUnion]) *converseStream {
 	cs := &converseStream{

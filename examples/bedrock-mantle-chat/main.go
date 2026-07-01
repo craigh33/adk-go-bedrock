@@ -1,6 +1,6 @@
 // Bedrock Mantle chat example for adk-go. It drives an ADK runner through the
 // Anthropic-compatible Bedrock Mantle endpoint instead of the native Converse
-// API, reusing the same bedrock.Model via a Mantle RuntimeAPI implementation.
+// API, reusing the same converse.Model via a Mantle RuntimeAPI implementation.
 //
 // Authenticate with either:
 //   - an Anthropic/Bedrock API key: set AWS_BEARER_TOKEN_BEDROCK (or
@@ -21,13 +21,13 @@ import (
 	"os"
 	"strings"
 
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/runner"
-	"google.golang.org/adk/session"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/runner"
+	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 	"github.com/craigh33/adk-go-bedrock/bedrock/mantle"
 )
 
@@ -58,7 +58,7 @@ func main() {
 		log.Fatalf("bedrock mantle client: %v", err)
 	}
 
-	llm, err := bedrock.NewWithAPI(modelID, mantleClient)
+	llm, err := converse.NewWithAPI(modelID, mantleClient)
 	if err != nil {
 		log.Fatalf("bedrock model: %v", err)
 	}

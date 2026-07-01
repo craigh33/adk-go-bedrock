@@ -11,10 +11,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
-	"google.golang.org/adk/model"
+	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 )
 
 // fakeMessages is a test double for the Anthropic Messages API.
@@ -113,7 +113,7 @@ func TestClientConverse_Errors(t *testing.T) {
 }
 
 // TestClientConverse_ThroughModel drives the unary path end to end through a
-// bedrock.Model: genai request -> Converse -> Anthropic -> Converse -> genai.
+// converse.Model: genai request -> Converse -> Anthropic -> Converse -> genai.
 func TestClientConverse_ThroughModel(t *testing.T) {
 	msg := mustUnmarshalMessage(t, `{
 		"id": "msg_1", "type": "message", "role": "assistant",
@@ -128,7 +128,7 @@ func TestClientConverse_ThroughModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWithMessages: %v", err)
 	}
-	llm, err := bedrock.NewWithAPI("anthropic.claude-3-haiku", client)
+	llm, err := converse.NewWithAPI("anthropic.claude-3-haiku", client)
 	if err != nil {
 		t.Fatalf("NewWithAPI: %v", err)
 	}

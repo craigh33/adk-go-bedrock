@@ -6,8 +6,8 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.55.0
 	github.com/aws/aws-sdk-go-v2 v1.42.0
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.54.1
-	github.com/craigh33/adk-go-bedrock v0.11.1
-	google.golang.org/adk v1.4.0
+	github.com/craigh33/adk-go-bedrock v1.0.1
+	google.golang.org/adk/v2 v2.0.0
 	google.golang.org/genai v1.62.0
 )
 
@@ -51,10 +51,11 @@ require (
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
+	go.opentelemetry.io/otel/sdk/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
-	golang.org/x/net v0.54.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect

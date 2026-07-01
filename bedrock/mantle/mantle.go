@@ -11,7 +11,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 )
 
 // MessagesAPI is the subset of the Anthropic Messages API used by the Mantle
@@ -60,14 +60,14 @@ func (c Config) toMantleConfig() anthropicbedrock.MantleClientConfig {
 }
 
 // Client adapts the Anthropic Bedrock Mantle Messages API to the Bedrock
-// [github.com/craigh33/adk-go-bedrock/bedrock.RuntimeAPI] interface. Pair it with
-// [github.com/craigh33/adk-go-bedrock/bedrock.NewWithAPI] to drive a
-// [github.com/craigh33/adk-go-bedrock/bedrock.Model] over Mantle instead of Converse.
+// [github.com/craigh33/adk-go-bedrock/bedrock/converse.RuntimeAPI] interface. Pair it with
+// [github.com/craigh33/adk-go-bedrock/bedrock/converse.NewWithAPI] to drive a
+// [github.com/craigh33/adk-go-bedrock/bedrock/converse.Model] over Mantle instead of Converse.
 type Client struct {
 	messages MessagesAPI
 }
 
-var _ bedrock.RuntimeAPI = (*Client)(nil)
+var _ converse.RuntimeAPI = (*Client)(nil)
 
 // New builds a [Client] backed by a live Anthropic Bedrock Mantle client.
 func New(ctx context.Context, cfg Config, opts ...option.RequestOption) (*Client, error) {
@@ -88,7 +88,7 @@ func NewWithMessages(messages MessagesAPI) (*Client, error) {
 }
 
 // Converse implements the unary call path of
-// [github.com/craigh33/adk-go-bedrock/bedrock.RuntimeAPI] by translating the
+// [github.com/craigh33/adk-go-bedrock/bedrock/converse.RuntimeAPI] by translating the
 // Converse request to the Anthropic Messages API and mapping the reply back to a
 // [bedrockruntime.ConverseOutput]. The Bedrock runtime option functions do not
 // apply to the Mantle transport and are ignored.
@@ -112,7 +112,7 @@ func (c *Client) Converse(
 }
 
 // ConverseStream implements the streaming call path of
-// [github.com/craigh33/adk-go-bedrock/bedrock.RuntimeAPI] by opening an Anthropic
+// [github.com/craigh33/adk-go-bedrock/bedrock/converse.RuntimeAPI] by opening an Anthropic
 // Messages SSE stream and adapting its events into the Converse stream variants
 // that the Model's stream assembly consumes. The Bedrock runtime option functions
 // do not apply to the Mantle transport and are ignored.
@@ -120,7 +120,7 @@ func (c *Client) ConverseStream(
 	ctx context.Context,
 	params *bedrockruntime.ConverseStreamInput,
 	_ ...func(*bedrockruntime.Options),
-) (bedrock.StreamReader, error) {
+) (converse.StreamReader, error) {
 	if c == nil || c.messages == nil {
 		return nil, errors.New("nil Mantle client")
 	}
