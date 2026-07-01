@@ -6,6 +6,11 @@ on:
 jobs:
   lint-test:
     runs-on: ubuntu-latest
+    # Core Converse module. GOWORK=off keeps this job scoped to the root module so
+    # the workspace (which also includes bedrock/mantle) does not pull the
+    # anthropic-sdk-go dependency into the core module's resolution.
+    env:
+      GOWORK: off
     steps:
       - uses: actions/checkout@v7
 
@@ -20,4 +25,27 @@ jobs:
           args: --timeout=5m
 
       - name: Unit tests
+        run: go test ./... -count=1
+
+  lint-test-mantle:
+    runs-on: ubuntu-latest
+    # Nested Bedrock Mantle module (own go.mod). Runs in workspace mode so the
+    # committed go.work resolves the in-repo parent module. The anthropic-sdk-go
+    # dependency stays in this module's go.sum, out of the core module's.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: bedrock/mantle/go.mod
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          working-directory: bedrock/mantle
+          args: --timeout=5m
+
+      - name: Unit tests
+        working-directory: bedrock/mantle
         run: go test ./... -count=1
