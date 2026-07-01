@@ -13,9 +13,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	bdaruntime "github.com/aws/aws-sdk-go-v2/service/bedrockdataautomationruntime"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/model"
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/tool"
 	"google.golang.org/genai"
 
 	bedrockmappers "github.com/craigh33/adk-go-bedrock/internal/mappers"
@@ -246,7 +246,7 @@ func newFunctionDeclaration() *genai.FunctionDeclaration {
 	}
 }
 
-func (t *dataAutomationTool) ProcessRequest(_ agent.ToolContext, req *model.LLMRequest) error {
+func (t *dataAutomationTool) ProcessRequest(_ agent.Context, req *model.LLMRequest) error {
 	if req.Tools == nil {
 		req.Tools = make(map[string]any)
 	}
@@ -281,7 +281,7 @@ func (t *dataAutomationTool) ProcessRequest(_ agent.ToolContext, req *model.LLMR
 	return nil
 }
 
-func (t *dataAutomationTool) Run(ctx agent.ToolContext, args any) (map[string]any, error) {
+func (t *dataAutomationTool) Run(ctx agent.Context, args any) (map[string]any, error) {
 	m, ok := args.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("unexpected args type: %T", args)
@@ -356,7 +356,7 @@ func (t *dataAutomationTool) Run(ctx agent.ToolContext, args any) (map[string]an
 	return out, nil
 }
 
-func (t *dataAutomationTool) stageArtifact(ctx agent.ToolContext, artifactName, clientToken string) (string, error) {
+func (t *dataAutomationTool) stageArtifact(ctx agent.Context, artifactName, clientToken string) (string, error) {
 	if t.s3 == nil {
 		return "", errors.New("bedrockdataautomation: S3 client is required for artifact input")
 	}
@@ -524,7 +524,7 @@ func nextPollBackoff(prev, maxPoll time.Duration) time.Duration {
 }
 
 func (t *dataAutomationTool) appendResultArtifact(
-	ctx agent.ToolContext,
+	ctx agent.Context,
 	fileName, outputS3URI string,
 	out map[string]any,
 ) error {

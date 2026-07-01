@@ -14,15 +14,15 @@ import (
 	bdaruntime "github.com/aws/aws-sdk-go-v2/service/bedrockdataautomationruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/artifact"
-	"google.golang.org/adk/runner"
-	"google.golang.org/adk/session"
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/artifact"
+	"google.golang.org/adk/v2/runner"
+	"google.golang.org/adk/v2/session"
+	"google.golang.org/adk/v2/tool"
 	"google.golang.org/genai"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 	"github.com/craigh33/adk-go-bedrock/tools/bedrockdataautomation"
 )
 
@@ -55,9 +55,9 @@ func run(ctx context.Context) error {
 	}
 
 	br := bedrockruntime.NewFromConfig(awsCfg)
-	llm, err := bedrock.NewWithAPI(
+	llm, err := converse.NewWithAPI(
 		envOrDefault("BEDROCK_MODEL_ID", "eu.amazon.nova-2-lite-v1:0"),
-		bedrock.NewRuntimeAPI(br),
+		converse.NewRuntimeAPI(br),
 	)
 	if err != nil {
 		return fmt.Errorf("bedrock model: %w", err)
