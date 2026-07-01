@@ -74,6 +74,7 @@ These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat 
 - [`examples/bedrock-request-guardrail`](examples/bedrock-request-guardrail): request-side Bedrock guardrail configuration via `ModelOption`.
 - [`examples/bedrock-system-instruction`](examples/bedrock-system-instruction): system instructions for role definition, output formatting, and behavioral control.
 - [`examples/bedrock-web-ui`](examples/bedrock-web-ui): ADK local web UI launcher.
+- [`examples/bedrock-mantle-chat`](examples/bedrock-mantle-chat): runner-based chat example using the Anthropic-compatible **Bedrock Mantle** endpoint instead of Converse.
 
 All examples load AWS configuration with [`config.LoadDefaultConfig`](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/config#LoadDefaultConfig) and require **`BEDROCK_MODEL_ID`** plus region configuration (`AWS_REGION` or profile region).
 
@@ -142,6 +143,26 @@ func groundedAsk(ctx context.Context, llm model.LLM, question string) (*model.LL
 Grounded replies include citation payloads under `genai.Part.PartMetadata` with key `"bedrock_citations"` (each entry may include `location.url`, `location.domain`, etc.). Retain and surface those citations in user-facing output per AWS guidance.
 
 A runnable CLI lives at [`examples/bedrock-nova-grounding`](examples/bedrock-nova-grounding).
+
+## How it maps to Mantle
+
+Amazon Bedrock offers two inference endpoints. The default path in this library targets **`bedrock-runtime`** (the native Converse / ConverseStream API described above). The optional **`bedrock-mantle`** endpoint exposes an Anthropic-compatible Messages API instead.
+
+The [`bedrock/mantle`](bedrock/mantle) package (a nested Go module so its `anthropic-sdk-go` dependency stays out of the core module's `go.sum`) provides a `converse.RuntimeAPI` implementation that translates Converse request/response shapes to and from the Anthropic Messages API. Because it satisfies the same interface, you drive it through the existing `converse.Model` with no other changes:
+
+```go
+mantleClient, err := mantle.New(ctx, mantle.Config{AWSRegion: "us-east-1"})
+if err != nil {
+    log.Fatal(err)
+}
+llm, err := converse.NewWithAPI("anthropic.claude-sonnet-4-5-20250929-v1:0", mantleClient)
+```
+
+- **Transport, not a new provider**: the genai ↔ Converse translation is unchanged; the Mantle layer only re-encodes the already-translated Converse `ConverseInput`/`ConverseOutput` as Anthropic Messages calls, so `Model` and the streaming assembly are reused verbatim.
+- **Authentication**: unlike Converse (SigV4 only), Mantle also accepts an API key/bearer token. Auth resolves by precedence: `Config.APIKey` (x-api-key) → `AWS_BEARER_TOKEN_BEDROCK` / `ANTHROPIC_AWS_API_KEY` env → the default AWS credential chain (SigV4). It has its own base URL (`https://bedrock-mantle.{region}.api.aws/anthropic`, overridable) and separate service quotas.
+- **Model IDs**: Mantle uses plain Anthropic model IDs (e.g. `anthropic.claude-sonnet-4-5-...`). Converse-style cross-region inference-profile prefixes (`us.`, `eu.`, `apac.`, `global.`, `us-gov.`) are accepted and normalized. Non-Anthropic model IDs are rejected, since Mantle serves only Anthropic models.
+- **Streaming**: Anthropic Messages SSE events are adapted into the same Converse stream variants the `Model` already consumes, so partial text, streamed tool-call input, reasoning, and usage all behave as on the Converse path.
+- **Capability gaps**: features with no Anthropic Messages equivalent are rejected early with a clear error rather than silently dropped — `GuardrailConfiguration` (Bedrock Guardrails), `OutputConfig` (structured outputs), and `AdditionalModelRequestFields` (model-specific fields such as Nova Web Grounding). S3-sourced media and audio/video/document blocks are likewise unsupported on this transport (Converse remains the path for those).
 
 ## Limitations
 
