@@ -7,7 +7,7 @@ import (
 
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/types"
 	"github.com/google/uuid"
-	"google.golang.org/adk/session"
+	"google.golang.org/adk/v2/session"
 )
 
 const (

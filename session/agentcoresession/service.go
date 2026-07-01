@@ -15,7 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime"
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/types"
 	"github.com/aws/smithy-go"
-	"google.golang.org/adk/session"
+	"google.golang.org/adk/v2/session"
 
 	bedrockmappers "github.com/craigh33/adk-go-bedrock/internal/mappers"
 )

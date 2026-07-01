@@ -13,14 +13,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime"
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/types"
 	"github.com/google/uuid"
-	"google.golang.org/adk/model"
-	"google.golang.org/adk/session"
-	"google.golang.org/adk/session/session_test"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/session"
+	"google.golang.org/adk/v2/session/sessiontestsuite"
 	"google.golang.org/genai"
 )
 
 func TestServiceSuite(t *testing.T) {
-	session_test.RunServiceTests(t, session_test.SuiteOptions{
+	sessiontestsuite.RunServiceTests(t, sessiontestsuite.SuiteOptions{
 		SupportsUserProvidedSessionID: false,
 	}, func(t *testing.T) session.Service {
 		t.Helper()
@@ -69,7 +69,7 @@ func TestAppendEventStoresFullEventJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events := session_test.Snapshot(got.Session).Events
+	events := sessiontestsuite.Snapshot(got.Session).Events
 	if len(events) != 1 {
 		t.Fatalf("events len = %d, want 1", len(events))
 	}
