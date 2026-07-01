@@ -49,3 +49,21 @@ jobs:
       - name: Unit tests
         working-directory: bedrock/mantle
         run: go test ./... -count=1
+
+  build-mantle-example:
+    runs-on: ubuntu-latest
+    # Self-contained example leaf module. Built with GOWORK=off so it resolves
+    # the in-repo modules via its replace directives, keeping anthropic-sdk-go
+    # out of the core module.
+    env:
+      GOWORK: off
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: examples/bedrock-mantle-chat/go.mod
+
+      - name: Build
+        working-directory: examples/bedrock-mantle-chat
+        run: go build ./...
