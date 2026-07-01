@@ -24,7 +24,7 @@ import (
 	"google.golang.org/adk/v2/tool/functiontool"
 	"google.golang.org/genai"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
 )
 
@@ -89,7 +89,7 @@ func main() {
 	defer func() { _ = shutdownTP(context.Background()) }()
 
 	br := bedrockruntime.NewFromConfig(awsCfg)
-	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp)))
+	llm, err := converse.NewWithAPI(modelID, converse.NewRuntimeAPI(br, converse.WithTracerProvider(tp)))
 	if err != nil {
 		log.Panicf("bedrock model: %v", err)
 	}

@@ -24,7 +24,7 @@ import (
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/genai"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 	"github.com/craigh33/adk-go-bedrock/tools/imagegenerator"
 )
 
@@ -51,7 +51,7 @@ func main() {
 
 	br := bedrockruntime.NewFromConfig(awsCfg)
 
-	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br))
+	llm, err := converse.NewWithAPI(modelID, converse.NewRuntimeAPI(br))
 	if err != nil {
 		log.Fatalf("bedrock model: %v", err)
 	}

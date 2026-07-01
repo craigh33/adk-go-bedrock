@@ -34,7 +34,7 @@ Replace the module path with your fork or published path if you rename the modul
 
 ```go
 ctx := context.Background()
-llm, err := bedrock.New(ctx, "us.anthropic.claude-3-5-sonnet-20241022-v2:0", &bedrock.Options{
+llm, err := converse.New(ctx, "us.anthropic.claude-3-5-sonnet-20241022-v2:0", &converse.Options{
     Region: os.Getenv("AWS_REGION"),
 })
 if err != nil {
@@ -49,9 +49,9 @@ agent, err := llmagent.New(llmagent.Config{
 // Wire agent into runner.New(...) as usual.
 ```
 
-`bedrock.New` accepts a **model ID** or **inference profile ARN** as documented by AWS. [`LLMRequest.Model`](https://pkg.go.dev/google.golang.org/adk/v2/model#LLMRequest) can override the model ID at runtime (e.g. from ADK callbacks).
+`converse.New` accepts a **model ID** or **inference profile ARN** as documented by AWS. [`LLMRequest.Model`](https://pkg.go.dev/google.golang.org/adk/v2/model#LLMRequest) can override the model ID at runtime (e.g. from ADK callbacks).
 
-The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conversions (requests, responses, tools, usage). Import it if you need the same mappings outside the default [`bedrock`](bedrock/) package. It also exports [`MIMETypeFromExtension`](bedrock/mappers/mime_extension.go) for inferring MIME types from a filename when building `genai` parts. The Bedrock Runtime API abstraction used by [`converse.go`](bedrock/converse.go) is exported from [`bedrock`](bedrock/) (`RuntimeAPI`, `StreamReader`, and `NewRuntimeAPI`).
+The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conversions (requests, responses, tools, usage). Import it if you need the same mappings outside the default [`converse`](bedrock/converse/) package. It also exports [`MIMETypeFromExtension`](bedrock/mappers/mime_extension.go) for inferring MIME types from a filename when building `genai` parts. The Bedrock Runtime API abstraction used by [`converse.go`](bedrock/converse/converse.go) is exported from [`converse`](bedrock/converse/) (`RuntimeAPI`, `StreamReader`, and `NewRuntimeAPI`).
 
 ## Examples
 

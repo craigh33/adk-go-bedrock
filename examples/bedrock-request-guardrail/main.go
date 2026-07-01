@@ -20,7 +20,7 @@ import (
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
 )
 
@@ -65,11 +65,11 @@ func main() {
 	defer func() { _ = shutdownTP(context.Background()) }()
 
 	br := bedrockruntime.NewFromConfig(awsCfg)
-	runtimeAPI := bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp))
-	llm, err := bedrock.NewWithAPI(
+	runtimeAPI := converse.NewRuntimeAPI(br, converse.WithTracerProvider(tp))
+	llm, err := converse.NewWithAPI(
 		modelID,
 		runtimeAPI,
-		bedrock.WithGuardrail(guardrailID, guardrailVersion, types.GuardrailTraceEnabled),
+		converse.WithGuardrail(guardrailID, guardrailVersion, types.GuardrailTraceEnabled),
 	)
 	if err != nil {
 		//nolint:gocritic // exitAfterDefer: example skips tracer shutdown on model setup failure

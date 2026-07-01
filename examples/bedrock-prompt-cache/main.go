@@ -20,7 +20,7 @@ import (
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
 )
 
@@ -119,12 +119,12 @@ func main() {
 	defer func() { _ = shutdownTP(context.Background()) }()
 
 	br := bedrockruntime.NewFromConfig(awsCfg)
-	runtimeAPI := bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp))
+	runtimeAPI := converse.NewRuntimeAPI(br, converse.WithTracerProvider(tp))
 
 	// WithCacheSystemPrompt appends a CachePoint block after the system prompt
 	// on every request. Bedrock caches everything up to that marker, so
 	// subsequent requests pay (90%) less for those tokens.
-	llm, err := bedrock.NewWithAPI(modelID, runtimeAPI, bedrock.WithCacheSystemPrompt())
+	llm, err := converse.NewWithAPI(modelID, runtimeAPI, converse.WithCacheSystemPrompt())
 	if err != nil {
 		log.Fatalf("create bedrock model: %v", err) //nolint:gocritic // This is just an example
 	}

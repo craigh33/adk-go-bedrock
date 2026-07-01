@@ -1,4 +1,4 @@
-package bedrock
+package converse
 
 import (
 	"context"
@@ -47,7 +47,7 @@ type RuntimeAPI interface {
 	) (StreamReader, error)
 }
 
-const otelTracerName = "github.com/craigh33/adk-go-bedrock/bedrock"
+const otelTracerName = "github.com/craigh33/adk-go-bedrock/bedrock/converse"
 
 // RuntimeAPIOption configures [NewRuntimeAPI].
 type RuntimeAPIOption func(*runtimeAdapter)

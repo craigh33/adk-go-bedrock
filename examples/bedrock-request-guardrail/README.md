@@ -1,6 +1,6 @@
 # bedrock-request-guardrail example
 
-This example attaches a preconfigured Bedrock guardrail to one Converse request with `bedrock.WithGuardrail`.
+This example attaches a preconfigured Bedrock guardrail to one Converse request with `converse.WithGuardrail`.
 
 ## Prerequisites
 
