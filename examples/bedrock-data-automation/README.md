@@ -25,4 +25,4 @@ export BDA_OUTPUT_S3_URI=s3://your-bucket/bda-output
 make -C examples/bedrock-data-automation run PROMPT='Analyze s3://your-bucket/input/document.pdf and save the JSON as bda-result.json'
 ```
 
-BDA async output is S3-first. The tool returns the invocation ARN and output S3 URI. If the model sets `result_artifact_name`, the tool attempts to save `<output_s3_uri>/output.json` as an ADK artifact.
+BDA async output is S3-first. The tool returns the invocation ARN and output S3 URI. If the model sets `result_artifact_name`, the tool attempts to save the returned JSON output as an ADK artifact.

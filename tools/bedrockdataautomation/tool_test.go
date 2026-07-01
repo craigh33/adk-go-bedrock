@@ -482,9 +482,9 @@ func TestRunSavesResultArtifact(t *testing.T) {
 	t.Parallel()
 	api := &fakeRuntimeAPI{
 		invokeOut: &bdaruntime.InvokeDataAutomationAsyncOutput{InvocationArn: aws.String("arn")},
-		getOut:    []*bdaruntime.GetDataAutomationStatusOutput{successStatus("s3://out/job")},
+		getOut:    []*bdaruntime.GetDataAutomationStatusOutput{successStatus("s3://out/job_metadata.json")},
 	}
-	s3api := &fakeS3{objects: map[string][]byte{"out/job/output.json": []byte(`{"ok":true}`)}}
+	s3api := &fakeS3{objects: map[string][]byte{"out/job_metadata.json": []byte(`{"ok":true}`)}}
 	arts := &fakeArtifacts{version: 7}
 	gt := newTestTool(t, api, s3api)
 
@@ -495,7 +495,7 @@ func TestRunSavesResultArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s3api.lastGetBucket != "out" || s3api.lastGetKey != "job/output.json" {
+	if s3api.lastGetBucket != "out" || s3api.lastGetKey != "job_metadata.json" {
 		t.Fatalf("get bucket/key = %s/%s", s3api.lastGetBucket, s3api.lastGetKey)
 	}
 	if arts.savedName != "bda-result.json" ||
@@ -503,7 +503,7 @@ func TestRunSavesResultArtifact(t *testing.T) {
 		string(arts.savedPart.InlineData.Data) != `{"ok":true}` {
 		t.Fatalf("saved artifact = %q %+v", arts.savedName, arts.savedPart)
 	}
-	if out["result_s3_uri"] != "s3://out/job/output.json" || out["result_version"] != int64(7) {
+	if out["result_s3_uri"] != "s3://out/job_metadata.json" || out["result_version"] != int64(7) {
 		t.Fatalf("out = %+v", out)
 	}
 }

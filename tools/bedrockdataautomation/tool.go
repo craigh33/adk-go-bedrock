@@ -528,7 +528,10 @@ func (t *dataAutomationTool) appendResultArtifact(
 	fileName, outputS3URI string,
 	out map[string]any,
 ) error {
-	resultS3URI := joinS3Key(outputS3URI, resultObjectName)
+	resultS3URI := strings.TrimSpace(outputS3URI)
+	if !strings.HasSuffix(resultS3URI, ".json") {
+		resultS3URI = joinS3Key(resultS3URI, resultObjectName)
+	}
 	bucket, key, err := parseS3URI(resultS3URI)
 	if err != nil {
 		return err

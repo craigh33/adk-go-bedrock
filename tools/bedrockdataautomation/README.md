@@ -41,7 +41,7 @@ On success the tool returns:
 - `input_s3_uri`
 - `output_s3_uri`
 
-If `result_artifact_name` is set, the tool downloads `<output_s3_uri>/output.json` and saves it as an ADK artifact. Rich discovery of modality-specific output files is intentionally left out of v1.
+If `result_artifact_name` is set, the tool saves the returned JSON S3 object as an ADK artifact. When BDA returns an output prefix instead of a JSON object, the tool falls back to `<output_s3_uri>/output.json`. Rich discovery of modality-specific output files is intentionally left out of v1.
 
 ## Required IAM Actions
 
