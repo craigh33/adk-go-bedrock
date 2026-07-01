@@ -33,6 +33,10 @@ const (
 	videoGenToolDescription = `Generates a short video from a text prompt using Amazon Nova Reel (Bedrock async invoke), stores output in your configured S3 location, and saves the MP4 as an artifact when S3 download is configured.
 
 NOTE: This is a long-running operation (often minutes). Do not call this tool again for the same request until it returns.`
+	videoToolParamPrompt   = "prompt"
+	videoToolParamFileName = "file_name"
+	videoToolParamSeed     = "seed"
+	videoStatusSuccess     = "success"
 
 	defaultDurationSeconds  = 6
 	defaultFPS              = 24
@@ -180,10 +184,10 @@ func (p *ReelProvider) modelInput(prompt string) any {
 			"text": prompt,
 		},
 		"videoGenerationConfig": map[string]any{
-			"durationSeconds": defaultDurationSeconds,
-			"fps":             defaultFPS,
-			"dimension":       defaultDimension,
-			"seed":            clampNovaReelSeed(p.Seed),
+			"durationSeconds":  defaultDurationSeconds,
+			"fps":              defaultFPS,
+			"dimension":        defaultDimension,
+			videoToolParamSeed: clampNovaReelSeed(p.Seed),
 		},
 	}
 }
@@ -295,26 +299,26 @@ func newFunctionDeclaration() *genai.FunctionDeclaration {
 		Parameters: &genai.Schema{
 			Type: "OBJECT",
 			Properties: map[string]*genai.Schema{
-				"prompt": {
+				videoToolParamPrompt: {
 					Type: "STRING",
 					Description: fmt.Sprintf(
 						"Text prompt describing the video (English, max %d characters for single-shot)",
 						maxNovaReelPromptRunes,
 					),
 				},
-				"file_name": {
+				videoToolParamFileName: {
 					Type: "STRING",
 					Description: fmt.Sprintf(
 						"Artifact filename for the downloaded MP4 (e.g. 'clip.mp4'). Defaults to %q.",
 						defaultArtifactFileName,
 					),
 				},
-				"seed": {
+				videoToolParamSeed: {
 					Type:        "INTEGER",
 					Description: "Optional positive integer seed for reproducibility; omit, zero, or non-positive values select a random seed.",
 				},
 			},
-			Required: []string{"prompt"},
+			Required: []string{videoToolParamPrompt},
 		},
 	}
 }
@@ -364,7 +368,7 @@ func (t *videoGenTool) ProcessRequest(_ agent.Context, req *model.LLMRequest) er
 
 func providerForArgs(base *ReelProvider, m map[string]any) (*ReelProvider, error) {
 	prov := base
-	if seedRaw, ok := m["seed"]; ok && seedRaw != nil {
+	if seedRaw, ok := m[videoToolParamSeed]; ok && seedRaw != nil {
 		switch v := seedRaw.(type) {
 		case float64:
 			if math.Trunc(v) != v {
@@ -474,7 +478,7 @@ func (t *videoGenTool) appendArtifactFromS3(
 	if err != nil {
 		return fmt.Errorf("save artifact %q: %w", fileName, err)
 	}
-	out["file_name"] = fileName
+	out[videoToolParamFileName] = fileName
 	out["version"] = saveResp.Version
 	return nil
 }
@@ -485,7 +489,7 @@ func (t *videoGenTool) Run(ctx agent.Context, args any) (map[string]any, error) 
 		return nil, fmt.Errorf("unexpected args type: %T", args)
 	}
 
-	prompt, _ := m["prompt"].(string)
+	prompt, _ := m[videoToolParamPrompt].(string)
 	if prompt == "" {
 		return nil, errors.New("prompt is required")
 	}
@@ -493,7 +497,7 @@ func (t *videoGenTool) Run(ctx agent.Context, args any) (map[string]any, error) 
 		return nil, fmt.Errorf("prompt exceeds %d characters", maxNovaReelPromptRunes)
 	}
 
-	fileName, _ := m["file_name"].(string)
+	fileName, _ := m[videoToolParamFileName].(string)
 	if fileName == "" {
 		fileName = defaultArtifactFileName
 	}
@@ -524,7 +528,7 @@ func (t *videoGenTool) Run(ctx agent.Context, args any) (map[string]any, error) 
 	videoS3URI := joinS3Key(s3Base, novaReelOutputKey)
 
 	out := map[string]any{
-		"status":       "success",
+		"status":       videoStatusSuccess,
 		"invocation":   invocationArn,
 		"video_s3_uri": videoS3URI,
 	}
