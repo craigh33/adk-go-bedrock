@@ -14,6 +14,9 @@ bedrock-a2a
 # Test binary, built with `go test -c`
 *.test
 
+# Compiled example binaries (named after their directory by `go build`)
+/examples/bedrock-mantle-chat/bedrock-mantle-chat
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
