@@ -112,13 +112,21 @@ func (c *Client) Converse(
 }
 
 // ConverseStream implements the streaming call path of
-// [github.com/craigh33/adk-go-bedrock/bedrock.RuntimeAPI].
+// [github.com/craigh33/adk-go-bedrock/bedrock.RuntimeAPI] by opening an Anthropic
+// Messages SSE stream and adapting its events into the Converse stream variants
+// that the Model's stream assembly consumes. The Bedrock runtime option functions
+// do not apply to the Mantle transport and are ignored.
 func (c *Client) ConverseStream(
 	ctx context.Context,
 	params *bedrockruntime.ConverseStreamInput,
 	_ ...func(*bedrockruntime.Options),
 ) (bedrock.StreamReader, error) {
-	_ = ctx
-	_ = params
-	return nil, errors.New("bedrock Mantle ConverseStream is not yet implemented")
+	if c == nil || c.messages == nil {
+		return nil, errors.New("nil Mantle client")
+	}
+	msgParams, err := MessageParamsFromConverseStreamInput(params)
+	if err != nil {
+		return nil, err
+	}
+	return newConverseStream(c.messages.NewStreaming(ctx, msgParams)), nil
 }
