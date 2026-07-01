@@ -8,13 +8,13 @@
 
 # adk-go-bedrock
 
-[Amazon Bedrock](https://aws.amazon.com/bedrock/) **Converse** / **ConverseStream** implementation of the [`model.LLM`](https://pkg.go.dev/google.golang.org/adk/model#LLM) interface for [adk-go](https://github.com/google/adk-go), so you can run agents on Claude, Nova, and other Bedrock chat models with the same ADK APIs you use for Gemini.
+[Amazon Bedrock](https://aws.amazon.com/bedrock/) **Converse** / **ConverseStream** implementation of the [`model.LLM`](https://pkg.go.dev/google.golang.org/adk/v2/model#LLM) interface for [adk-go](https://github.com/google/adk-go), so you can run agents on Claude, Nova, and other Bedrock chat models with the same ADK APIs you use for Gemini.
 
 **Other providers:** [adk-go-ollama](https://github.com/craigh33/adk-go-ollama) · [adk-go-kronk](https://github.com/craigh33/adk-go-kronk)
 
 ## Requirements
 
-- **Go** 1.25+ (aligned with `google.golang.org/adk`)
+- **Go** 1.25+ (aligned with `google.golang.org/adk/v2`)
 - **AWS account** with Bedrock model access in your chosen region
 - **Credentials** via the default AWS chain ([environment variables](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-envvars.html), shared config, IAM role, etc.)
 - A **region** where Bedrock is available: `AWS_REGION`, or `region` in `~/.aws/config` for your profile
@@ -49,7 +49,7 @@ agent, err := llmagent.New(llmagent.Config{
 // Wire agent into runner.New(...) as usual.
 ```
 
-`bedrock.New` accepts a **model ID** or **inference profile ARN** as documented by AWS. [`LLMRequest.Model`](https://pkg.go.dev/google.golang.org/adk/model#LLMRequest) can override the model ID at runtime (e.g. from ADK callbacks).
+`bedrock.New` accepts a **model ID** or **inference profile ARN** as documented by AWS. [`LLMRequest.Model`](https://pkg.go.dev/google.golang.org/adk/v2/model#LLMRequest) can override the model ID at runtime (e.g. from ADK callbacks).
 
 The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conversions (requests, responses, tools, usage). Import it if you need the same mappings outside the default [`bedrock`](bedrock/) package. It also exports [`MIMETypeFromExtension`](bedrock/mappers/mime_extension.go) for inferring MIME types from a filename when building `genai` parts. The Bedrock Runtime API abstraction used by [`converse.go`](bedrock/converse.go) is exported from [`bedrock`](bedrock/) (`RuntimeAPI`, `StreamReader`, and `NewRuntimeAPI`).
 
@@ -112,7 +112,7 @@ Converse request payloads use SystemTool name `nova_grounding`, while IAM polici
 import (
     "context"
 
-    "google.golang.org/adk/model"
+    "google.golang.org/adk/v2/model"
     "google.golang.org/genai"
 
     "github.com/craigh33/adk-go-bedrock/tools/novagrounding"
