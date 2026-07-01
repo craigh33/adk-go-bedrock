@@ -18,15 +18,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/artifact"
-	"google.golang.org/adk/runner"
-	"google.golang.org/adk/session"
-	"google.golang.org/adk/tool"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/artifact"
+	"google.golang.org/adk/v2/runner"
+	"google.golang.org/adk/v2/session"
+	"google.golang.org/adk/v2/tool"
 	"google.golang.org/genai"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 	"github.com/craigh33/adk-go-bedrock/tools/videogenerator"
 )
 
@@ -63,7 +63,7 @@ func run(ctx context.Context) error {
 	br := bedrockruntime.NewFromConfig(awsCfg)
 	s3Client := s3.NewFromConfig(awsCfg)
 
-	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br))
+	llm, err := converse.NewWithAPI(modelID, converse.NewRuntimeAPI(br))
 	if err != nil {
 		return fmt.Errorf("bedrock model: %w", err)
 	}
