@@ -65,7 +65,7 @@ To enable a pre-configured Bedrock guardrail in your applications:
 
 1. Create a guardrail in AWS Bedrock console
 2. Note its Identifier and Version
-3. Pass the guardrail to the Bedrock model with `bedrock.WithGuardrail(identifier, version, types.GuardrailTraceEnabled)`
+3. Pass the guardrail to the Bedrock model with `converse.WithGuardrail(identifier, version, types.GuardrailTraceEnabled)`
 
 See [`examples/bedrock-request-guardrail`](../bedrock-request-guardrail) for a small request-side guardrail example.
 
