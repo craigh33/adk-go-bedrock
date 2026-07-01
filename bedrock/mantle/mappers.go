@@ -31,13 +31,18 @@ func MessageParamsFromConverseInput(in *bedrockruntime.ConverseInput) (anthropic
 		return anthropic.MessageNewParams{}, err
 	}
 
+	modelID := aws.ToString(in.ModelId)
+	if err := ValidateModelID(modelID); err != nil {
+		return anthropic.MessageNewParams{}, err
+	}
+
 	messages, err := messageParamsFromMessages(in.Messages)
 	if err != nil {
 		return anthropic.MessageNewParams{}, err
 	}
 
 	params := anthropic.MessageNewParams{
-		Model:     aws.ToString(in.ModelId),
+		Model:     NormalizeModelID(modelID),
 		MaxTokens: defaultMaxTokens,
 		Messages:  messages,
 		System:    systemTextBlocksFromConverse(in.System),
