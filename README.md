@@ -73,6 +73,7 @@ These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat 
 - [`examples/bedrock-guardrails`](examples/bedrock-guardrails): safety assessments, content filtering, and guardrail metadata handling.
 - [`examples/bedrock-request-guardrail`](examples/bedrock-request-guardrail): request-side Bedrock guardrail configuration via `ModelOption`.
 - [`examples/bedrock-system-instruction`](examples/bedrock-system-instruction): system instructions for role definition, output formatting, and behavioral control.
+- [`examples/bedrock-agentcore-memory`](examples/bedrock-agentcore-memory): long-term memory backed by Amazon Bedrock AgentCore Memory via [`memory/agentcore`](memory/agentcore) (see [Memory](#memory)).
 - [`examples/bedrock-web-ui`](examples/bedrock-web-ui): ADK local web UI launcher.
 
 All examples load AWS configuration with [`config.LoadDefaultConfig`](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/config#LoadDefaultConfig) and require **`BEDROCK_MODEL_ID`** plus region configuration (`AWS_REGION` or profile region).
@@ -88,6 +89,34 @@ Run streaming example:
 ```bash
 make -C examples/bedrock-stream run
 ```
+
+## Memory
+
+The [`memory/agentcore`](memory/agentcore) package implements ADK's [`memory.Service`](https://pkg.go.dev/google.golang.org/adk/memory#Service) on top of **Amazon Bedrock AgentCore Memory**, the AWS analogue of ADK's Vertex AI MemoryBank adapter. Wire it into [`runner.Config.MemoryService`](https://pkg.go.dev/google.golang.org/adk/runner#Config) so agents can persist conversation events and recall long-term memory across sessions.
+
+- `AddSessionToMemory` writes each text-bearing session event to the Memory resource with `CreateEvent` (mapping the ADK user to an AgentCore actor and the session to an AgentCore session).
+- `SearchMemory` retrieves relevant records with `RetrieveMemoryRecords` and maps them back to `memory.Entry` values.
+
+```go
+memSvc, err := agentcore.New(ctx, &agentcore.Config{
+    MemoryID:  os.Getenv("AGENTCORE_MEMORY_ID"), // required
+    Region:    os.Getenv("AWS_REGION"),
+    Namespace: "/actors/{actorId}/facts",        // required to search; must match your strategy
+    TopK:      5,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r, err := runner.New(runner.Config{
+    AppName:        "my-app",
+    Agent:          agent,
+    SessionService: session.InMemoryService(),
+    MemoryService:  memSvc,
+})
+```
+
+The AgentCore Memory resource and its strategies must be provisioned out of band, and callers need IAM permission for `bedrock-agentcore:CreateEvent` and `bedrock-agentcore:RetrieveMemoryRecords`. **Long-term memory extraction is asynchronous**, so events written by `AddSessionToMemory` are not immediately returned by `SearchMemory`. A runnable program lives at [`examples/bedrock-agentcore-memory`](examples/bedrock-agentcore-memory).
 
 ## How it maps to Bedrock
 
