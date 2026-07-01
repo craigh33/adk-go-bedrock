@@ -20,10 +20,12 @@ import (
 const DefaultCanvasModelID = "amazon.nova-canvas-v1:0"
 
 const (
-	imageToolName         = "generate_image"
-	defaultCanvasWidth    = 512
-	defaultCanvasHeight   = 512
-	defaultCanvasCfgScale = 8.0
+	imageToolName          = "generate_image"
+	imageToolParamPrompt   = "prompt"
+	imageToolParamFileName = "file_name"
+	defaultCanvasWidth     = 512
+	defaultCanvasHeight    = 512
+	defaultCanvasCfgScale  = 8.0
 	// maxNovaCanvasSeed is the maximum allowed value for imageGenerationConfig.seed on Nova Canvas
 	// (Bedrock returns ValidationException if seed > this value).
 	maxNovaCanvasSeed int64 = 2147483646
@@ -108,16 +110,16 @@ func (t *imageGenTool) Declaration() *genai.FunctionDeclaration {
 		Parameters: &genai.Schema{
 			Type: "OBJECT",
 			Properties: map[string]*genai.Schema{
-				"prompt": {
+				imageToolParamPrompt: {
 					Type:        "STRING",
 					Description: "The text prompt describing the image to generate",
 				},
-				"file_name": {
+				imageToolParamFileName: {
 					Type:        "STRING",
 					Description: "The filename to save the generated image as (e.g. 'landscape.png'). If not provided, the image will be saved as 'generated_image.png'.",
 				},
 			},
-			Required: []string{"prompt"},
+			Required: []string{imageToolParamPrompt},
 		},
 	}
 }
@@ -168,11 +170,11 @@ func (t *imageGenTool) Run(ctx agent.Context, args any) (map[string]any, error) 
 		return nil, fmt.Errorf("unexpected args type: %T", args)
 	}
 
-	prompt, _ := m["prompt"].(string)
+	prompt, _ := m[imageToolParamPrompt].(string)
 	if prompt == "" {
 		return nil, errors.New("prompt is required")
 	}
-	fileName, _ := m["file_name"].(string)
+	fileName, _ := m[imageToolParamFileName].(string)
 	if fileName == "" {
 		fileName = "generated_image.png"
 	}
@@ -209,9 +211,9 @@ func (t *imageGenTool) Run(ctx agent.Context, args any) (map[string]any, error) 
 	}
 
 	return map[string]any{
-		"file_name": fileName,
-		"version":   saveResp.Version,
-		"status":    "success",
+		imageToolParamFileName: fileName,
+		"version":              saveResp.Version,
+		"status":               "success",
 	}, nil
 }
 

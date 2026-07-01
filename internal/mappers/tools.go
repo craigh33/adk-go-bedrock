@@ -14,7 +14,11 @@ import (
 	"github.com/craigh33/adk-go-bedrock/tools/novagrounding"
 )
 
-const unsupportedToolVariantCount = 11
+const (
+	unsupportedToolVariantCount = 11
+	jsonSchemaKeyType           = "type"
+	jsonSchemaTypeObject        = "object"
+)
 
 func toolConfigurationFromGenai(cfg *genai.GenerateContentConfig) (*types.ToolConfiguration, error) {
 	if cfg == nil || len(cfg.Tools) == 0 {
@@ -115,8 +119,8 @@ func functionParametersToToolInputSchema(fd *genai.FunctionDeclaration) (types.T
 	if fd.Parameters == nil {
 		return &types.ToolInputSchemaMemberJson{
 			Value: brdoc.NewLazyDocument(map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
+				jsonSchemaKeyType: jsonSchemaTypeObject,
+				"properties":      map[string]any{},
 			}),
 		}, nil
 	}
@@ -140,7 +144,7 @@ func normalizeSchemaTypes(v any) {
 	switch m := v.(type) {
 	case map[string]any:
 		for k, val := range m {
-			if k == "type" {
+			if k == jsonSchemaKeyType {
 				if s, ok := val.(string); ok {
 					m[k] = strings.ToLower(s)
 				}
