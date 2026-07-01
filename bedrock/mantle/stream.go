@@ -41,6 +41,9 @@ func MessageParamsFromConverseStreamInput(
 	if in == nil {
 		return anthropic.MessageNewParams{}, errors.New("nil ConverseStreamInput")
 	}
+	if err := checkUnsupportedStreamCapabilities(in); err != nil {
+		return anthropic.MessageNewParams{}, err
+	}
 	return MessageParamsFromConverseInput(&bedrockruntime.ConverseInput{
 		ModelId:         in.ModelId,
 		Messages:        in.Messages,

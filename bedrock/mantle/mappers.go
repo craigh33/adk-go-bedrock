@@ -27,6 +27,9 @@ func MessageParamsFromConverseInput(in *bedrockruntime.ConverseInput) (anthropic
 	if in == nil {
 		return anthropic.MessageNewParams{}, errors.New("nil ConverseInput")
 	}
+	if err := checkUnsupportedCapabilities(in); err != nil {
+		return anthropic.MessageNewParams{}, err
+	}
 
 	messages, err := messageParamsFromMessages(in.Messages)
 	if err != nil {
