@@ -14,19 +14,19 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/agent/remoteagent/v2"
-	"google.golang.org/adk/cmd/launcher"
-	"google.golang.org/adk/cmd/launcher/full"
-	"google.golang.org/adk/runner"
-	"google.golang.org/adk/server/adka2a/v2"
-	"google.golang.org/adk/session"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/agent/remoteagent/v2"
+	"google.golang.org/adk/v2/cmd/launcher"
+	"google.golang.org/adk/v2/cmd/launcher/full"
+	"google.golang.org/adk/v2/runner"
+	"google.golang.org/adk/v2/server/adka2a/v2"
+	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
 )
 
@@ -50,7 +50,7 @@ func newWeatherAgent(ctx context.Context, tp trace.TracerProvider) agent.Agent {
 	}
 
 	br := bedrockruntime.NewFromConfig(awsCfg)
-	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp)))
+	llm, err := converse.NewWithAPI(modelID, converse.NewRuntimeAPI(br, converse.WithTracerProvider(tp)))
 	if err != nil {
 		log.Fatalf("bedrock model: %v", err)
 	}

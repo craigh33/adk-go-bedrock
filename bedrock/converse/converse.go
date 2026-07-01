@@ -1,4 +1,4 @@
-package bedrock
+package converse
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/adk/model"
+	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/internal/mappers"
@@ -47,7 +47,7 @@ type RuntimeAPI interface {
 	) (StreamReader, error)
 }
 
-const otelTracerName = "github.com/craigh33/adk-go-bedrock/bedrock"
+const otelTracerName = "github.com/craigh33/adk-go-bedrock/bedrock/converse"
 
 // RuntimeAPIOption configures [NewRuntimeAPI].
 type RuntimeAPIOption func(*runtimeAdapter)
