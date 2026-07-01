@@ -66,6 +66,7 @@ type converseStream struct {
 	events    chan types.ConverseStreamOutput
 	done      chan struct{}
 	closeOnce sync.Once
+	mu        sync.Mutex // guards err
 	err       error
 }
 
@@ -96,9 +97,11 @@ func (c *converseStream) pump() {
 			}
 		}
 	}
-	// Written before the deferred close(events); the channel close establishes
-	// the happens-before edge for a subsequent Err read by the consumer.
+	// Guarded because StreamReader is exported: a caller may read Err()
+	// concurrently with the stream rather than only after Events() closes.
+	c.mu.Lock()
 	c.err = c.src.Err()
+	c.mu.Unlock()
 }
 
 func (c *converseStream) Events() <-chan types.ConverseStreamOutput {
@@ -106,6 +109,8 @@ func (c *converseStream) Events() <-chan types.ConverseStreamOutput {
 }
 
 func (c *converseStream) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.err
 }
 

@@ -76,7 +76,7 @@ These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat 
 - [`examples/bedrock-web-ui`](examples/bedrock-web-ui): ADK local web UI launcher.
 - [`examples/bedrock-mantle-chat`](examples/bedrock-mantle-chat): runner-based chat example using the Anthropic-compatible **Bedrock Mantle** endpoint instead of Converse.
 
-All examples load AWS configuration with [`config.LoadDefaultConfig`](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/config#LoadDefaultConfig) and require **`BEDROCK_MODEL_ID`** plus region configuration (`AWS_REGION` or profile region).
+All examples load AWS configuration with [`config.LoadDefaultConfig`](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/config#LoadDefaultConfig) and need region configuration (`AWS_REGION` or profile region). The Converse-based examples read the model ID from **`BEDROCK_MODEL_ID`**; the Mantle example uses **`BEDROCK_MANTLE_MODEL_ID`**.
 
 ```bash
 export BEDROCK_MODEL_ID=us.anthropic.claude-3-5-sonnet-20241022-v2:0

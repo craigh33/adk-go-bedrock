@@ -3,8 +3,8 @@
 // API, reusing the same converse.Model via a Mantle RuntimeAPI implementation.
 //
 // Authenticate with either:
-//   - an Anthropic/Bedrock API key: set AWS_BEARER_TOKEN_BEDROCK (or
-//     ANTHROPIC_API_KEY), or
+//   - a Bedrock API key: set AWS_BEARER_TOKEN_BEDROCK (or ANTHROPIC_AWS_API_KEY),
+//     or
 //   - the default AWS credential chain for SigV4 (env vars, shared config,
 //     SSO / AWS_PROFILE, instance role, etc.).
 //
@@ -47,12 +47,11 @@ func main() {
 		modelID = defaultModelID
 	}
 
-	// APIKey is optional: when empty, the Mantle client falls back to the
-	// AWS_BEARER_TOKEN_BEDROCK / ANTHROPIC_AWS_API_KEY env vars and then to the
+	// APIKey is left empty so the Mantle client resolves auth itself: the
+	// AWS_BEARER_TOKEN_BEDROCK / ANTHROPIC_AWS_API_KEY env vars first, then the
 	// default AWS credential chain (SigV4).
 	mantleClient, err := mantle.New(ctx, mantle.Config{
 		AWSRegion: region,
-		APIKey:    strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")),
 	})
 	if err != nil {
 		log.Fatalf("bedrock mantle client: %v", err)
@@ -87,8 +86,8 @@ func main() {
 	}
 
 	userMsg := "What is 2+2? Reply with just the number."
-	if len(os.Args) > 1 {
-		userMsg = os.Args[1]
+	if prompt := strings.TrimSpace(strings.Join(os.Args[1:], " ")); prompt != "" {
+		userMsg = prompt
 	}
 
 	msg := genai.NewContentFromText(userMsg, genai.RoleUser)
