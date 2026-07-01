@@ -29,7 +29,12 @@ const (
 	deltaInputJSON = "input_json_delta"
 )
 
-const contentBlockTypeToolUse = "tool_use"
+// Anthropic content-block type discriminators (shared by request and response mapping).
+const (
+	contentBlockTypeText     = "text"
+	contentBlockTypeThinking = "thinking"
+	contentBlockTypeToolUse  = "tool_use"
+)
 
 // MessageParamsFromConverseStreamInput maps a [bedrockruntime.ConverseStreamInput]
 // to Anthropic [anthropic.MessageNewParams]. It mirrors the Converse-side

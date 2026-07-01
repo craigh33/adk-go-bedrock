@@ -19,6 +19,13 @@ import (
 // as optional, so a request that omits it still needs a concrete ceiling here.
 const defaultMaxTokens = 4096
 
+// JSON Schema keys with dedicated fields on anthropic.ToolInputSchemaParam.
+const (
+	schemaKeyType       = "type"
+	schemaKeyProperties = "properties"
+	schemaKeyRequired   = "required"
+)
+
 // MessageParamsFromConverseInput maps a Bedrock [bedrockruntime.ConverseInput] to
 // Anthropic [anthropic.MessageNewParams]. It mirrors the Converse-side
 // ConverseInputFromLLMRequest so the Mantle transport can satisfy the same
@@ -283,10 +290,10 @@ func toolInputSchemaFromConverse(schema types.ToolInputSchema) (anthropic.ToolIn
 		return anthropic.ToolInputSchemaParam{}, err
 	}
 	out := anthropic.ToolInputSchemaParam{}
-	if props, ok := m["properties"]; ok {
+	if props, ok := m[schemaKeyProperties]; ok {
 		out.Properties = props
 	}
-	if required, ok := m["required"].([]any); ok {
+	if required, ok := m[schemaKeyRequired].([]any); ok {
 		out.Required = stringSlice(required)
 	}
 	out.ExtraFields = extraSchemaFields(m)
@@ -300,7 +307,7 @@ func extraSchemaFields(schema map[string]any) map[string]any {
 	extra := map[string]any{}
 	for k, v := range schema {
 		switch k {
-		case "type", "properties", "required":
+		case schemaKeyType, schemaKeyProperties, schemaKeyRequired:
 			continue
 		default:
 			extra[k] = v
@@ -364,14 +371,14 @@ func converseContentBlocksFromMessage(blocks []anthropic.ContentBlockUnion) ([]t
 
 func converseContentBlockFromMessage(b anthropic.ContentBlockUnion) (types.ContentBlock, error) {
 	switch b.Type {
-	case "text":
+	case contentBlockTypeText:
 		if b.Text == "" {
 			return nil, nil //nolint:nilnil // Empty text blocks are dropped.
 		}
 		return &types.ContentBlockMemberText{Value: b.Text}, nil
-	case "thinking":
+	case contentBlockTypeThinking:
 		return reasoningContentBlockFromMessage(b), nil
-	case "tool_use":
+	case contentBlockTypeToolUse:
 		return toolUseContentBlockFromMessage(b)
 	default:
 		// Skip response variants without a Converse equivalent (redacted thinking,
@@ -451,18 +458,19 @@ func imageMediaTypeFromFormat(f types.ImageFormat) (string, error) {
 	}
 }
 
+// documentToMap decodes a Bedrock document to a map. It marshals via
+// MarshalSmithyDocument (which works for both lazy documents built from Go
+// values and documents received on the wire) and then JSON-decodes, rather than
+// UnmarshalSmithyDocument, which only supports wire-received documents.
 func documentToMap(d brdoc.Interface) (map[string]any, error) {
 	if d == nil {
 		return map[string]any{}, nil
 	}
-	var m map[string]any
-	if err := d.UnmarshalSmithyDocument(&m); err != nil {
+	raw, err := d.MarshalSmithyDocument()
+	if err != nil {
 		return nil, err
 	}
-	if m == nil {
-		return map[string]any{}, nil
-	}
-	return m, nil
+	return rawJSONToMap(raw)
 }
 
 func rawJSONToMap(raw json.RawMessage) (map[string]any, error) {
