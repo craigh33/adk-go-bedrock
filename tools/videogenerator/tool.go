@@ -32,7 +32,7 @@ const (
 	videoGenToolName        = "generate_video"
 	videoGenToolDescription = `Generates a short video from a text prompt using Amazon Nova Reel (Bedrock async invoke), stores output in your configured S3 location, and saves the MP4 as an artifact when S3 download is configured.
 
-	NOTE: This is a long-running operation (often minutes). Do not call this tool again for the same request until it returns.`
+NOTE: This is a long-running operation (often minutes). Do not call this tool again for the same request until it returns.`
 	videoToolParamPrompt   = "prompt"
 	videoToolParamFileName = "file_name"
 	videoToolParamSeed     = "seed"
