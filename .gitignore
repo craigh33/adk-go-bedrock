@@ -14,6 +14,9 @@ bedrock-a2a
 # Test binary, built with `go test -c`
 *.test
 
+# Compiled example binaries (named after their directory by `go build`)
+/examples/bedrock-mantle-chat/bedrock-mantle-chat
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
@@ -24,7 +27,10 @@ profile.cov
 # vendor/
 
 # Go workspace file
-go.work
+# NOTE: go.work is intentionally committed. This repo is a multi-module workspace
+# (root Converse module + nested bedrock/mantle module); the workspace file ties
+# them together for local development and the Mantle CI job. go.work.sum stays
+# ignored and is regenerated with `go work sync`.
 go.work.sum
 
 # env file

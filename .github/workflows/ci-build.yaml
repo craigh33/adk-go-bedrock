@@ -3,9 +3,17 @@ name: CI Build
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   lint-test:
     runs-on: ubuntu-latest
+    # Core Converse module. GOWORK=off keeps this job scoped to the root module so
+    # the workspace (which also includes bedrock/mantle) does not pull the
+    # anthropic-sdk-go dependency into the core module's resolution.
+    env:
+      GOWORK: off
     steps:
       - uses: actions/checkout@v7
 
@@ -21,3 +29,44 @@ jobs:
 
       - name: Unit tests
         run: go test ./... -count=1
+
+  lint-test-mantle:
+    runs-on: ubuntu-latest
+    # Nested Bedrock Mantle module (own go.mod). Runs in workspace mode so the
+    # committed go.work resolves the in-repo parent module. The anthropic-sdk-go
+    # dependency stays in this module's go.sum, out of the core module's.
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: bedrock/mantle/go.mod
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11.4
+          working-directory: bedrock/mantle
+          args: --timeout=5m
+
+      - name: Unit tests
+        working-directory: bedrock/mantle
+        run: go test ./... -count=1
+
+  build-mantle-example:
+    runs-on: ubuntu-latest
+    # Self-contained example leaf module. Built with GOWORK=off so it resolves
+    # the in-repo modules via its replace directives, keeping anthropic-sdk-go
+    # out of the core module.
+    env:
+      GOWORK: off
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: examples/bedrock-mantle-chat/go.mod
+
+      - name: Build
+        working-directory: examples/bedrock-mantle-chat
+        run: go build ./...
