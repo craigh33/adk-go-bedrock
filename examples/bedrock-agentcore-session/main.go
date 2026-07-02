@@ -23,9 +23,9 @@ import (
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 
+	"github.com/craigh33/adk-go-bedrock/bedrock/agentcore/session/agentcoresession"
 	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
-	"github.com/craigh33/adk-go-bedrock/session/agentcoresession"
 )
 
 const appName = "bedrock-agentcore-session-example"

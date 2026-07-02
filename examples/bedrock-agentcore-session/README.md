@@ -1,6 +1,6 @@
 # bedrock-agentcore-session example
 
-This example runs an ADK runner with `session/agentcoresession`, so session state and event history are stored in the AgentCore session layer.
+This example runs an ADK runner with `bedrock/agentcore/session/agentcoresession`, so session state and event history are stored in the AgentCore session layer.
 
 ## Prerequisites
 

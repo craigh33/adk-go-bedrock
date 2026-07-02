@@ -1,6 +1,6 @@
 # agentcoresession
 
-`agentcoresession` implements `google.golang.org/adk/session.Service` with the Amazon Bedrock AgentCore session APIs exposed by Bedrock Agent Runtime.
+`agentcoresession` implements `google.golang.org/adk/v2/session.Service` with the Amazon Bedrock AgentCore session APIs exposed by Bedrock Agent Runtime.
 
 ## Usage
 
@@ -70,4 +70,4 @@ The adapter stores ADK app name, user ID, schema version, and current session st
 - Listing is client-filtered by adapter metadata because Bedrock `ListSessions` has no app/user filter.
 - AgentCore session APIs may have regional availability, retention, and quota limits.
 
-See [`../../examples/bedrock-agentcore-session`](../../examples/bedrock-agentcore-session) for a runnable setup.
+See [`examples/bedrock-agentcore-session`](../../../../examples/bedrock-agentcore-session) for a runnable setup.
