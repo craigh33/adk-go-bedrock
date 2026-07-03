@@ -118,7 +118,8 @@ func run(ctx context.Context) error {
 	if err := printRunEvents(ctx, r, a, userMsg); err != nil {
 		return err
 	}
-	return printSummaryArtifact(ctx, artifactService)
+	printSummaryArtifact(ctx, artifactService)
+	return nil
 }
 
 func seedArtifacts(ctx context.Context, artifactService artifact.Service) error {
@@ -166,7 +167,7 @@ func printRunEvents(ctx context.Context, r *runner.Runner, a agent.Agent, userMs
 	return nil
 }
 
-func printSummaryArtifact(ctx context.Context, artifactService artifact.Service) error {
+func printSummaryArtifact(ctx context.Context, artifactService artifact.Service) {
 	resp, err := artifactService.Load(ctx, &artifact.LoadRequest{
 		AppName:   appName,
 		UserID:    userID,
@@ -177,10 +178,9 @@ func printSummaryArtifact(ctx context.Context, artifactService artifact.Service)
 		if resp.Part != nil && resp.Part.Text != "" {
 			fmt.Printf("\nSaved summary.txt:\n%s\n", resp.Part.Text)
 		}
-		return nil
+		return
 	}
 	fmt.Println("summary.txt artifact was not saved")
-	return nil
 }
 
 func envOrDefault(name, defaultValue string) string {

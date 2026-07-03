@@ -369,6 +369,66 @@ func TestRunExecutionErrorReturnsToolResult(t *testing.T) {
 	}
 }
 
+func TestRunExecutionErrorSkipsRequestedOutputs(t *testing.T) {
+	t.Parallel()
+	api := &fakeAgentCoreAPI{invokeOuts: []invokeOut{{results: []agentcoretypes.CodeInterpreterResult{{
+		IsError: aws.Bool(true),
+		StructuredContent: &agentcoretypes.ToolResultStructuredContent{
+			Stderr:   aws.String("boom"),
+			ExitCode: aws.Int32(1),
+		},
+	}}}}}
+	tl, err := New(Config{API: api, CodeInterpreterIdentifier: "interp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := tl.(*codeInterpreterTool).Run(newFakeToolCtx(nil), map[string]any{
+		paramCode: "raise Exception()",
+		paramOutputArtifacts: []any{map[string]any{
+			paramPath: "summary.txt",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["status"] != "error" || result["stderr"] != "boom" {
+		t.Fatalf("result = %+v", result)
+	}
+	wantCalls := "StartCodeInterpreterSession,InvokeCodeInterpreter:executeCode,StopCodeInterpreterSession"
+	if got := strings.Join(api.calls, ","); got != wantCalls {
+		t.Fatalf("calls = %s", got)
+	}
+}
+
+func TestRunAggregatesStreamedResults(t *testing.T) {
+	t.Parallel()
+	api := &fakeAgentCoreAPI{invokeOuts: []invokeOut{{results: []agentcoretypes.CodeInterpreterResult{
+		successResult("first\n"),
+		{
+			IsError: aws.Bool(true),
+			StructuredContent: &agentcoretypes.ToolResultStructuredContent{
+				Stderr:   aws.String("boom\n"),
+				ExitCode: aws.Int32(1),
+			},
+		},
+		successResult("last\n"),
+	}}}}
+	tl, err := New(Config{API: api, CodeInterpreterIdentifier: "interp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := tl.(*codeInterpreterTool).Run(newFakeToolCtx(nil), map[string]any{paramCode: "print(1)"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["status"] != "error" ||
+		result["is_error"] != true ||
+		result["stdout"] != "first\nlast\n" ||
+		result["stderr"] != "boom\n" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
 func TestRunInputArtifactRequiresArtifactServiceAndStopsSession(t *testing.T) {
 	t.Parallel()
 	api := &fakeAgentCoreAPI{}
@@ -469,6 +529,12 @@ func TestParseArtifactArgsRejectUnsafeSandboxPaths(t *testing.T) {
 		paramPath: "../summary.txt",
 	}}); err == nil || !strings.Contains(err.Error(), "must not contain '..'") {
 		t.Fatalf("traversal output path err = %v", err)
+	}
+	if _, err := parseOutputArtifactArgs([]any{map[string]any{
+		paramPath:         "summary.txt",
+		paramArtifactName: "reports/summary.txt",
+	}}); err == nil || !strings.Contains(err.Error(), "path separators") {
+		t.Fatalf("artifact name path err = %v", err)
 	}
 }
 

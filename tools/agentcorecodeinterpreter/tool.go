@@ -36,6 +36,7 @@ const (
 	schemaTypeString = "STRING"
 	schemaTypeArray  = "ARRAY"
 
+	resultStatusError   = "error"
 	resultStatusSuccess = "success"
 
 	defaultMaxExecutionTime = 5 * time.Minute
@@ -122,7 +123,7 @@ func New(cfg Config) (tool.Tool, error) {
 		return nil, err
 	}
 	defaultLanguageRaw := cfg.DefaultLanguage
-	if strings.TrimSpace(defaultLanguageRaw) == "" && !containsString(allowed, "python") {
+	if strings.TrimSpace(defaultLanguageRaw) == "" && !slices.Contains(allowed, "python") {
 		defaultLanguageRaw = allowed[0]
 	}
 	defaultLanguage, err := bedrockmappers.AgentCoreCodeInterpreterNormalizeLanguage("", defaultLanguageRaw, allowed)
@@ -381,7 +382,7 @@ func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[strin
 	if err != nil {
 		return nil, err
 	}
-	if len(outputArtifacts) > 0 {
+	if len(outputArtifacts) > 0 && !toolResultIsError(result) {
 		readArtifacts, err := t.readOutputArtifacts(runCtx, sessionID, outputArtifacts)
 		if err != nil {
 			return nil, err
@@ -466,6 +467,8 @@ func (t *codeInterpreterTool) mapResults(
 	merged := map[string]any{"status": resultStatusSuccess, "is_error": false}
 	var artifacts []bedrockmappers.AgentCoreCodeInterpreterOutputArtifact
 	var content []map[string]any
+	var stdout []string
+	var stderr []string
 	for _, result := range results {
 		m, arts, err := bedrockmappers.AgentCoreCodeInterpreterResult(result, t.maxOutputBytes)
 		if err != nil {
@@ -475,13 +478,38 @@ func (t *codeInterpreterTool) mapResults(
 			content = append(content, c...)
 			delete(m, "content")
 		}
+		if value, ok := m["stdout"].(string); ok {
+			stdout = append(stdout, value)
+			delete(m, "stdout")
+		}
+		if value, ok := m["stderr"].(string); ok {
+			stderr = append(stderr, value)
+			delete(m, "stderr")
+		}
+		if toolResultIsError(m) {
+			merged["status"] = resultStatusError
+			merged["is_error"] = true
+		}
+		delete(m, "status")
+		delete(m, "is_error")
 		maps.Copy(merged, m)
 		artifacts = append(artifacts, arts...)
+	}
+	if len(stdout) > 0 {
+		merged["stdout"] = strings.Join(stdout, "")
+	}
+	if len(stderr) > 0 {
+		merged["stderr"] = strings.Join(stderr, "")
 	}
 	if len(content) > 0 {
 		merged["content"] = content
 	}
 	return merged, artifacts, nil
+}
+
+func toolResultIsError(result map[string]any) bool {
+	isError, _ := result["is_error"].(bool)
+	return isError
 }
 
 func (t *codeInterpreterTool) loadInputArtifacts(
@@ -651,6 +679,13 @@ func parseOutputArtifactArgs(raw any) ([]outputArtifactArg, error) {
 		if artifactName == "." || artifactName == "/" || artifactName == "" {
 			artifactName = bedrockmappers.AgentCoreCodeInterpreterArtifactName(path, i)
 		}
+		if strings.ContainsAny(artifactName, `/\`) {
+			return nil, fmt.Errorf("%s.%s must not contain path separators, got %q",
+				paramOutputArtifacts,
+				paramArtifactName,
+				artifactName,
+			)
+		}
 		out = append(out, outputArtifactArg{Path: path, ArtifactName: artifactName})
 	}
 	return out, nil
@@ -694,8 +729,4 @@ func objectSlice(raw any, name string) ([]map[string]any, error) {
 	default:
 		return nil, fmt.Errorf("%s: expected array, got %T", name, raw)
 	}
-}
-
-func containsString(values []string, want string) bool {
-	return slices.Contains(values, want)
 }

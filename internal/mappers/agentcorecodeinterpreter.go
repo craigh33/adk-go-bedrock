@@ -200,7 +200,7 @@ func AgentCoreCodeInterpreterNormalizeLanguage(language, defaultLanguage string,
 	if !agentCoreCodeInterpreterLanguageSupported(lang) {
 		return "", fmt.Errorf("agentcorecodeinterpreter: unsupported language %q", language)
 	}
-	if !stringInSlice(lang, normalizedAllowed) {
+	if !slices.Contains(normalizedAllowed, lang) {
 		return "", fmt.Errorf("agentcorecodeinterpreter: language %q is not allowed", lang)
 	}
 	return lang, nil
@@ -220,7 +220,7 @@ func AgentCoreCodeInterpreterNormalizeAllowedLanguages(allowed []string) ([]stri
 		if !agentCoreCodeInterpreterLanguageSupported(lang) {
 			return nil, fmt.Errorf("agentcorecodeinterpreter: unsupported allowed language %q", raw)
 		}
-		if !stringInSlice(lang, out) {
+		if !slices.Contains(out, lang) {
 			out = append(out, lang)
 		}
 	}
@@ -485,10 +485,6 @@ func limitOutputString(s string, maxBytes int64, alreadyTruncated bool) (string,
 		limit--
 	}
 	return s[:limit] + "\n[truncated]", true
-}
-
-func stringInSlice(s string, values []string) bool {
-	return slices.Contains(values, s)
 }
 
 func agentCoreCodeInterpreterLanguages() []string {
