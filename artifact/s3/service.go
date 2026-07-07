@@ -228,13 +228,11 @@ func (s *Service) List(ctx context.Context, req *artifact.ListRequest) (*artifac
 		s.sessionPrefix(req.AppName, req.UserID, req.SessionID),
 		s.userPrefix(req.AppName, req.UserID),
 	} {
-		if err := s.eachKey(ctx, prefix, func(key string) {
-			// Key shape: .../fileName/version — the filename is the
-			// second-to-last segment (path separators in filenames are
-			// rejected at validation).
-			segments := strings.Split(key, "/")
-			if len(segments) >= 2 {
-				filenames[segments[len(segments)-2]] = true
+		if err := s.eachCommonPrefix(ctx, prefix, func(cp string) {
+			// cp = prefix + fileName + "/" — strip both to get the bare filename.
+			name := strings.TrimSuffix(strings.TrimPrefix(cp, prefix), "/")
+			if name != "" {
+				filenames[name] = true
 			}
 		}); err != nil {
 			return nil, fmt.Errorf("failed to list artifacts under %q: %w", prefix, err)
@@ -364,6 +362,33 @@ func (s *Service) eachKey(ctx context.Context, prefix string, fn func(key string
 		}
 		for _, obj := range out.Contents {
 			fn(aws.ToString(obj.Key))
+		}
+		if !aws.ToBool(out.IsTruncated) {
+			return nil
+		}
+		continuation = out.NextContinuationToken
+	}
+}
+
+// eachCommonPrefix calls fn with every common prefix returned by a
+// delimiter-based listing under prefix, following pagination. Each common
+// prefix represents one distinct filename "directory" (prefix + fileName + "/")
+// regardless of how many version objects it contains, making callers O(distinct
+// filenames) rather than O(total versions).
+func (s *Service) eachCommonPrefix(ctx context.Context, prefix string, fn func(cp string)) error {
+	var continuation *string
+	for {
+		out, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(s.cfg.Bucket),
+			Prefix:            aws.String(prefix),
+			Delimiter:         aws.String("/"),
+			ContinuationToken: continuation,
+		})
+		if err != nil {
+			return err
+		}
+		for _, cp := range out.CommonPrefixes {
+			fn(aws.ToString(cp.Prefix))
 		}
 		if !aws.ToBool(out.IsTruncated) {
 			return nil

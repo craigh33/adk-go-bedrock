@@ -105,38 +105,89 @@ func (f *fakeS3) ListObjectsV2(
 	in *s3.ListObjectsV2Input,
 	_ ...func(*s3.Options),
 ) (*s3.ListObjectsV2Output, error) {
-	var keys []string
+	prefix := aws.ToString(in.Prefix)
+	delimiter := aws.ToString(in.Delimiter)
+
+	var allKeys []string
 	for k := range f.objects {
-		if strings.HasPrefix(k, aws.ToString(in.Prefix)) {
-			keys = append(keys, k)
+		if strings.HasPrefix(k, prefix) {
+			allKeys = append(allKeys, k)
 		}
 	}
-	sort.Strings(keys)
+	sort.Strings(allKeys)
 
-	start := 0
-	if tok := aws.ToString(in.ContinuationToken); tok != "" {
-		for i, k := range keys {
-			if k > tok {
-				start = i
-				break
-			}
-		}
-	}
-	end := len(keys)
-	truncated := false
-	if f.listPageSize > 0 && start+f.listPageSize < len(keys) {
-		end = start + f.listPageSize
-		truncated = true
+	if delimiter != "" {
+		return f.listWithDelimiter(allKeys, prefix, delimiter, aws.ToString(in.ContinuationToken))
 	}
 
+	start := pageStart(allKeys, aws.ToString(in.ContinuationToken))
+	end, truncated := pageEnd(len(allKeys), start, f.listPageSize)
 	out := &s3.ListObjectsV2Output{IsTruncated: aws.Bool(truncated)}
-	for _, k := range keys[start:end] {
+	for _, k := range allKeys[start:end] {
 		out.Contents = append(out.Contents, types.Object{Key: aws.String(k)})
 	}
 	if truncated {
-		out.NextContinuationToken = aws.String(keys[end-1])
+		out.NextContinuationToken = aws.String(allKeys[end-1])
 	}
 	return out, nil
+}
+
+// listWithDelimiter collapses keys that share a common prefix (up to the first
+// occurrence of delimiter after the listing prefix) into CommonPrefixes entries,
+// mirroring real S3 behaviour. Pagination uses the same token scheme as the
+// non-delimiter path.
+func (f *fakeS3) listWithDelimiter(
+	allKeys []string,
+	prefix, delimiter, token string,
+) (*s3.ListObjectsV2Output, error) {
+	seen := map[string]bool{}
+	var items []string
+	for _, k := range allKeys {
+		rest := k[len(prefix):]
+		if idx := strings.Index(rest, delimiter); idx >= 0 {
+			cp := prefix + rest[:idx+1]
+			if !seen[cp] {
+				seen[cp] = true
+				items = append(items, cp)
+			}
+		} else {
+			items = append(items, k)
+		}
+	}
+
+	start := pageStart(items, token)
+	end, truncated := pageEnd(len(items), start, f.listPageSize)
+	out := &s3.ListObjectsV2Output{IsTruncated: aws.Bool(truncated)}
+	for _, item := range items[start:end] {
+		if strings.HasSuffix(item, delimiter) {
+			out.CommonPrefixes = append(out.CommonPrefixes, types.CommonPrefix{Prefix: aws.String(item)})
+		} else {
+			out.Contents = append(out.Contents, types.Object{Key: aws.String(item)})
+		}
+	}
+	if truncated {
+		out.NextContinuationToken = aws.String(items[end-1])
+	}
+	return out, nil
+}
+
+func pageStart(items []string, token string) int {
+	if token == "" {
+		return 0
+	}
+	for i, item := range items {
+		if item > token {
+			return i
+		}
+	}
+	return len(items)
+}
+
+func pageEnd(total, start, pageSize int) (int, bool) {
+	if pageSize > 0 && start+pageSize < total {
+		return start + pageSize, true
+	}
+	return total, false
 }
 
 func newTestService(t *testing.T, client Client, cfg Config) *Service {
