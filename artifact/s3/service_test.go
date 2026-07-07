@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	"google.golang.org/genai"
 
 	"google.golang.org/adk/v2/artifact"
@@ -357,4 +359,26 @@ func keys(f *fakeS3) []string {
 
 func isFSNotExist(err error) bool {
 	return errors.Is(err, fs.ErrNotExist)
+}
+
+// smithyNotFound wraps a raw smithy.GenericAPIError so tests can exercise
+// the error-code fallback path in isNotFound without a concrete SDK type.
+type smithyNotFound struct{ code string }
+
+func (e *smithyNotFound) Error() string      { return e.code }
+func (e *smithyNotFound) ErrorCode() string  { return e.code }
+func (e *smithyNotFound) ErrorMessage() string { return e.code }
+func (e *smithyNotFound) ErrorFault() smithy.ErrorFault { return smithy.FaultClient }
+
+func TestIsNotFoundSmithyFallback(t *testing.T) {
+	for _, code := range []string{"NoSuchKey", "NotFound"} {
+		wrapped := fmt.Errorf("outer: %w", &smithyNotFound{code: code})
+		if !isNotFound(wrapped) {
+			t.Errorf("isNotFound(%q via smithy code) = false, want true", code)
+		}
+	}
+	// Unrelated error codes must not match.
+	if isNotFound(&smithyNotFound{code: "AccessDenied"}) {
+		t.Error("isNotFound(AccessDenied) = true, want false")
+	}
 }

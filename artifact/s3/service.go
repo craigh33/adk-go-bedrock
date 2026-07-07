@@ -38,6 +38,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	"google.golang.org/genai"
 
 	"google.golang.org/adk/v2/artifact"
@@ -368,10 +369,23 @@ func (s *Service) eachKey(ctx context.Context, prefix string, fn func(key string
 }
 
 // isNotFound reports whether an S3 error means the object does not exist.
+// It checks the concrete typed errors first, then falls back to the smithy
+// error code for cases where the SDK wraps the error without preserving the
+// concrete type (e.g. through middleware or response parsing paths).
 func isNotFound(err error) bool {
 	var noKey *types.NoSuchKey
 	var notFound *types.NotFound
-	return errors.As(err, &noKey) || errors.As(err, &notFound)
+	if errors.As(err, &noKey) || errors.As(err, &notFound) {
+		return true
+	}
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "NoSuchKey", "NotFound":
+			return true
+		}
+	}
+	return false
 }
 
 // fileHasUserNamespace reports whether a filename is user-scoped rather than
