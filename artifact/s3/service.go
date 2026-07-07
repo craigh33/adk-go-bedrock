@@ -86,6 +86,8 @@ type Service struct {
 
 var _ artifact.Service = (*Service)(nil)
 
+const mimeTypePlain = "text/plain"
+
 // NewService returns an S3-backed [artifact.Service] using the given client
 // (typically *s3.Client from your configured AWS SDK).
 func NewService(client Client, cfg Config) (*Service, error) {
@@ -105,18 +107,9 @@ func (s *Service) Save(ctx context.Context, req *artifact.SaveRequest) (*artifac
 		return nil, fmt.Errorf("request validation failed: %w", err)
 	}
 
-	nextVersion := req.Version
-	if nextVersion == 0 {
-		existing, err := s.versions(ctx, &artifact.VersionsRequest{
-			AppName: req.AppName, UserID: req.UserID, SessionID: req.SessionID, FileName: req.FileName,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to list artifact versions: %w", err)
-		}
-		nextVersion = int64(1)
-		if len(existing.Versions) > 0 {
-			nextVersion = slices.Max(existing.Versions) + 1
-		}
+	nextVersion, err := s.nextSaveVersion(ctx, req)
+	if err != nil {
+		return nil, err
 	}
 
 	data, contentType := partPayload(req.Part)
@@ -136,6 +129,39 @@ func (s *Service) Save(ctx context.Context, req *artifact.SaveRequest) (*artifac
 	return &artifact.SaveResponse{Version: nextVersion}, nil
 }
 
+// nextSaveVersion resolves the version to write. For auto-increment
+// (req.Version==0) it returns max(existing)+1. For an explicit version it
+// guards immutability via a HeadObject probe and returns [fs.ErrExist] if the
+// object is already present.
+func (s *Service) nextSaveVersion(ctx context.Context, req *artifact.SaveRequest) (int64, error) {
+	if req.Version == 0 {
+		existing, err := s.versions(ctx, &artifact.VersionsRequest{
+			AppName: req.AppName, UserID: req.UserID, SessionID: req.SessionID, FileName: req.FileName,
+		})
+		if err != nil {
+			return 0, fmt.Errorf("failed to list artifact versions: %w", err)
+		}
+		if len(existing.Versions) > 0 {
+			return slices.Max(existing.Versions) + 1, nil
+		}
+		return 1, nil
+	}
+	// Explicit version: enforce immutability — refuse to overwrite an existing
+	// object so callers can't silently clobber stored data.
+	key := s.objectKey(req.AppName, req.UserID, req.SessionID, req.FileName, req.Version)
+	_, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(s.cfg.Bucket),
+		Key:    aws.String(key),
+	})
+	if err == nil {
+		return 0, fmt.Errorf("artifact %q version %d already exists: %w", req.FileName, req.Version, fs.ErrExist)
+	}
+	if !isNotFound(err) {
+		return 0, fmt.Errorf("failed to check artifact %q version %d: %w", req.FileName, req.Version, err)
+	}
+	return req.Version, nil
+}
+
 // partPayload extracts bytes + MIME type from a genai.Part the way ADK's
 // artifact services expect: inline bytes with their MIME type, or text as
 // text/plain.
@@ -143,7 +169,7 @@ func partPayload(part *genai.Part) ([]byte, string) {
 	if part.InlineData != nil {
 		return part.InlineData.Data, part.InlineData.MIMEType
 	}
-	return []byte(part.Text), "text/plain"
+	return []byte(part.Text), mimeTypePlain
 }
 
 // Load implements [artifact.Service]. Version 0 loads the latest version.

@@ -244,6 +244,16 @@ func TestSaveHonorsExplicitVersion(t *testing.T) {
 	if _, ok := fake.objects["app/u1/s1/report.txt/5"]; !ok {
 		t.Fatalf("expected key at version 5, got %v", keys(fake))
 	}
+
+	// A second write to the same explicit version must be rejected.
+	_, err = svc.Save(context.Background(), &artifact.SaveRequest{
+		AppName: "app", UserID: "u1", SessionID: "s1", FileName: "report.txt",
+		Part:    genai.NewPartFromText("overwrite"),
+		Version: 5,
+	})
+	if !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("overwrite explicit version: want fs.ErrExist, got %v", err)
+	}
 }
 
 func TestUserNamespacedKeys(t *testing.T) {
