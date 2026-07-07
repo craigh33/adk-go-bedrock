@@ -48,9 +48,21 @@ import (
 type Client interface {
 	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
 	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
-	HeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
-	DeleteObject(ctx context.Context, params *s3.DeleteObjectInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
-	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
+	HeadObject(
+		ctx context.Context,
+		params *s3.HeadObjectInput,
+		optFns ...func(*s3.Options),
+	) (*s3.HeadObjectOutput, error)
+	DeleteObject(
+		ctx context.Context,
+		params *s3.DeleteObjectInput,
+		optFns ...func(*s3.Options),
+	) (*s3.DeleteObjectOutput, error)
+	ListObjectsV2(
+		ctx context.Context,
+		params *s3.ListObjectsV2Input,
+		optFns ...func(*s3.Options),
+	) (*s3.ListObjectsV2Output, error)
 }
 
 // Config configures the S3 artifact service.
@@ -83,38 +95,6 @@ func NewService(client Client, cfg Config) (*Service, error) {
 		return nil, errors.New("s3artifact: bucket is required")
 	}
 	return &Service{client: client, cfg: cfg}, nil
-}
-
-// fileHasUserNamespace reports whether a filename is user-scoped rather than
-// session-scoped.
-func fileHasUserNamespace(fileName string) bool {
-	return strings.HasPrefix(fileName, "user:")
-}
-
-func (s *Service) objectKey(appName, userID, sessionID, fileName string, version int64) string {
-	return s.objectKeyPrefix(appName, userID, sessionID, fileName) + strconv.FormatInt(version, 10)
-}
-
-func (s *Service) objectKeyPrefix(appName, userID, sessionID, fileName string) string {
-	if fileHasUserNamespace(fileName) {
-		return s.withKeyPrefix(fmt.Sprintf("%s/%s/user/%s/", appName, userID, fileName))
-	}
-	return s.withKeyPrefix(fmt.Sprintf("%s/%s/%s/%s/", appName, userID, sessionID, fileName))
-}
-
-func (s *Service) sessionPrefix(appName, userID, sessionID string) string {
-	return s.withKeyPrefix(fmt.Sprintf("%s/%s/%s/", appName, userID, sessionID))
-}
-
-func (s *Service) userPrefix(appName, userID string) string {
-	return s.withKeyPrefix(fmt.Sprintf("%s/%s/user/", appName, userID))
-}
-
-func (s *Service) withKeyPrefix(key string) string {
-	if s.cfg.KeyPrefix == "" {
-		return key
-	}
-	return strings.TrimSuffix(s.cfg.KeyPrefix, "/") + "/" + key
 }
 
 // Save implements [artifact.Service]. Note the version race documented on the
@@ -298,7 +278,10 @@ func (s *Service) versions(ctx context.Context, req *artifact.VersionsRequest) (
 
 // GetArtifactVersion implements [artifact.Service]. Version 0 resolves to the
 // latest version.
-func (s *Service) GetArtifactVersion(ctx context.Context, req *artifact.GetArtifactVersionRequest) (*artifact.GetArtifactVersionResponse, error) {
+func (s *Service) GetArtifactVersion(
+	ctx context.Context,
+	req *artifact.GetArtifactVersionRequest,
+) (*artifact.GetArtifactVersionResponse, error) {
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("request validation failed: %w", err)
 	}
@@ -341,7 +324,11 @@ func (s *Service) GetArtifactVersion(ctx context.Context, req *artifact.GetArtif
 }
 
 // resolveVersion returns the given version, or the latest when it is 0.
-func (s *Service) resolveVersion(ctx context.Context, appName, userID, sessionID, fileName string, version int64) (int64, error) {
+func (s *Service) resolveVersion(
+	ctx context.Context,
+	appName, userID, sessionID, fileName string,
+	version int64,
+) (int64, error) {
 	if version != 0 {
 		return version, nil
 	}
@@ -385,4 +372,36 @@ func isNotFound(err error) bool {
 	var noKey *types.NoSuchKey
 	var notFound *types.NotFound
 	return errors.As(err, &noKey) || errors.As(err, &notFound)
+}
+
+// fileHasUserNamespace reports whether a filename is user-scoped rather than
+// session-scoped.
+func fileHasUserNamespace(fileName string) bool {
+	return strings.HasPrefix(fileName, "user:")
+}
+
+func (s *Service) objectKey(appName, userID, sessionID, fileName string, version int64) string {
+	return s.objectKeyPrefix(appName, userID, sessionID, fileName) + strconv.FormatInt(version, 10)
+}
+
+func (s *Service) objectKeyPrefix(appName, userID, sessionID, fileName string) string {
+	if fileHasUserNamespace(fileName) {
+		return s.withKeyPrefix(fmt.Sprintf("%s/%s/user/%s/", appName, userID, fileName))
+	}
+	return s.withKeyPrefix(fmt.Sprintf("%s/%s/%s/%s/", appName, userID, sessionID, fileName))
+}
+
+func (s *Service) sessionPrefix(appName, userID, sessionID string) string {
+	return s.withKeyPrefix(fmt.Sprintf("%s/%s/%s/", appName, userID, sessionID))
+}
+
+func (s *Service) userPrefix(appName, userID string) string {
+	return s.withKeyPrefix(fmt.Sprintf("%s/%s/user/", appName, userID))
+}
+
+func (s *Service) withKeyPrefix(key string) string {
+	if s.cfg.KeyPrefix == "" {
+		return key
+	}
+	return strings.TrimSuffix(s.cfg.KeyPrefix, "/") + "/" + key
 }

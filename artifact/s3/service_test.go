@@ -39,7 +39,11 @@ func newFakeS3() *fakeS3 {
 	return &fakeS3{objects: map[string]fakeObject{}}
 }
 
-func (f *fakeS3) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+func (f *fakeS3) PutObject(
+	_ context.Context,
+	in *s3.PutObjectInput,
+	_ ...func(*s3.Options),
+) (*s3.PutObjectOutput, error) {
 	data, err := io.ReadAll(in.Body)
 	if err != nil {
 		return nil, err
@@ -54,7 +58,11 @@ func (f *fakeS3) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*
 	return &s3.PutObjectOutput{}, nil
 }
 
-func (f *fakeS3) GetObject(_ context.Context, in *s3.GetObjectInput, _ ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
+func (f *fakeS3) GetObject(
+	_ context.Context,
+	in *s3.GetObjectInput,
+	_ ...func(*s3.Options),
+) (*s3.GetObjectOutput, error) {
 	obj, ok := f.objects[aws.ToString(in.Key)]
 	if !ok {
 		return nil, &types.NoSuchKey{}
@@ -65,7 +73,11 @@ func (f *fakeS3) GetObject(_ context.Context, in *s3.GetObjectInput, _ ...func(*
 	}, nil
 }
 
-func (f *fakeS3) HeadObject(_ context.Context, in *s3.HeadObjectInput, _ ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
+func (f *fakeS3) HeadObject(
+	_ context.Context,
+	in *s3.HeadObjectInput,
+	_ ...func(*s3.Options),
+) (*s3.HeadObjectOutput, error) {
 	obj, ok := f.objects[aws.ToString(in.Key)]
 	if !ok {
 		return nil, &types.NotFound{}
@@ -77,12 +89,20 @@ func (f *fakeS3) HeadObject(_ context.Context, in *s3.HeadObjectInput, _ ...func
 	}, nil
 }
 
-func (f *fakeS3) DeleteObject(_ context.Context, in *s3.DeleteObjectInput, _ ...func(*s3.Options)) (*s3.DeleteObjectOutput, error) {
+func (f *fakeS3) DeleteObject(
+	_ context.Context,
+	in *s3.DeleteObjectInput,
+	_ ...func(*s3.Options),
+) (*s3.DeleteObjectOutput, error) {
 	delete(f.objects, aws.ToString(in.Key))
 	return &s3.DeleteObjectOutput{}, nil
 }
 
-func (f *fakeS3) ListObjectsV2(_ context.Context, in *s3.ListObjectsV2Input, _ ...func(*s3.Options)) (*s3.ListObjectsV2Output, error) {
+func (f *fakeS3) ListObjectsV2(
+	_ context.Context,
+	in *s3.ListObjectsV2Input,
+	_ ...func(*s3.Options),
+) (*s3.ListObjectsV2Output, error) {
 	var keys []string
 	for k := range f.objects {
 		if strings.HasPrefix(k, aws.ToString(in.Prefix)) {
