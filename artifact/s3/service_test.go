@@ -361,24 +361,24 @@ func isFSNotExist(err error) bool {
 	return errors.Is(err, fs.ErrNotExist)
 }
 
-// smithyNotFound wraps a raw smithy.GenericAPIError so tests can exercise
+// smithyNotFoundError wraps a raw smithy.GenericAPIError so tests can exercise
 // the error-code fallback path in isNotFound without a concrete SDK type.
-type smithyNotFound struct{ code string }
+type smithyNotFoundError struct{ code string }
 
-func (e *smithyNotFound) Error() string      { return e.code }
-func (e *smithyNotFound) ErrorCode() string  { return e.code }
-func (e *smithyNotFound) ErrorMessage() string { return e.code }
-func (e *smithyNotFound) ErrorFault() smithy.ErrorFault { return smithy.FaultClient }
+func (e *smithyNotFoundError) Error() string                 { return e.code }
+func (e *smithyNotFoundError) ErrorCode() string             { return e.code }
+func (e *smithyNotFoundError) ErrorMessage() string          { return e.code }
+func (e *smithyNotFoundError) ErrorFault() smithy.ErrorFault { return smithy.FaultClient }
 
 func TestIsNotFoundSmithyFallback(t *testing.T) {
 	for _, code := range []string{"NoSuchKey", "NotFound"} {
-		wrapped := fmt.Errorf("outer: %w", &smithyNotFound{code: code})
+		wrapped := fmt.Errorf("outer: %w", &smithyNotFoundError{code: code})
 		if !isNotFound(wrapped) {
 			t.Errorf("isNotFound(%q via smithy code) = false, want true", code)
 		}
 	}
 	// Unrelated error codes must not match.
-	if isNotFound(&smithyNotFound{code: "AccessDenied"}) {
+	if isNotFound(&smithyNotFoundError{code: "AccessDenied"}) {
 		t.Error("isNotFound(AccessDenied) = true, want false")
 	}
 }
