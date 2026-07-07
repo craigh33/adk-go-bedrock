@@ -175,6 +175,26 @@ func TestSaveAssignsIncrementingVersionsAndKeys(t *testing.T) {
 	}
 }
 
+func TestSaveHonorsExplicitVersion(t *testing.T) {
+	fake := newFakeS3()
+	svc := newTestService(t, fake, Config{Bucket: "b"})
+
+	resp, err := svc.Save(context.Background(), &artifact.SaveRequest{
+		AppName: "app", UserID: "u1", SessionID: "s1", FileName: "report.txt",
+		Part:    genai.NewPartFromText("pinned"),
+		Version: 5,
+	})
+	if err != nil {
+		t.Fatalf("Save with explicit version: %v", err)
+	}
+	if resp.Version != 5 {
+		t.Fatalf("response version = %d, want 5", resp.Version)
+	}
+	if _, ok := fake.objects["app/u1/s1/report.txt/5"]; !ok {
+		t.Fatalf("expected key at version 5, got %v", keys(fake))
+	}
+}
+
 func TestUserNamespacedKeys(t *testing.T) {
 	fake := newFakeS3()
 	svc := newTestService(t, fake, Config{Bucket: "b"})

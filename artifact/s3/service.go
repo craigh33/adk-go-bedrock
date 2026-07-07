@@ -105,15 +105,18 @@ func (s *Service) Save(ctx context.Context, req *artifact.SaveRequest) (*artifac
 		return nil, fmt.Errorf("request validation failed: %w", err)
 	}
 
-	nextVersion := int64(1)
-	existing, err := s.versions(ctx, &artifact.VersionsRequest{
-		AppName: req.AppName, UserID: req.UserID, SessionID: req.SessionID, FileName: req.FileName,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list artifact versions: %w", err)
-	}
-	if len(existing.Versions) > 0 {
-		nextVersion = slices.Max(existing.Versions) + 1
+	nextVersion := req.Version
+	if nextVersion == 0 {
+		existing, err := s.versions(ctx, &artifact.VersionsRequest{
+			AppName: req.AppName, UserID: req.UserID, SessionID: req.SessionID, FileName: req.FileName,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to list artifact versions: %w", err)
+		}
+		nextVersion = int64(1)
+		if len(existing.Versions) > 0 {
+			nextVersion = slices.Max(existing.Versions) + 1
+		}
 	}
 
 	data, contentType := partPayload(req.Part)
