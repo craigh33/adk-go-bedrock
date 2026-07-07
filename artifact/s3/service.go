@@ -277,6 +277,7 @@ func (s *Service) versions(ctx context.Context, req *artifact.VersionsRequest) (
 	}); err != nil {
 		return nil, fmt.Errorf("failed to list artifact versions under %q: %w", prefix, err)
 	}
+	sort.Slice(versions, func(i, j int) bool { return versions[i] < versions[j] })
 	return &artifact.VersionsResponse{Versions: versions}, nil
 }
 

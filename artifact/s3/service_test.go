@@ -309,6 +309,28 @@ func TestListUnionsSessionAndUserScopesAcrossPages(t *testing.T) {
 	}
 }
 
+func TestVersionsNumericOrder(t *testing.T) {
+	fake := newFakeS3()
+	svc := newTestService(t, fake, Config{Bucket: "b"})
+	// Write versions 1–10 so that lexicographic order (1,10,2,...) differs from numeric.
+	for i := range int64(10) {
+		saveText(t, svc, "report.txt", "v")
+		_ = i
+	}
+
+	resp, err := svc.Versions(context.Background(), &artifact.VersionsRequest{
+		AppName: "app", UserID: "u1", SessionID: "s1", FileName: "report.txt",
+	})
+	if err != nil {
+		t.Fatalf("Versions: %v", err)
+	}
+	for i, v := range resp.Versions {
+		if v != int64(i+1) {
+			t.Fatalf("Versions[%d] = %d, want %d (got %v)", i, v, i+1, resp.Versions)
+		}
+	}
+}
+
 func TestVersionsErrorsWhenEmpty(t *testing.T) {
 	svc := newTestService(t, newFakeS3(), Config{Bucket: "b"})
 	_, err := svc.Versions(context.Background(), &artifact.VersionsRequest{
