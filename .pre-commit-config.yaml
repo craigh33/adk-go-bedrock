@@ -16,12 +16,11 @@ repos:
         stages: [commit-msg]
         args: [feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert]
 
-  - repo: local
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.11.4
     hooks:
       - id: golangci-lint
         name: Lint
-        entry: env GOROOT=/opt/homebrew/opt/go/libexec golangci-lint run
-        language: system
         args:
           - '--config=.golangci.yaml'
           - '--new'
@@ -37,7 +36,6 @@ repos:
             )$
         types:
           - go
-        pass_filenames: false
         stages: [ pre-commit ]
 
   - repo: local
