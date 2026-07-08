@@ -87,9 +87,8 @@ resp, err := svc.PresignLoad(ctx, &s3artifact.PresignLoadRequest{
 `Config.Presigner` is opt-in: services that do not set it are unaffected and
 `PresignLoad` returns an error if called without one.
 
-No additional IAM actions are needed beyond `s3:GetObject` (already required for
-`Load`). The credentials embedded in the signed URL belong to the signer at
-signing time.
+No additional S3 actions are needed beyond `s3:GetObject` (already required for `Load`), but if objects are encrypted with SSE-KMS you may also need `kms:Decrypt` on the KMS key.
+The credentials embedded in the signed URL belong to the signer at signing time.
 
 ## Limitations
 
