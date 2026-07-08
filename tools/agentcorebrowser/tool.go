@@ -323,11 +323,7 @@ func (t *browserTool) runStop(ctx agent.Context, m map[string]any) (map[string]a
 	if err != nil {
 		return nil, err
 	}
-	out, err := t.api.StopBrowserSession(ctx, &bedrockagentcore.StopBrowserSessionInput{
-		BrowserIdentifier: aws.String(t.browserIdentifier),
-		SessionId:         aws.String(sessionID),
-		ClientToken:       aws.String(clientToken(ctx.FunctionCallID())),
-	})
+	out, err := t.stopSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("stop browser session %q: %w", sessionID, err)
 	}
@@ -340,6 +336,24 @@ func (t *browserTool) runStop(ctx agent.Context, m map[string]any) (map[string]a
 	}, nil
 }
 
+func (t *browserTool) stopSession(
+	ctx agent.Context,
+	sessionID string,
+) (*bedrockagentcore.StopBrowserSessionOutput, error) {
+	return t.api.StopBrowserSession(ctx, &bedrockagentcore.StopBrowserSessionInput{
+		BrowserIdentifier: aws.String(t.browserIdentifier),
+		SessionId:         aws.String(sessionID),
+		ClientToken:       aws.String(clientToken(ctx.FunctionCallID())),
+	})
+}
+
+func (t *browserTool) cleanupStartedSession(ctx agent.Context, sessionID string, cause error) error {
+	if _, err := t.stopSession(ctx, sessionID); err != nil {
+		return fmt.Errorf("%w; cleanup stop browser session %q: %w", cause, sessionID, err)
+	}
+	return cause
+}
+
 func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[string]any, error) {
 	rawURL, err := requiredString(m, paramURL)
 	if err != nil {
@@ -350,12 +364,14 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 	}
 
 	sessionID := optionalString(m, paramSessionID)
+	autoStarted := false
 	var streams *types.BrowserSessionStream
 	if sessionID == "" {
 		started, err := t.startSession(ctx)
 		if err != nil {
 			return nil, err
 		}
+		autoStarted = true
 		sessionID = aws.ToString(started.SessionId)
 		streams = started.Streams
 	} else {
@@ -371,6 +387,9 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 
 	cdp, err := t.openCDP(ctx, automationEndpoint(streams))
 	if err != nil {
+		if autoStarted {
+			return nil, t.cleanupStartedSession(ctx, sessionID, err)
+		}
 		return nil, err
 	}
 	defer cdp.close()
@@ -378,10 +397,16 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 	navCtx, cancel := context.WithTimeout(ctx, t.navigationTimeout)
 	defer cancel()
 	if err := cdp.navigate(navCtx, rawURL); err != nil {
+		if autoStarted {
+			return nil, t.cleanupStartedSession(ctx, sessionID, err)
+		}
 		return nil, err
 	}
 	meta, err := cdp.pageMetadata(ctx)
 	if err != nil {
+		if autoStarted {
+			return nil, t.cleanupStartedSession(ctx, sessionID, err)
+		}
 		return nil, err
 	}
 
@@ -565,6 +590,8 @@ func (t *browserTool) signedWebSocketHeaders(ctx context.Context, endpoint strin
 		signURL.Scheme = "https"
 	case "ws":
 		signURL.Scheme = "http"
+	default:
+		return nil, fmt.Errorf("automation stream endpoint scheme must be ws or wss, got %q", signURL.Scheme)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, signURL.String(), nil)
 	if err != nil {
@@ -784,10 +811,11 @@ func truncateUTF8(s string, maxBytes int) (string, bool) {
 }
 
 type cdpConn struct {
-	conn      *websocket.Conn
-	nextID    int64
-	events    []cdpMessage
-	responses map[int64]cdpMessage
+	conn          *websocket.Conn
+	nextID        int64
+	pageSessionID string
+	events        []cdpMessage
+	responses     map[int64]cdpMessage
 }
 
 type cdpMessage struct {
@@ -802,6 +830,20 @@ type cdpMessage struct {
 type cdpError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+type runtimeEvaluateResult struct {
+	Result struct {
+		Value json.RawMessage `json:"value"`
+	} `json:"result"`
+	ExceptionDetails *runtimeExceptionDetails `json:"exceptionDetails,omitempty"`
+}
+
+type runtimeExceptionDetails struct {
+	Text      string `json:"text,omitempty"`
+	Exception *struct {
+		Description string `json:"description,omitempty"`
+	} `json:"exception,omitempty"`
 }
 
 type pageMetadata struct {
@@ -856,15 +898,11 @@ return {text: node ? (node.innerText || node.textContent || "") : "", url: locat
 	if err != nil {
 		return nil, err
 	}
-	var out struct {
-		Result struct {
-			Value textResult `json:"value"`
-		} `json:"result"`
+	var result textResult
+	if err := unmarshalRuntimeValue(raw, "extract_text", &result); err != nil {
+		return nil, err
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("parse extract_text result: %w", err)
-	}
-	return &out.Result.Value, nil
+	return &result, nil
 }
 
 func (c *cdpConn) pageMetadata(ctx context.Context) (*pageMetadata, error) {
@@ -879,15 +917,11 @@ func (c *cdpConn) pageMetadata(ctx context.Context) (*pageMetadata, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out struct {
-		Result struct {
-			Value pageMetadata `json:"value"`
-		} `json:"result"`
+	var result pageMetadata
+	if err := unmarshalRuntimeValue(raw, "page metadata", &result); err != nil {
+		return nil, err
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("parse page metadata: %w", err)
-	}
-	return &out.Result.Value, nil
+	return &result, nil
 }
 
 func (c *cdpConn) screenshot(ctx context.Context, format string) ([]byte, error) {
@@ -916,6 +950,9 @@ func (c *cdpConn) screenshot(ctx context.Context, format string) ([]byte, error)
 }
 
 func (c *cdpConn) pageSession(ctx context.Context) (string, error) {
+	if c.pageSessionID != "" {
+		return c.pageSessionID, nil
+	}
 	raw, err := c.call(ctx, "Target.getTargets", nil, "")
 	if err != nil {
 		return "", err
@@ -965,7 +1002,35 @@ func (c *cdpConn) pageSession(ctx context.Context) (string, error) {
 	if attached.SessionID == "" {
 		return "", errors.New("attach target returned empty sessionId")
 	}
+	c.pageSessionID = attached.SessionID
 	return attached.SessionID, nil
+}
+
+func unmarshalRuntimeValue(raw json.RawMessage, op string, out any) error {
+	var eval runtimeEvaluateResult
+	if err := json.Unmarshal(raw, &eval); err != nil {
+		return fmt.Errorf("parse %s result: %w", op, err)
+	}
+	if eval.ExceptionDetails != nil {
+		return fmt.Errorf("%s JavaScript exception: %s", op, eval.ExceptionDetails.message())
+	}
+	if err := json.Unmarshal(eval.Result.Value, out); err != nil {
+		return fmt.Errorf("parse %s value: %w", op, err)
+	}
+	return nil
+}
+
+func (d *runtimeExceptionDetails) message() string {
+	if d == nil {
+		return "unknown exception"
+	}
+	if d.Exception != nil && strings.TrimSpace(d.Exception.Description) != "" {
+		return strings.TrimSpace(d.Exception.Description)
+	}
+	if strings.TrimSpace(d.Text) != "" {
+		return strings.TrimSpace(d.Text)
+	}
+	return "unknown exception"
 }
 
 func (c *cdpConn) call(ctx context.Context, method string, params any, sessionID string) (json.RawMessage, error) {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -144,6 +145,11 @@ func browserStreams(wsURL string) *types.BrowserSessionStream {
 }
 
 func fakeCDPServer(t *testing.T, failMethod string) string {
+	return fakeCDPServerWithHook(t, failMethod, nil)
+}
+
+//nolint:gocognit // Keeping the fake CDP request table in one place is clearer for these tests.
+func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string)) string {
 	t.Helper()
 	upgrader := websocket.Upgrader{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -162,6 +168,9 @@ func fakeCDPServer(t *testing.T, failMethod string) string {
 			}
 			if err := conn.ReadJSON(&req); err != nil {
 				return
+			}
+			if hook != nil {
+				hook(req.Method)
 			}
 			if req.Method == failMethod {
 				_ = conn.WriteJSON(map[string]any{
@@ -189,6 +198,20 @@ func fakeCDPServer(t *testing.T, failMethod string) string {
 				_ = conn.WriteJSON(map[string]any{"method": "Page.loadEventFired", "sessionId": "session-1"})
 				_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{"frameId": "frame-1"}})
 			case "Runtime.evaluate":
+				if failMethod == "Runtime.evaluate.exception" {
+					_ = conn.WriteJSON(map[string]any{
+						"id": req.ID,
+						"result": map[string]any{
+							"exceptionDetails": map[string]any{
+								"text": "Uncaught",
+								"exception": map[string]any{
+									"description": "SyntaxError: invalid selector",
+								},
+							},
+						},
+					})
+					continue
+				}
 				value := map[string]any{"url": "https://example.com/after", "title": "Example"}
 				if expr, _ := req.Params["expression"].(string); strings.Contains(expr, "document.querySelector") {
 					value["text"] = "hello world"
@@ -274,6 +297,18 @@ func TestDeclarationAndProcessRequest(t *testing.T) {
 	}
 	if err := bt.ProcessRequest(newFakeToolCtx(&fakeArtifacts{}), req); err == nil {
 		t.Fatal("expected duplicate tool error")
+	}
+}
+
+func TestSignedWebSocketHeadersRejectsUnsupportedScheme(t *testing.T) {
+	t.Parallel()
+	tl, err := New(Config{API: &fakeAgentCoreAPI{}, Region: "us-east-1", Credentials: testCreds()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bt := tl.(*browserTool)
+	if _, err := bt.signedWebSocketHeaders(context.Background(), "https://example.com/stream"); err == nil {
+		t.Fatal("expected unsupported scheme error")
 	}
 }
 
@@ -407,7 +442,12 @@ func TestHostPolicyRejectsLocalTargetsByDefault(t *testing.T) {
 
 func TestNavigateStartsSessionAndUsesCDP(t *testing.T) {
 	t.Parallel()
-	wsURL := fakeCDPServer(t, "")
+	var attachCount atomic.Int32
+	wsURL := fakeCDPServerWithHook(t, "", func(method string) {
+		if method == "Target.attachToTarget" {
+			attachCount.Add(1)
+		}
+	})
 	api := &fakeAgentCoreAPI{
 		startOut: &bedrockagentcore.StartBrowserSessionOutput{
 			BrowserIdentifier: aws.String("aws.browser.v1"),
@@ -430,6 +470,9 @@ func TestNavigateStartsSessionAndUsesCDP(t *testing.T) {
 	}
 	if out["url"] != "https://example.com/after" || out["title"] != "Example" {
 		t.Errorf("metadata = url %v title %v", out["url"], out["title"])
+	}
+	if attachCount.Load() != 1 {
+		t.Errorf("attach count = %d", attachCount.Load())
 	}
 }
 
@@ -459,6 +502,57 @@ func TestExtractTextGetsSessionAndTruncates(t *testing.T) {
 	}
 	if aws.ToString(api.lastGet.SessionId) != "session-1" {
 		t.Errorf("get session id = %q", aws.ToString(api.lastGet.SessionId))
+	}
+}
+
+func TestExtractTextReturnsRuntimeEvaluateException(t *testing.T) {
+	t.Parallel()
+	wsURL := fakeCDPServer(t, "Runtime.evaluate.exception")
+	api := &fakeAgentCoreAPI{
+		getOut: &bedrockagentcore.GetBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	bt := tl.(*browserTool)
+
+	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction:    actionExtractText,
+		paramSessionID: "session-1",
+		paramSelector:  "[",
+	})
+	if err == nil || !strings.Contains(err.Error(), "SyntaxError: invalid selector") {
+		t.Fatalf("expected runtime exception, got %v", err)
+	}
+	if api.lastStop != nil {
+		t.Fatal("extract_text should not stop caller-owned session")
+	}
+}
+
+func TestNavigateStopsAutoStartedSessionOnMetadataError(t *testing.T) {
+	t.Parallel()
+	wsURL := fakeCDPServer(t, "Runtime.evaluate.exception")
+	api := &fakeAgentCoreAPI{
+		startOut: &bedrockagentcore.StartBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	bt := tl.(*browserTool)
+
+	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction: actionNavigate,
+		paramURL:    "https://example.com",
+	})
+	if err == nil || !strings.Contains(err.Error(), "SyntaxError: invalid selector") {
+		t.Fatalf("expected metadata exception, got %v", err)
+	}
+	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
+		t.Fatalf("auto-started session was not stopped: %#v", api.lastStop)
 	}
 }
 
@@ -518,6 +612,9 @@ func TestCDPErrorIsReturned(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "fake cdp failure") {
 		t.Fatalf("expected CDP failure, got %v", err)
+	}
+	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
+		t.Fatalf("auto-started session was not stopped: %#v", api.lastStop)
 	}
 }
 
