@@ -65,7 +65,8 @@ These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat 
 - [`examples/bedrock-function-tool`](examples/bedrock-function-tool): ADK `functiontool` with typed args/results and `llmagent` + runner (contrasts with hand-written `genai.Tool` in bedrock-tool-calling).
 - [`examples/bedrock-image-gen`](examples/bedrock-image-gen): ADK runner with the [`imagegenerator`](tools/imagegenerator) tool—Nova Canvas image generation via Bedrock `InvokeModel` and artifact storage.
 - [`examples/bedrock-video-gen`](examples/bedrock-video-gen): ADK runner with the [`videogenerator`](tools/videogenerator) tool—Nova Reel text-to-video via Bedrock async invoke, S3 output, and optional MP4 download into artifacts.
-- [`examples/bedrock-nova-grounding`](examples/bedrock-nova-grounding): Nova Web Grounding via [`tools/novagrounding`](tools/novagrounding); prints answers and `bedrock_citations` metadata (see [Nova Web Grounding](#nova-web-grounding)).
+- [`examples/bedrock-agentcore-browser`](examples/bedrock-agentcore-browser): AgentCore Browser via [`tools/agentcorebrowser`](tools/agentcorebrowser); starts managed browser sessions, navigates, extracts text, and saves screenshots as artifacts.
+- [`examples/bedrock-nova-grounding`](examples/bedrock-nova-grounding): Nova Web Grounding via [`tools/novagrounding`](tools/novagrounding); prints answers and `bedrock_citations` metadata.
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
 - [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
 - [`examples/bedrock-multimodal`](examples/bedrock-multimodal): comprehensive image analysis, document processing, tool calling with rich media, and vision-based reasoning.
@@ -103,46 +104,6 @@ make -C examples/bedrock-stream run
 - **Function responses**: JSON tool output still maps as before, and image/video/document `FunctionResponse.Parts` are preserved through Bedrock tool-result content blocks.
 - **Streaming**: When ADK uses SSE streaming, the provider calls `ConverseStream`, emits partial text responses, and buffers streamed tool calls, reasoning blocks, image blocks, citation deltas (for grounded responses), usage, and guardrail metadata into the final `TurnComplete` response.
 - **Guardrails / safety results**: Bedrock guardrail stop reasons and trace metadata are mapped back into ADK `FinishReason` and `CustomMetadata`, including synthesized `safety_ratings` derived from Bedrock guardrail assessments when available.
-
-## Nova Web Grounding
-
-Enable real-time web search for supported Nova models by adding [`novagrounding.Tool()`](tools/novagrounding/tool.go) to `GenerateContentConfig.Tools`. This tool is Bedrock-specific. Use an applicable Bedrock region and an inference profile that supports Web Grounding (for example `us.amazon.nova-2-lite-v1:0`; see AWS docs for current model IDs). For current regional availability, check [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/).
-Converse request payloads use SystemTool name `nova_grounding`, while IAM policies for `bedrock:InvokeTool` may reference the resource identifier `amazon.nova_grounding`.
-
-```go
-import (
-    "context"
-
-    "google.golang.org/adk/v2/model"
-    "google.golang.org/genai"
-
-    "github.com/craigh33/adk-go-bedrock/tools/novagrounding"
-)
-
-func groundedAsk(ctx context.Context, llm model.LLM, question string) (*model.LLMResponse, error) {
-    req := &model.LLMRequest{
-        Contents: []*genai.Content{
-            genai.NewContentFromText(question, genai.RoleUser),
-        },
-        Config: &genai.GenerateContentConfig{
-            Tools:           []*genai.Tool{novagrounding.Tool()},
-            MaxOutputTokens: 1024,
-        },
-    }
-    var last *model.LLMResponse
-    for resp, e := range llm.GenerateContent(ctx, req, false) {
-        if e != nil {
-            return nil, e
-        }
-        last = resp
-    }
-    return last, nil
-}
-```
-
-Grounded replies include citation payloads under `genai.Part.PartMetadata` with key `"bedrock_citations"` (each entry may include `location.url`, `location.domain`, etc.). Retain and surface those citations in user-facing output per AWS guidance.
-
-A runnable CLI lives at [`examples/bedrock-nova-grounding`](examples/bedrock-nova-grounding).
 
 ## Limitations
 
