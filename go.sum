@@ -28,6 +28,8 @@ github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.30 h1:jn46zC9LdsVR/ZpMIJ
 github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.30/go.mod h1:1hTMsAgbdS/AtUi4bw8+gUuh1pceo+eXRLfpSuSQj3M=
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.31 h1:3GUprIsfmGcC5SACIyB0e7E0BM1O1b3Erl5CePYIAeQ=
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.31/go.mod h1:7PuV1yl5e2xnUbm+RqvVg5i2iBM8EyijZNoI9wsOoOc=
+github.com/aws/aws-sdk-go-v2/service/bedrockagentcore v1.32.2 h1:tHrisFD5j+8sAgl6KwrZoCSOuGtTE81t392BHa+QKhM=
+github.com/aws/aws-sdk-go-v2/service/bedrockagentcore v1.32.2/go.mod h1:oMoaLKiXi0SdQZDKWlSIF7m4zHVy/+zv7KP1CxYKXpg=
 github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime v1.53.0 h1:NlmPSeybA5/SWG6CM3NbVjGj6B5JJsvDqqljCMlxJmo=
 github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime v1.53.0/go.mod h1:fuuuSzGBU3h4DQD4Caa2MMSzhok7SUvj6EaU+e9b0qU=
 github.com/aws/aws-sdk-go-v2/service/bedrockdataautomationruntime v1.11.8 h1:1kUNdkPVAo7HnGidBp/Xi6Off5r53iJvlUfN4jOciFw=
