@@ -76,6 +76,12 @@ type Config struct {
 	// SSEKMSKeyID, when set, enables SSE-KMS with this key on every write.
 	// When empty, writes rely on the bucket's default encryption settings.
 	SSEKMSKeyID string
+	// Presigner, when set, enables [Service.PresignLoad]. Use
+	// [PresignClientAdapter] to wrap *s3.PresignClient.
+	Presigner Presigner
+	// PresignTTL is the default TTL applied by [Service.PresignLoad].
+	// Defaults to 15 minutes when zero.
+	PresignTTL time.Duration
 }
 
 // Service is an S3-backed [artifact.Service].

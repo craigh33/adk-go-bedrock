@@ -1,7 +1,7 @@
 // S3 artifact service example for adk-go-bedrock: wires the artifact/s3
 // [artifact.Service] into an ADK runner so agent/tool artifacts persist in
-// Amazon S3 instead of process memory, then saves and reloads an artifact
-// directly to show the round trip.
+// Amazon S3 instead of process memory, then saves, reloads, and generates a
+// pre-signed download URL for an artifact to show the full round trip.
 //
 // Authenticate with AWS using the default credential chain and set:
 //
@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -41,9 +42,14 @@ func main() {
 		log.Fatalf("load AWS config: %v", err)
 	}
 
-	svc, err := s3artifact.NewService(s3.NewFromConfig(awsCfg), s3artifact.Config{
+	s3Client := s3.NewFromConfig(awsCfg)
+
+	svc, err := s3artifact.NewService(s3Client, s3artifact.Config{
 		Bucket:    bucket,
 		KeyPrefix: os.Getenv("ARTIFACT_S3_PREFIX"),
+		// Wire up pre-signed URL support.
+		Presigner:  s3artifact.PresignClientAdapter{Client: s3.NewPresignClient(s3Client)},
+		PresignTTL: 15 * time.Minute,
 	})
 	if err != nil {
 		log.Fatalf("create artifact service: %v", err)
@@ -69,14 +75,23 @@ func main() {
 	if err != nil {
 		log.Fatalf("save artifact: %v", err)
 	}
-	fmt.Printf("saved greeting.txt version %d\n", saved.Version)
+	fmt.Printf("saved %q version %d\n", "greeting.txt", saved.Version)
 
 	loaded, err := svc.Load(ctx, &artifact.LoadRequest{
 		AppName: "artifact-s3-example", UserID: "demo-user", SessionID: "demo-session",
-		FileName: "greeting.txt", // Version 0 = latest
+		FileName: "greeting.txt",
 	})
 	if err != nil {
 		log.Fatalf("load artifact: %v", err)
 	}
 	fmt.Printf("loaded: %s\n", loaded.Part.InlineData.Data)
+
+	signed, err := svc.PresignLoad(ctx, &s3artifact.PresignLoadRequest{
+		AppName: "artifact-s3-example", UserID: "demo-user", SessionID: "demo-session",
+		FileName: "greeting.txt",
+	})
+	if err != nil {
+		log.Fatalf("presign: %v", err)
+	}
+	fmt.Printf("pre-signed URL (expires %s):\n%s\n", signed.Expires.Format(time.RFC3339), signed.URL)
 }
