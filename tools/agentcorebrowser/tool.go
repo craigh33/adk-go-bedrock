@@ -447,6 +447,9 @@ func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[s
 	if err != nil {
 		return nil, err
 	}
+	if err := t.checkURL(result.URL); err != nil {
+		return nil, fmt.Errorf("current url: %w", err)
+	}
 	result.Text, result.Truncated = truncateUTF8(result.Text, t.maxTextBytes)
 	return map[string]any{
 		resultKeyStatus:    statusSuccess,
@@ -483,6 +486,13 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 	}
 	defer cdp.close()
 
+	meta, err := cdp.pageMetadata(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := t.checkURL(meta.URL); err != nil {
+		return nil, fmt.Errorf("current url: %w", err)
+	}
 	data, err := cdp.screenshot(ctx, format)
 	if err != nil {
 		return nil, err
@@ -529,31 +539,28 @@ func (t *browserTool) startSession(ctx agent.Context) (*bedrockagentcore.StartBr
 
 func (t *browserTool) startResult(out *bedrockagentcore.StartBrowserSessionOutput) map[string]any {
 	return map[string]any{
-		resultKeyStatus:         statusSuccess,
-		paramAction:             actionStart,
-		resultKeyBrowserID:      aws.ToString(out.BrowserIdentifier),
-		paramSessionID:          aws.ToString(out.SessionId),
-		"created_at":            timeValue(out.CreatedAt),
-		"automation_stream_url": automationEndpoint(out.Streams),
-		"live_view_url":         liveViewEndpoint(out.Streams),
+		resultKeyStatus:    statusSuccess,
+		paramAction:        actionStart,
+		resultKeyBrowserID: aws.ToString(out.BrowserIdentifier),
+		paramSessionID:     aws.ToString(out.SessionId),
+		"created_at":       timeValue(out.CreatedAt),
+		"live_view_url":    liveViewEndpoint(out.Streams),
 	}
 }
 
 func (t *browserTool) sessionResult(out *bedrockagentcore.GetBrowserSessionOutput) map[string]any {
 	return map[string]any{
-		resultKeyStatus:            statusSuccess,
-		resultKeySessionStatus:     string(out.Status),
-		paramAction:                actionStatus,
-		resultKeyBrowserID:         aws.ToString(out.BrowserIdentifier),
-		paramSessionID:             aws.ToString(out.SessionId),
-		"name":                     aws.ToString(out.Name),
-		"created_at":               timeValue(out.CreatedAt),
-		"last_updated_at":          timeValue(out.LastUpdatedAt),
-		"session_timeout_seconds":  int32Value(out.SessionTimeoutSeconds),
-		"session_replay_artifact":  aws.ToString(out.SessionReplayArtifact),
-		"automation_stream_url":    automationEndpoint(out.Streams),
-		"automation_stream_status": automationStatus(out.Streams),
-		"live_view_url":            liveViewEndpoint(out.Streams),
+		resultKeyStatus:           statusSuccess,
+		resultKeySessionStatus:    string(out.Status),
+		paramAction:               actionStatus,
+		resultKeyBrowserID:        aws.ToString(out.BrowserIdentifier),
+		paramSessionID:            aws.ToString(out.SessionId),
+		"name":                    aws.ToString(out.Name),
+		"created_at":              timeValue(out.CreatedAt),
+		"last_updated_at":         timeValue(out.LastUpdatedAt),
+		"session_timeout_seconds": int32Value(out.SessionTimeoutSeconds),
+		"session_replay_artifact": aws.ToString(out.SessionReplayArtifact),
+		"live_view_url":           liveViewEndpoint(out.Streams),
 	}
 }
 
@@ -672,13 +679,6 @@ func automationEndpoint(streams *types.BrowserSessionStream) string {
 		return ""
 	}
 	return aws.ToString(streams.AutomationStream.StreamEndpoint)
-}
-
-func automationStatus(streams *types.BrowserSessionStream) string {
-	if streams == nil || streams.AutomationStream == nil {
-		return ""
-	}
-	return string(streams.AutomationStream.StreamStatus)
 }
 
 func liveViewEndpoint(streams *types.BrowserSessionStream) string {

@@ -323,12 +323,14 @@ func TestStartStatusStopUseAgentCoreAPI(t *testing.T) {
 			BrowserIdentifier: aws.String("aws.browser.v1"),
 			SessionId:         aws.String("session-1"),
 			CreatedAt:         &now,
+			Streams:           browserStreams("wss://agentcore.example/automation"),
 		},
 		getOut: &bedrockagentcore.GetBrowserSessionOutput{
 			BrowserIdentifier:     aws.String("aws.browser.v1"),
 			SessionId:             aws.String("session-1"),
 			Status:                types.BrowserSessionStatusReady,
 			SessionTimeoutSeconds: aws.Int32(900),
+			Streams:               browserStreams("wss://agentcore.example/automation"),
 		},
 		stopOut: &bedrockagentcore.StopBrowserSessionOutput{
 			BrowserIdentifier: aws.String("aws.browser.v1"),
@@ -348,8 +350,12 @@ func TestStartStatusStopUseAgentCoreAPI(t *testing.T) {
 	ctx := newFakeToolCtx(&fakeArtifacts{})
 	ctx.functionCallID = "tooluse_abc"
 
-	if _, err := bt.Run(ctx, map[string]any{paramAction: actionStart}); err != nil {
+	startOut, err := bt.Run(ctx, map[string]any{paramAction: actionStart})
+	if err != nil {
 		t.Fatalf("start: %v", err)
+	}
+	if _, ok := startOut["automation_stream_url"]; ok {
+		t.Fatal("start result leaked automation stream URL")
 	}
 	if got := aws.ToString(
 		api.lastStart.ClientToken,
@@ -364,10 +370,22 @@ func TestStartStatusStopUseAgentCoreAPI(t *testing.T) {
 		t.Fatalf("viewport not set: %#v", api.lastStart.ViewPort)
 	}
 
-	if out, err := bt.Run(ctx, map[string]any{paramAction: actionStatus, paramSessionID: "session-1"}); err != nil {
+	statusOut, err := bt.Run(ctx, map[string]any{paramAction: actionStatus, paramSessionID: "session-1"})
+	if err != nil {
 		t.Fatalf("status: %v", err)
-	} else if out[resultKeyStatus] != statusSuccess || out[resultKeySessionStatus] != "READY" {
-		t.Errorf("status result = %v session_status = %v", out[resultKeyStatus], out[resultKeySessionStatus])
+	}
+	if statusOut[resultKeyStatus] != statusSuccess || statusOut[resultKeySessionStatus] != "READY" {
+		t.Errorf(
+			"status result = %v session_status = %v",
+			statusOut[resultKeyStatus],
+			statusOut[resultKeySessionStatus],
+		)
+	}
+	if _, ok := statusOut["automation_stream_url"]; ok {
+		t.Fatal("status result leaked automation stream URL")
+	}
+	if _, ok := statusOut["automation_stream_status"]; ok {
+		t.Fatal("status result leaked automation stream status")
 	}
 	if aws.ToString(api.lastGet.SessionId) != "session-1" {
 		t.Errorf("get session id = %q", aws.ToString(api.lastGet.SessionId))
@@ -534,6 +552,37 @@ func TestExtractTextReturnsRuntimeEvaluateException(t *testing.T) {
 	}
 }
 
+func TestExtractTextRejectsDisallowedCurrentURL(t *testing.T) {
+	t.Parallel()
+	wsURL := fakeCDPServer(t, "Runtime.evaluate.redirect")
+	api := &fakeAgentCoreAPI{
+		getOut: &bedrockagentcore.GetBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	tl, _ := New(Config{
+		API:          api,
+		Region:       "us-east-1",
+		Credentials:  testCreds(),
+		AllowedHosts: []string{"example.com"},
+	})
+	bt := tl.(*browserTool)
+
+	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction:    actionExtractText,
+		paramSessionID: "session-1",
+		paramSelector:  "main",
+	})
+	if err == nil || !strings.Contains(err.Error(), "current url") {
+		t.Fatalf("expected current URL policy error, got %v", err)
+	}
+	if api.lastStop != nil {
+		t.Fatal("extract_text should not stop caller-owned session")
+	}
+}
+
 func TestNavigateStopsAutoStartedSessionOnMetadataError(t *testing.T) {
 	t.Parallel()
 	wsURL := fakeCDPServer(t, "Runtime.evaluate.exception")
@@ -586,6 +635,45 @@ func TestNavigateRejectsDisallowedFinalURL(t *testing.T) {
 	}
 	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
 		t.Fatalf("auto-started session was not stopped: %#v", api.lastStop)
+	}
+}
+
+func TestScreenshotRejectsDisallowedCurrentURLBeforeSaving(t *testing.T) {
+	t.Parallel()
+	var captureCount atomic.Int32
+	wsURL := fakeCDPServerWithHook(t, "Runtime.evaluate.redirect", func(method string) {
+		if method == "Page.captureScreenshot" {
+			captureCount.Add(1)
+		}
+	})
+	api := &fakeAgentCoreAPI{
+		getOut: &bedrockagentcore.GetBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	arts := &fakeArtifacts{}
+	tl, _ := New(Config{
+		API:          api,
+		Region:       "us-east-1",
+		Credentials:  testCreds(),
+		AllowedHosts: []string{"example.com"},
+	})
+	bt := tl.(*browserTool)
+
+	_, err := bt.Run(newFakeToolCtx(arts), map[string]any{
+		paramAction:    actionScreenshot,
+		paramSessionID: "session-1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "current url") {
+		t.Fatalf("expected current URL policy error, got %v", err)
+	}
+	if captureCount.Load() != 0 {
+		t.Fatalf("screenshot captured before URL policy check")
+	}
+	if arts.savedName != "" {
+		t.Fatalf("artifact saved despite URL policy error: %q", arts.savedName)
 	}
 }
 
