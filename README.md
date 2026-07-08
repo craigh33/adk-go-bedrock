@@ -58,6 +58,7 @@ The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conver
 These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat runners, tools, streaming, multimodal and document flows, guardrails, and provider-specific options. Each example has its own `README.md` and `Makefile`:
 
 - [`examples/bedrock-a2a`](examples/bedrock-a2a): A2A remote-agent example backed by Bedrock.
+- [`examples/bedrock-artifact-s3`](examples/bedrock-artifact-s3): durable artifact storage in Amazon S3 via [`artifact/s3`](artifact/s3), an S3 implementation of ADK's `artifact.Service`.
 - [`examples/bedrock-chat`](examples/bedrock-chat): runner-based chat example.
 - [`examples/bedrock-mcp`](examples/bedrock-mcp): MCP support via ADK's `mcptoolset` with an in-memory MCP server ([MCP support](#mcp-support)).
 - [`examples/bedrock-tool-calling`](examples/bedrock-tool-calling): tool-calling agent example with function declarations.
