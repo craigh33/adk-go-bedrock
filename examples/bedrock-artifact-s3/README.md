@@ -7,7 +7,7 @@ Objects are stored one-per-version under `[prefix/]appName/userID/sessionID/file
 ## Requirements
 
 - AWS credentials via the default chain
-- An S3 bucket you can read/write: `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, `s3:ListBucket` on the bucket (plus KMS permissions if you set `SSEKMSKeyID`)
+- An S3 bucket you can read/write: `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, `s3:ListBucket` on the configured prefix (plus KMS permissions if you set `SSEKMSKeyID`)
 
 ## Run
 
