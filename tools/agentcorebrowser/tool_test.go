@@ -186,8 +186,8 @@ func fakeCDPServer(t *testing.T, failMethod string) string {
 			case "Page.enable":
 				_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{}})
 			case "Page.navigate":
-				_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{"frameId": "frame-1"}})
 				_ = conn.WriteJSON(map[string]any{"method": "Page.loadEventFired", "sessionId": "session-1"})
+				_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{"frameId": "frame-1"}})
 			case "Runtime.evaluate":
 				value := map[string]any{"url": "https://example.com/after", "title": "Example"}
 				if expr, _ := req.Params["expression"].(string); strings.Contains(expr, "document.querySelector") {
@@ -325,8 +325,8 @@ func TestStartStatusStopUseAgentCoreAPI(t *testing.T) {
 
 	if out, err := bt.Run(ctx, map[string]any{paramAction: actionStatus, paramSessionID: "session-1"}); err != nil {
 		t.Fatalf("status: %v", err)
-	} else if out["status"] != "READY" {
-		t.Errorf("status result = %v", out["status"])
+	} else if out[resultKeyStatus] != statusSuccess || out[resultKeySessionStatus] != "READY" {
+		t.Errorf("status result = %v session_status = %v", out[resultKeyStatus], out[resultKeySessionStatus])
 	}
 	if aws.ToString(api.lastGet.SessionId) != "session-1" {
 		t.Errorf("get session id = %q", aws.ToString(api.lastGet.SessionId))

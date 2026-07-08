@@ -50,12 +50,13 @@ const (
 	actionStatus      = "status"
 	actionStop        = "stop"
 
-	schemaTypeString     = "STRING"
-	resultKeyStatus      = actionStatus
-	resultKeyBrowserID   = "browser_identifier"
-	resultKeyTitle       = "title"
-	screenshotFormatPNG  = "png"
-	screenshotFormatJPEG = "jpeg"
+	schemaTypeString       = "STRING"
+	resultKeyStatus        = actionStatus
+	resultKeyBrowserID     = "browser_identifier"
+	resultKeySessionStatus = "session_status"
+	resultKeyTitle         = "title"
+	screenshotFormatPNG    = "png"
+	screenshotFormatJPEG   = "jpeg"
 
 	statusSuccess = "success"
 	serviceID     = "bedrock-agentcore"
@@ -506,7 +507,8 @@ func (t *browserTool) startResult(out *bedrockagentcore.StartBrowserSessionOutpu
 
 func (t *browserTool) sessionResult(out *bedrockagentcore.GetBrowserSessionOutput) map[string]any {
 	return map[string]any{
-		resultKeyStatus:            string(out.Status),
+		resultKeyStatus:            statusSuccess,
+		resultKeySessionStatus:     string(out.Status),
 		paramAction:                actionStatus,
 		resultKeyBrowserID:         aws.ToString(out.BrowserIdentifier),
 		paramSessionID:             aws.ToString(out.SessionId),
@@ -732,8 +734,10 @@ func truncateUTF8(s string, maxBytes int) (string, bool) {
 }
 
 type cdpConn struct {
-	conn   *websocket.Conn
-	nextID int64
+	conn      *websocket.Conn
+	nextID    int64
+	events    []cdpMessage
+	responses map[int64]cdpMessage
 }
 
 type cdpMessage struct {
@@ -933,37 +937,86 @@ func (c *cdpConn) call(ctx context.Context, method string, params any, sessionID
 	if err := c.conn.WriteJSON(msg); err != nil {
 		return nil, fmt.Errorf("cdp %s: %w", method, err)
 	}
+	if resp, ok := c.takeResponse(id); ok {
+		return c.callResult(method, resp)
+	}
 	for {
-		if err := c.conn.SetReadDeadline(deadline(ctx)); err != nil {
-			return nil, err
-		}
-		var resp cdpMessage
-		if err := c.conn.ReadJSON(&resp); err != nil {
+		resp, err := c.readMessage(ctx)
+		if err != nil {
 			return nil, fmt.Errorf("cdp %s: %w", method, err)
 		}
 		if resp.ID != id {
+			c.bufferMessage(resp)
 			continue
 		}
-		if resp.Error != nil {
-			return nil, fmt.Errorf("cdp %s: %s", method, resp.Error.Message)
-		}
-		return resp.Result, nil
+		return c.callResult(method, resp)
 	}
 }
 
 func (c *cdpConn) waitEvent(ctx context.Context, sessionID, method string) error {
+	if c.takeEvent(sessionID, method) {
+		return nil
+	}
 	for {
-		if err := c.conn.SetReadDeadline(deadline(ctx)); err != nil {
-			return err
-		}
-		var msg cdpMessage
-		if err := c.conn.ReadJSON(&msg); err != nil {
+		msg, err := c.readMessage(ctx)
+		if err != nil {
 			return fmt.Errorf("wait for %s: %w", method, err)
 		}
 		if msg.Method == method && (sessionID == "" || msg.SessionID == sessionID) {
 			return nil
 		}
+		c.bufferMessage(msg)
 	}
+}
+
+func (c *cdpConn) callResult(method string, resp cdpMessage) (json.RawMessage, error) {
+	if resp.Error != nil {
+		return nil, fmt.Errorf("cdp %s: %s", method, resp.Error.Message)
+	}
+	return resp.Result, nil
+}
+
+func (c *cdpConn) readMessage(ctx context.Context) (cdpMessage, error) {
+	if err := c.conn.SetReadDeadline(deadline(ctx)); err != nil {
+		return cdpMessage{}, err
+	}
+	var msg cdpMessage
+	if err := c.conn.ReadJSON(&msg); err != nil {
+		return cdpMessage{}, err
+	}
+	return msg, nil
+}
+
+func (c *cdpConn) bufferMessage(msg cdpMessage) {
+	if msg.ID != 0 {
+		if c.responses == nil {
+			c.responses = map[int64]cdpMessage{}
+		}
+		c.responses[msg.ID] = msg
+		return
+	}
+	c.events = append(c.events, msg)
+}
+
+func (c *cdpConn) takeResponse(id int64) (cdpMessage, bool) {
+	if c.responses == nil {
+		return cdpMessage{}, false
+	}
+	msg, ok := c.responses[id]
+	if ok {
+		delete(c.responses, id)
+	}
+	return msg, ok
+}
+
+func (c *cdpConn) takeEvent(sessionID, method string) bool {
+	for i, msg := range c.events {
+		if msg.Method == method && (sessionID == "" || msg.SessionID == sessionID) {
+			c.events = append(c.events[:i], c.events[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 func deadline(ctx context.Context) time.Time {
