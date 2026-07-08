@@ -258,6 +258,9 @@ func TestDeclarationAndProcessRequest(t *testing.T) {
 	if got := decl.Parameters.Properties[paramAction].Enum; len(got) != 6 {
 		t.Errorf("action enum = %v", got)
 	}
+	if got := strings.Join(decl.Parameters.Properties[paramFormat].Enum, ","); got != "png,jpeg,jpg" {
+		t.Errorf("format enum = %v", got)
+	}
 
 	req := &model.LLMRequest{}
 	if err := bt.ProcessRequest(newFakeToolCtx(&fakeArtifacts{}), req); err != nil {
@@ -362,6 +365,43 @@ func TestHostPolicy(t *testing.T) {
 	}
 	if err := bt.checkURL("file:///etc/passwd"); err == nil {
 		t.Fatal("expected scheme error")
+	}
+}
+
+func TestHostPolicyRejectsLocalTargetsByDefault(t *testing.T) {
+	t.Parallel()
+	tl, _ := New(Config{API: &fakeAgentCoreAPI{}, Region: "us-east-1", Credentials: testCreds()})
+	bt := tl.(*browserTool)
+
+	for _, rawURL := range []string{
+		"https://localhost",
+		"https://sub.localhost",
+		"https://127.0.0.1",
+		"https://[::1]",
+		"https://169.254.169.254/latest/meta-data",
+		"https://10.0.0.1",
+		"https://[fc00::1]",
+	} {
+		if err := bt.checkURL(rawURL); err == nil {
+			t.Fatalf("expected local target rejection for %s", rawURL)
+		}
+	}
+	if err := bt.checkURL("https://93.184.216.34"); err != nil {
+		t.Fatalf("public IP rejected: %v", err)
+	}
+
+	tl, _ = New(Config{
+		API:          &fakeAgentCoreAPI{},
+		Region:       "us-east-1",
+		Credentials:  testCreds(),
+		AllowedHosts: []string{"localhost", "127.0.0.1"},
+	})
+	bt = tl.(*browserTool)
+	if err := bt.checkURL("https://localhost"); err != nil {
+		t.Fatalf("explicit localhost allow rejected: %v", err)
+	}
+	if err := bt.checkURL("https://127.0.0.1"); err != nil {
+		t.Fatalf("explicit loopback allow rejected: %v", err)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -57,6 +58,7 @@ const (
 	resultKeyTitle         = "title"
 	screenshotFormatPNG    = "png"
 	screenshotFormatJPEG   = "jpeg"
+	screenshotFormatJPG    = "jpg"
 
 	statusSuccess = "success"
 	serviceID     = "bedrock-agentcore"
@@ -223,7 +225,7 @@ func newFunctionDeclaration() *genai.FunctionDeclaration {
 				paramFormat: {
 					Type:        schemaTypeString,
 					Format:      "enum",
-					Enum:        []string{screenshotFormatPNG, screenshotFormatJPEG},
+					Enum:        []string{screenshotFormatPNG, screenshotFormatJPEG, screenshotFormatJPG},
 					Description: "Screenshot format. Defaults to png.",
 				},
 			},
@@ -600,6 +602,9 @@ func (t *browserTool) checkURL(raw string) error {
 	if len(t.allowedHosts) > 0 && !hostMatches(t.allowedHosts, host) {
 		return fmt.Errorf("url: host %q is not allowed", host)
 	}
+	if len(t.allowedHosts) == 0 && requiresExplicitAllow(host) {
+		return fmt.Errorf("url: host %q requires an explicit allowlist entry", host)
+	}
 	return nil
 }
 
@@ -621,10 +626,10 @@ func screenshotFormat(m map[string]any) (string, string, error) {
 	switch strings.ToLower(format) {
 	case "", screenshotFormatPNG:
 		return screenshotFormatPNG, "image/png", nil
-	case screenshotFormatJPEG, "jpg":
+	case screenshotFormatJPEG, screenshotFormatJPG:
 		return screenshotFormatJPEG, "image/jpeg", nil
 	default:
-		return "", "", fmt.Errorf("format must be png or jpeg, got %q", format)
+		return "", "", fmt.Errorf("format must be png, jpeg, or jpg, got %q", format)
 	}
 }
 
@@ -716,6 +721,51 @@ func normalizeHost(host string) string {
 func hostMatches(patterns []string, host string) bool {
 	for _, pattern := range patterns {
 		if host == pattern || strings.HasSuffix(host, "."+pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func requiresExplicitAllow(host string) bool {
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	host, _, _ = strings.Cut(host, "%")
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	if !addr.IsGlobalUnicast() {
+		return true
+	}
+	nonPublicIPPrefixes := [...]netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/8"),
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("100.64.0.0/10"),
+		netip.MustParsePrefix("127.0.0.0/8"),
+		netip.MustParsePrefix("169.254.0.0/16"),
+		netip.MustParsePrefix("172.16.0.0/12"),
+		netip.MustParsePrefix("192.0.0.0/24"),
+		netip.MustParsePrefix("192.0.2.0/24"),
+		netip.MustParsePrefix("192.168.0.0/16"),
+		netip.MustParsePrefix("198.18.0.0/15"),
+		netip.MustParsePrefix("198.51.100.0/24"),
+		netip.MustParsePrefix("203.0.113.0/24"),
+		netip.MustParsePrefix("224.0.0.0/4"),
+		netip.MustParsePrefix("240.0.0.0/4"),
+		netip.MustParsePrefix("::/128"),
+		netip.MustParsePrefix("::1/128"),
+		netip.MustParsePrefix("64:ff9b:1::/48"),
+		netip.MustParsePrefix("100::/64"),
+		netip.MustParsePrefix("2001:db8::/32"),
+		netip.MustParsePrefix("fc00::/7"),
+		netip.MustParsePrefix("fe80::/10"),
+		netip.MustParsePrefix("ff00::/8"),
+	}
+	for _, prefix := range nonPublicIPPrefixes {
+		if prefix.Contains(addr) {
 			return true
 		}
 	}
