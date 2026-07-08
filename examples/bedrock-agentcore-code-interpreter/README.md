@@ -21,6 +21,7 @@ AWS credentials are loaded from the default AWS SDK chain.
 ## Run
 
 ```bash
+export BEDROCK_MODEL_ID=global.amazon.nova-2-lite-v1:0
 export AWS_REGION=eu-west-2
 export AGENTCORE_REGION=eu-west-2
 export AGENTCORE_CODE_INTERPRETER_ID=aws.codeinterpreter.v1
