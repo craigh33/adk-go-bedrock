@@ -2,6 +2,8 @@ package s3artifact
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"strings"
 	"testing"
 	"time"
@@ -158,6 +160,111 @@ func TestPresignLoadErrorsWhenArtifactNotFound(t *testing.T) {
 	})
 	if !isFSNotExist(err) {
 		t.Fatalf("want fs.ErrNotExist, got %v", err)
+	}
+}
+
+func TestPresignLoadNilClientErrors(t *testing.T) {
+	adapter := PresignClientAdapter{Client: nil}
+	_, err := adapter.PresignGetObject(context.Background(), "b", "k", time.Minute)
+	if err == nil {
+		t.Fatal("want error for nil Client")
+	}
+}
+
+func TestPresignLoadMissingSessionIDErrors(t *testing.T) {
+	presigner := &fakePresigner{}
+	svc := newTestService(t, newFakeS3(), Config{Bucket: "b", Presigner: presigner})
+	_, err := svc.PresignLoad(context.Background(), &PresignLoadRequest{
+		AppName: "app", UserID: "u1", FileName: "report.txt",
+		// SessionID deliberately omitted — session-scoped artifact
+	})
+	if err == nil {
+		t.Fatal("want error when SessionID is empty for session-scoped artifact")
+	}
+}
+
+func TestPresignLoadNegativeVersionErrors(t *testing.T) {
+	presigner := &fakePresigner{}
+	svc := newTestService(t, newFakeS3(), Config{Bucket: "b", Presigner: presigner})
+	_, err := svc.PresignLoad(context.Background(), &PresignLoadRequest{
+		AppName: "app", UserID: "u1", SessionID: "s1", FileName: "report.txt",
+		Version: -1,
+	})
+	if err == nil {
+		t.Fatal("want error for negative Version")
+	}
+}
+
+func TestPresignLoadNegativeTTLErrors(t *testing.T) {
+	presigner := &fakePresigner{}
+	svc := newTestService(t, newFakeS3(), Config{Bucket: "b", Presigner: presigner})
+	saveText(t, svc, "report.txt", "x")
+	_, err := svc.PresignLoad(context.Background(), &PresignLoadRequest{
+		AppName: "app", UserID: "u1", SessionID: "s1", FileName: "report.txt",
+		TTL: -time.Minute,
+	})
+	if err == nil {
+		t.Fatal("want error for negative TTL")
+	}
+}
+
+func TestPresignLoadNegativeConfigTTLFallsToDefault(t *testing.T) {
+	fake := newFakeS3()
+	presigner := &fakePresigner{}
+	svc := newTestService(t, fake, Config{Bucket: "b", Presigner: presigner, PresignTTL: -time.Hour})
+	saveText(t, svc, "report.txt", "x")
+
+	if _, err := svc.PresignLoad(context.Background(), &PresignLoadRequest{
+		AppName: "app", UserID: "u1", SessionID: "s1", FileName: "report.txt",
+	}); err != nil {
+		t.Fatalf("PresignLoad: %v", err)
+	}
+	if got := presigner.calls[0].ttl; got != defaultPresignTTL {
+		t.Fatalf("ttl = %v, want %v (should fall back from negative config TTL to default)", got, defaultPresignTTL)
+	}
+}
+
+func TestPresignLoadSpecificVersionMissingErrors(t *testing.T) {
+	fake := newFakeS3()
+	presigner := &fakePresigner{}
+	svc := newTestService(t, fake, Config{Bucket: "b", Presigner: presigner})
+	saveText(t, svc, "report.txt", "v1")
+
+	_, err := svc.PresignLoad(context.Background(), &PresignLoadRequest{
+		AppName: "app", UserID: "u1", SessionID: "s1", FileName: "report.txt",
+		Version: 99,
+	})
+	if !isFSNotExist(err) {
+		t.Fatalf("want fs.ErrNotExist for non-existent version, got %v", err)
+	}
+}
+
+func TestPresignLoadUserScopedKeyUsesUserNamespace(t *testing.T) {
+	fake := newFakeS3()
+	presigner := &fakePresigner{}
+	svc := newTestService(t, fake, Config{Bucket: "b", Presigner: presigner})
+	saveText(t, svc, "user:profile.txt", "data")
+
+	resp, err := svc.PresignLoad(context.Background(), &PresignLoadRequest{
+		AppName: "app", UserID: "u1", SessionID: "s1",
+		FileName: "user:profile.txt",
+	})
+	if err != nil {
+		t.Fatalf("PresignLoad user-scoped: %v", err)
+	}
+	if !strings.Contains(resp.URL, "/user/") {
+		t.Fatalf("URL = %q, want user-scoped key path", resp.URL)
+	}
+}
+
+func TestPresignLoadErrorsWhenArtifactNotFoundExplicitVersion(t *testing.T) {
+	presigner := &fakePresigner{}
+	svc := newTestService(t, newFakeS3(), Config{Bucket: "b", Presigner: presigner})
+	_, err := svc.PresignLoad(context.Background(), &PresignLoadRequest{
+		AppName: "app", UserID: "u1", SessionID: "s1", FileName: "nope.txt", Version: 1,
+	})
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("want fs.ErrNotExist for missing specific version, got %v", err)
 	}
 }
 
