@@ -137,7 +137,7 @@ func (s *Service) PresignLoad(ctx context.Context, req *PresignLoadRequest) (*Pr
 	key := s.objectKey(req.AppName, req.UserID, req.SessionID, req.FileName, version)
 	url, err := s.cfg.Presigner.PresignGetObject(ctx, s.cfg.Bucket, key, ttl)
 	if err != nil {
-		return nil, fmt.Errorf("failed to presign artifact URL: %w", err)
+		return nil, fmt.Errorf("failed to presign s3://%s/%s: %w", s.cfg.Bucket, key, err)
 	}
 
 	return &PresignLoadResponse{
