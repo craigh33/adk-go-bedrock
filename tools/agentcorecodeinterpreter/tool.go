@@ -198,7 +198,7 @@ func (t *codeInterpreterTool) newFunctionDeclaration() *genai.FunctionDeclaratio
 					Type:        schemaTypeString,
 					Format:      "enum",
 					Enum:        []string{"python", "nodejs", "deno"},
-					Description: "Optional runtime override. JavaScript and TypeScript default to deno when omitted.",
+					Description: "Optional runtime override. If omitted, AgentCore Code Interpreter selects a default runtime.",
 				},
 				paramInputArtifacts: {
 					Type:        schemaTypeArray,
@@ -441,9 +441,13 @@ func (t *codeInterpreterTool) invoke(
 			return nil, fmt.Errorf("invoke code interpreter %s: unexpected stream event %T", input.Name, ev)
 		}
 	}
+	streamErr := stream.Err()
 	streamClosed = true
 	if err := stream.Close(); err != nil {
 		return nil, fmt.Errorf("close code interpreter stream %s: %w", input.Name, err)
+	}
+	if streamErr != nil {
+		return nil, fmt.Errorf("invoke code interpreter %s: stream error: %w", input.Name, streamErr)
 	}
 	return results, nil
 }
