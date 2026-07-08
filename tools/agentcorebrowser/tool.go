@@ -349,7 +349,7 @@ func (t *browserTool) stopSession(
 
 func (t *browserTool) cleanupStartedSession(ctx agent.Context, sessionID string, cause error) error {
 	if _, err := t.stopSession(ctx, sessionID); err != nil {
-		return fmt.Errorf("%w; cleanup stop browser session %q: %w", cause, sessionID, err)
+		return errors.Join(cause, fmt.Errorf("cleanup stop browser session %q: %w", sessionID, err))
 	}
 	return cause
 }
@@ -404,6 +404,13 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 	}
 	meta, err := cdp.pageMetadata(ctx)
 	if err != nil {
+		if autoStarted {
+			return nil, t.cleanupStartedSession(ctx, sessionID, err)
+		}
+		return nil, err
+	}
+	if err := t.checkURL(meta.URL); err != nil {
+		err = fmt.Errorf("final url: %w", err)
 		if autoStarted {
 			return nil, t.cleanupStartedSession(ctx, sessionID, err)
 		}

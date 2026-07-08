@@ -213,6 +213,9 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string)) s
 					continue
 				}
 				value := map[string]any{"url": "https://example.com/after", "title": "Example"}
+				if failMethod == "Runtime.evaluate.redirect" {
+					value["url"] = "https://blocked.example.net/after"
+				}
 				if expr, _ := req.Params["expression"].(string); strings.Contains(expr, "document.querySelector") {
 					value["text"] = "hello world"
 				}
@@ -550,6 +553,36 @@ func TestNavigateStopsAutoStartedSessionOnMetadataError(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "SyntaxError: invalid selector") {
 		t.Fatalf("expected metadata exception, got %v", err)
+	}
+	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
+		t.Fatalf("auto-started session was not stopped: %#v", api.lastStop)
+	}
+}
+
+func TestNavigateRejectsDisallowedFinalURL(t *testing.T) {
+	t.Parallel()
+	wsURL := fakeCDPServer(t, "Runtime.evaluate.redirect")
+	api := &fakeAgentCoreAPI{
+		startOut: &bedrockagentcore.StartBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	tl, _ := New(Config{
+		API:          api,
+		Region:       "us-east-1",
+		Credentials:  testCreds(),
+		AllowedHosts: []string{"example.com"},
+	})
+	bt := tl.(*browserTool)
+
+	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction: actionNavigate,
+		paramURL:    "https://example.com",
+	})
+	if err == nil || !strings.Contains(err.Error(), "final url") {
+		t.Fatalf("expected final URL policy error, got %v", err)
 	}
 	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
 		t.Fatalf("auto-started session was not stopped: %#v", api.lastStop)
