@@ -35,7 +35,7 @@ The tool is named `agentcore_browser`. Calls use an `action` value:
 
 The tool uses AgentCore session APIs plus the automation stream. It only exposes the actions above; it does not expose raw CDP, mouse, keyboard, or arbitrary browser protocol access.
 
-By default sessions use `aws.browser.v1` and a 900 second timeout. `AllowedHosts` and `DeniedHosts` apply to `navigate`; deny rules win. An empty `AllowedHosts` list permits public hosts except entries matched by `DeniedHosts`, while localhost and non-public IP literals require an explicit allowlist entry.
+By default sessions use `aws.browser.v1` and a 900 second timeout. `AllowedHosts` and `DeniedHosts` apply to requested and final URLs during `navigate`, and to the current URL during `extract_text` and `screenshot`; deny rules win. An empty `AllowedHosts` list permits public hosts except entries matched by `DeniedHosts`, while localhost and non-public IP literals require an explicit allowlist entry.
 
 ## Required IAM Actions
 

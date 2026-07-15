@@ -608,6 +608,45 @@ func TestNavigateStopsAutoStartedSessionOnMetadataError(t *testing.T) {
 	}
 }
 
+func TestNavigateAppliesTimeoutToMetadata(t *testing.T) {
+	t.Parallel()
+	var metadataCalls atomic.Int32
+	wsURL := fakeCDPServerWithHook(t, "", func(method string) {
+		if method == "Runtime.evaluate" {
+			metadataCalls.Add(1)
+			time.Sleep(500 * time.Millisecond)
+		}
+	})
+	api := &fakeAgentCoreAPI{
+		startOut: &bedrockagentcore.StartBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	tl, _ := New(Config{
+		API:               api,
+		Region:            "us-east-1",
+		Credentials:       testCreds(),
+		NavigationTimeout: 100 * time.Millisecond,
+	})
+	bt := tl.(*browserTool)
+
+	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction: actionNavigate,
+		paramURL:    "https://example.com",
+	})
+	if err == nil || !strings.Contains(err.Error(), "i/o timeout") {
+		t.Fatalf("expected metadata timeout, got %v", err)
+	}
+	if metadataCalls.Load() != 1 {
+		t.Fatalf("metadata calls = %d", metadataCalls.Load())
+	}
+	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
+		t.Fatalf("auto-started session was not stopped: %#v", api.lastStop)
+	}
+}
+
 func TestNavigateRejectsDisallowedFinalURL(t *testing.T) {
 	t.Parallel()
 	wsURL := fakeCDPServer(t, "Runtime.evaluate.redirect")

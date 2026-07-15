@@ -402,7 +402,7 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 		}
 		return nil, err
 	}
-	meta, err := cdp.pageMetadata(ctx)
+	meta, err := cdp.pageMetadata(navCtx)
 	if err != nil {
 		if autoStarted {
 			return nil, t.cleanupStartedSession(ctx, sessionID, err)
