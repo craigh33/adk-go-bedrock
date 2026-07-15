@@ -1337,6 +1337,64 @@ func TestRequiredStringArgumentsRejectInvalidTypes(t *testing.T) {
 	}
 }
 
+func TestModelFacingStringArgumentsRejectInvalidTypes(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		key  string
+		args map[string]any
+	}{
+		{
+			name: "action",
+			key:  paramAction,
+			args: map[string]any{paramAction: true},
+		},
+		{
+			name: "extract selector",
+			key:  paramSelector,
+			args: map[string]any{
+				paramAction:    actionExtractText,
+				paramSessionID: "session-1",
+				paramSelector:  true,
+			},
+		},
+		{
+			name: "screenshot file name",
+			key:  paramFileName,
+			args: map[string]any{
+				paramAction:    actionScreenshot,
+				paramSessionID: "session-1",
+				paramFileName:  true,
+			},
+		},
+		{
+			name: "screenshot format",
+			key:  paramFormat,
+			args: map[string]any{
+				paramAction:    actionScreenshot,
+				paramSessionID: "session-1",
+				paramFormat:    true,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			api := &fakeAgentCoreAPI{}
+			tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), tc.args)
+			if err == nil || !strings.Contains(err.Error(), tc.key+" must be a string") {
+				t.Fatalf("expected argument type error, got %v", err)
+			}
+			if api.lastStart != nil || api.lastGet != nil || api.lastStop != nil {
+				t.Fatal("AgentCore API called before argument validation")
+			}
+		})
+	}
+}
+
 func TestNavigateWaitsForSelector(t *testing.T) {
 	t.Parallel()
 	evaluations := make(chan map[string]any, 4)
@@ -2117,7 +2175,7 @@ func TestScreenshotSizeLimit(t *testing.T) {
 
 func TestScreenshotInfersFormatAndRejectsArtifactPaths(t *testing.T) {
 	t.Parallel()
-	format, mimeType, err := screenshotFormat(map[string]any{paramFileName: "page.JPG"})
+	format, mimeType, err := screenshotFormat("", "page.JPG")
 	if err != nil || format != screenshotFormatJPEG || mimeType != mimeTypeJPEG {
 		t.Fatalf("inferred screenshot format = %q %q, err %v", format, mimeType, err)
 	}

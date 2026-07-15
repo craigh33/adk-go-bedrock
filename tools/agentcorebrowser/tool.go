@@ -523,8 +523,11 @@ func (t *browserTool) Run(ctx agent.Context, args any) (map[string]any, error) {
 	if !ok {
 		return nil, fmt.Errorf("unexpected args type: %T", args)
 	}
-	action, _ := m[paramAction].(string)
-	switch strings.TrimSpace(action) {
+	action, err := requiredString(m, paramAction)
+	if err != nil {
+		return nil, err
+	}
+	switch action {
 	case actionStart:
 		return t.runStart(ctx)
 	case actionNavigate:
@@ -537,8 +540,6 @@ func (t *browserTool) Run(ctx agent.Context, args any) (map[string]any, error) {
 		return t.runStatus(ctx, m)
 	case actionStop:
 		return t.runStop(ctx, m)
-	case "":
-		return nil, errors.New("action is required")
 	default:
 		return nil, fmt.Errorf("unsupported action %q", action)
 	}
@@ -711,7 +712,10 @@ func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[s
 	if err != nil {
 		return nil, err
 	}
-	selector := optionalString(m, paramSelector)
+	selector, err := optionalStringArg(m, paramSelector)
+	if err != nil {
+		return nil, err
+	}
 	waitForSelector, err := optionalStringArg(m, paramWaitForSelector)
 	if err != nil {
 		return nil, err
@@ -767,11 +771,18 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 	if err != nil {
 		return nil, err
 	}
-	fileName := optionalString(m, paramFileName)
+	fileName, err := optionalStringArg(m, paramFileName)
+	if err != nil {
+		return nil, err
+	}
 	if strings.ContainsAny(fileName, `/\`) {
 		return nil, errors.New("file_name cannot contain path separators")
 	}
-	format, mimeType, err := screenshotFormat(m)
+	requestedFormat, err := optionalStringArg(m, paramFormat)
+	if err != nil {
+		return nil, err
+	}
+	format, mimeType, err := screenshotFormat(requestedFormat, fileName)
 	if err != nil {
 		return nil, err
 	}
@@ -1092,11 +1103,6 @@ func requiredString(m map[string]any, key string) (string, error) {
 	return value, nil
 }
 
-func optionalString(m map[string]any, key string) string {
-	value, _ := m[key].(string)
-	return strings.TrimSpace(value)
-}
-
 func optionalStringArg(m map[string]any, key string) (string, error) {
 	value, ok := m[key]
 	if !ok {
@@ -1191,10 +1197,9 @@ func integralInt64(value float64) (int64, bool) {
 	return int64(value), true
 }
 
-func screenshotFormat(m map[string]any) (string, string, error) {
-	format := optionalString(m, paramFormat)
+func screenshotFormat(format, fileName string) (string, string, error) {
 	if format == "" {
-		fileName := strings.ToLower(optionalString(m, paramFileName))
+		fileName = strings.ToLower(fileName)
 		switch {
 		case strings.HasSuffix(fileName, ".jpg"), strings.HasSuffix(fileName, ".jpeg"):
 			format = screenshotFormatJPEG
