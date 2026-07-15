@@ -1079,7 +1079,10 @@ func automationReadLimit(maxScreenshot int64, maxText int) (int64, error) {
 }
 
 func requiredString(m map[string]any, key string) (string, error) {
-	value := optionalString(m, key)
+	value, err := optionalStringArg(m, key)
+	if err != nil {
+		return "", err
+	}
 	if value == "" {
 		return "", fmt.Errorf("%s is required", key)
 	}
