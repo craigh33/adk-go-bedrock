@@ -1273,7 +1273,7 @@ func TestNavigateRejectsInvalidWaitOverrideBeforeStartingSession(t *testing.T) {
 	}
 }
 
-func TestSelectorAndWaitArgumentsRejectInvalidTypes(t *testing.T) {
+func TestNavigateOptionalStringArgumentsRejectInvalidTypes(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name string
@@ -1281,6 +1281,7 @@ func TestSelectorAndWaitArgumentsRejectInvalidTypes(t *testing.T) {
 	}{
 		{name: "wait_until", key: paramWaitUntil},
 		{name: "wait_for_selector", key: paramWaitForSelector},
+		{name: "session_id", key: paramSessionID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

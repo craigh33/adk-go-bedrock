@@ -612,6 +612,10 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 	if err != nil {
 		return nil, err
 	}
+	sessionID, err := optionalStringArg(m, paramSessionID)
+	if err != nil {
+		return nil, err
+	}
 	if err := t.checkURL(ctx, rawURL, URLStageNavigate); err != nil {
 		return nil, err
 	}
@@ -633,7 +637,6 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 	navCtx, cancel := context.WithTimeout(ctx, t.navigationTimeout)
 	defer cancel()
 
-	sessionID := optionalString(m, paramSessionID)
 	autoStarted := false
 	var streams *types.BrowserSessionStream
 	if sessionID == "" {
@@ -2072,6 +2075,7 @@ func (c *cdpConn) continuePausedRequest(
 	}
 	if (request.PostData == nil) != (original.PostData == nil) ||
 		!bytes.Equal(request.PostData, original.PostData) {
+		// CDP defines Fetch.continueRequest.postData as base64 when passed over JSON.
 		params["postData"] = base64.StdEncoding.EncodeToString(request.PostData)
 	}
 	_, err := c.call(ctx, "Fetch.continueRequest", params, sessionID)
