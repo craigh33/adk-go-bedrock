@@ -214,6 +214,21 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string)) s
 						"request":      map[string]any{"url": requestURL},
 					},
 				})
+				if failMethod == "Page.navigate.subresource" || failMethod == "Page.navigate.dataSubresource" {
+					subresourceURL := "http://169.254.169.254/latest/meta-data"
+					if failMethod == "Page.navigate.dataSubresource" {
+						subresourceURL = "data:text/plain,hello"
+					}
+					_ = conn.WriteJSON(map[string]any{
+						"method":    "Fetch.requestPaused",
+						"sessionId": "session-1",
+						"params": map[string]any{
+							"requestId":    "request-2",
+							"resourceType": "Image",
+							"request":      map[string]any{"url": subresourceURL},
+						},
+					})
+				}
 				if failMethod == "Page.navigate.errorText" {
 					_ = conn.WriteJSON(map[string]any{
 						"id": req.ID, "result": map[string]any{"errorText": "net::ERR_NAME_NOT_RESOLVED"},
@@ -604,7 +619,7 @@ func TestNavigateBlocksDeniedRedirectBeforeRequest(t *testing.T) {
 		paramAction: actionNavigate,
 		paramURL:    "https://example.com",
 	})
-	if err == nil || !strings.Contains(err.Error(), "navigation url") {
+	if err == nil || !strings.Contains(err.Error(), "browser request url") {
 		t.Fatalf("expected redirect policy error, got %v", err)
 	}
 	if failCount.Load() != 1 {
@@ -612,6 +627,47 @@ func TestNavigateBlocksDeniedRedirectBeforeRequest(t *testing.T) {
 	}
 	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
 		t.Fatalf("auto-started session was not stopped: %#v", api.lastStop)
+	}
+}
+
+func TestNavigateAppliesHostPolicyToSubresources(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		serverMode string
+		wantError  bool
+	}{
+		{name: "blocks HTTP subresource", serverMode: "Page.navigate.subresource", wantError: true},
+		{name: "allows browser-local scheme", serverMode: "Page.navigate.dataSubresource"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			wsURL := fakeCDPServer(t, tc.serverMode)
+			api := &fakeAgentCoreAPI{
+				startOut: &bedrockagentcore.StartBrowserSessionOutput{
+					BrowserIdentifier: aws.String("aws.browser.v1"),
+					SessionId:         aws.String("session-1"),
+					Streams:           browserStreams(wsURL),
+				},
+			}
+			tl, _ := New(Config{
+				API:          api,
+				Region:       "us-east-1",
+				Credentials:  testCreds(),
+				AllowedHosts: []string{"example.com"},
+			})
+
+			_, err := tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+				paramAction: actionNavigate,
+				paramURL:    "https://example.com",
+			})
+			if tc.wantError && (err == nil || !strings.Contains(err.Error(), "169.254.169.254")) {
+				t.Fatalf("expected subresource policy error, got %v", err)
+			}
+			if !tc.wantError && err != nil {
+				t.Fatalf("navigate: %v", err)
+			}
+		})
 	}
 }
 
@@ -1014,6 +1070,9 @@ func TestScreenshotInfersFormatAndRejectsArtifactPaths(t *testing.T) {
 	if err != nil || format != screenshotFormatJPEG || mimeType != mimeTypeJPEG {
 		t.Fatalf("inferred screenshot format = %q %q, err %v", format, mimeType, err)
 	}
+	if err := validateScreenshotFileName("page", screenshotFormatPNG); err != nil {
+		t.Fatalf("extensionless artifact name: %v", err)
+	}
 	api := &fakeAgentCoreAPI{}
 	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
 	bt := tl.(*browserTool)
@@ -1036,6 +1095,14 @@ func TestScreenshotInfersFormatAndRejectsArtifactPaths(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("expected artifact extension error, got %v", err)
+	}
+	_, err = bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction:    actionScreenshot,
+		paramSessionID: "session-1",
+		paramFileName:  "page.gif",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported extension") {
+		t.Fatalf("expected unsupported artifact extension error, got %v", err)
 	}
 }
 

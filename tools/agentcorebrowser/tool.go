@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -63,9 +64,9 @@ const (
 	screenshotFormatJPEG   = "jpeg"
 	screenshotFormatJPG    = "jpg"
 	mimeTypeJPEG           = "image/jpeg"
-	cdpResourceDocument    = "Document"
 	cdpKeyMethod           = "method"
 	cdpKeyRequestID        = "requestId"
+	cdpEventRequestPaused  = "Fetch.requestPaused"
 
 	statusSuccess = "success"
 	serviceID     = "bedrock-agentcore"
@@ -465,7 +466,7 @@ func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[s
 		return nil, err
 	}
 	defer cdp.close()
-	if err := cdp.enableDocumentPolicy(actionCtx, t.checkURL); err != nil {
+	if err := cdp.enableRequestPolicy(actionCtx, t.checkURL); err != nil {
 		return nil, err
 	}
 
@@ -507,11 +508,8 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 	if fileName == "" {
 		fileName = "browser_screenshot." + format
 	}
-	lowerFileName := strings.ToLower(fileName)
-	if (format == screenshotFormatPNG &&
-		(strings.HasSuffix(lowerFileName, ".jpg") || strings.HasSuffix(lowerFileName, ".jpeg"))) ||
-		(format == screenshotFormatJPEG && strings.HasSuffix(lowerFileName, ".png")) {
-		return nil, errors.New("file_name extension does not match format")
+	if err := validateScreenshotFileName(fileName, format); err != nil {
+		return nil, err
 	}
 	artifacts := ctx.Artifacts()
 	if artifacts == nil {
@@ -528,7 +526,7 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 		return nil, err
 	}
 	defer cdp.close()
-	if err := cdp.enableDocumentPolicy(actionCtx, t.checkURL); err != nil {
+	if err := cdp.enableRequestPolicy(actionCtx, t.checkURL); err != nil {
 		return nil, err
 	}
 
@@ -737,6 +735,25 @@ func screenshotFormat(m map[string]any) (string, string, error) {
 	}
 }
 
+func validateScreenshotFileName(fileName, format string) error {
+	extension := strings.ToLower(path.Ext(fileName))
+	switch extension {
+	case "":
+		return nil
+	case ".png":
+		if format == screenshotFormatPNG {
+			return nil
+		}
+	case ".jpg", ".jpeg":
+		if format == screenshotFormatJPEG {
+			return nil
+		}
+	default:
+		return fmt.Errorf("file_name has unsupported extension %q", extension)
+	}
+	return errors.New("file_name extension does not match format")
+}
+
 func automationEndpoint(streams *types.BrowserSessionStream) string {
 	if streams == nil || streams.AutomationStream == nil {
 		return ""
@@ -912,12 +929,12 @@ func truncateUTF8(s string, maxBytes int) (string, bool) {
 }
 
 type cdpConn struct {
-	conn           *websocket.Conn
-	nextID         int64
-	pageSessionID  string
-	events         []cdpMessage
-	responses      map[int64]cdpMessage
-	documentPolicy func(string) error
+	conn          *websocket.Conn
+	nextID        int64
+	pageSessionID string
+	events        []cdpMessage
+	responses     map[int64]cdpMessage
+	requestPolicy func(string) error
 }
 
 type cdpMessage struct {
@@ -961,9 +978,8 @@ type textResult struct {
 }
 
 type pausedRequest struct {
-	RequestID    string `json:"requestId"`
-	ResourceType string `json:"resourceType"`
-	Request      struct {
+	RequestID string `json:"requestId"`
+	Request   struct {
 		URL string `json:"url"`
 	} `json:"request"`
 }
@@ -977,7 +993,7 @@ func (c *cdpConn) navigate(ctx context.Context, rawURL string, policy func(strin
 	if err != nil {
 		return err
 	}
-	if err := c.enableDocumentPolicy(ctx, policy); err != nil {
+	if err := c.enableRequestPolicy(ctx, policy); err != nil {
 		return err
 	}
 	if _, err := c.call(ctx, "Page.enable", nil, sessionID); err != nil {
@@ -1003,21 +1019,20 @@ func (c *cdpConn) navigate(ctx context.Context, rawURL string, policy func(strin
 	return c.waitEvent(ctx, sessionID, "Page.loadEventFired")
 }
 
-func (c *cdpConn) enableDocumentPolicy(ctx context.Context, policy func(string) error) error {
+func (c *cdpConn) enableRequestPolicy(ctx context.Context, policy func(string) error) error {
 	sessionID, err := c.pageSession(ctx)
 	if err != nil {
 		return err
 	}
-	c.documentPolicy = policy
+	c.requestPolicy = policy
 	_, err = c.call(ctx, "Fetch.enable", map[string]any{
 		"patterns": []map[string]any{{
 			"urlPattern":   "*",
-			"resourceType": cdpResourceDocument,
 			"requestStage": "Request",
 		}},
 	}, sessionID)
 	if err != nil {
-		c.documentPolicy = nil
+		c.requestPolicy = nil
 	}
 	return err
 }
@@ -1254,38 +1269,40 @@ func (c *cdpConn) waitEvent(ctx context.Context, sessionID, method string) error
 }
 
 func (c *cdpConn) handlePausedRequest(ctx context.Context, msg cdpMessage) (bool, error) {
-	if msg.Method != "Fetch.requestPaused" || c.documentPolicy == nil {
+	if msg.Method != cdpEventRequestPaused || c.requestPolicy == nil {
 		return false, nil
 	}
 	var paused pausedRequest
 	if err := json.Unmarshal(msg.Params, &paused); err != nil {
-		return true, fmt.Errorf("parse paused document request: %w", err)
+		return true, fmt.Errorf("parse paused browser request: %w", err)
 	}
 	sessionID := msg.SessionID
 	if sessionID == "" {
 		sessionID = c.pageSessionID
 	}
 	if paused.RequestID == "" {
-		return true, errors.New("paused document request has no requestId")
+		return true, errors.New("paused browser request has no requestId")
 	}
-	if paused.ResourceType != cdpResourceDocument {
+	requestURL, err := url.Parse(paused.Request.URL)
+	if err == nil && requestURL.Scheme != "" && !strings.EqualFold(requestURL.Scheme, "http") &&
+		!strings.EqualFold(requestURL.Scheme, "https") {
 		_, err := c.call(ctx, "Fetch.continueRequest", map[string]any{
 			cdpKeyRequestID: paused.RequestID,
 		}, sessionID)
 		return true, err
 	}
-	if err := c.documentPolicy(paused.Request.URL); err != nil {
+	if err := c.requestPolicy(paused.Request.URL); err != nil {
 		_, failErr := c.call(ctx, "Fetch.failRequest", map[string]any{
 			cdpKeyRequestID: paused.RequestID,
 			"errorReason":   "BlockedByClient",
 		}, sessionID)
-		policyErr := fmt.Errorf("navigation url: %w", err)
+		policyErr := fmt.Errorf("browser request url: %w", err)
 		if failErr != nil {
 			return true, errors.Join(policyErr, failErr)
 		}
 		return true, policyErr
 	}
-	_, err := c.call(ctx, "Fetch.continueRequest", map[string]any{
+	_, err = c.call(ctx, "Fetch.continueRequest", map[string]any{
 		cdpKeyRequestID: paused.RequestID,
 	}, sessionID)
 	return true, err
