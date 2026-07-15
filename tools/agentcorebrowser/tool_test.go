@@ -33,6 +33,9 @@ type fakeAgentCoreAPI struct {
 	lastStart *bedrockagentcore.StartBrowserSessionInput
 	lastGet   *bedrockagentcore.GetBrowserSessionInput
 	lastStop  *bedrockagentcore.StopBrowserSessionInput
+
+	stopContextErr error
+	stopDeadline   time.Time
 }
 
 func (f *fakeAgentCoreAPI) StartBrowserSession(
@@ -60,11 +63,13 @@ func (f *fakeAgentCoreAPI) GetBrowserSession(
 }
 
 func (f *fakeAgentCoreAPI) StopBrowserSession(
-	_ context.Context,
+	ctx context.Context,
 	in *bedrockagentcore.StopBrowserSessionInput,
 	_ ...func(*bedrockagentcore.Options),
 ) (*bedrockagentcore.StopBrowserSessionOutput, error) {
 	f.lastStop = in
+	f.stopContextErr = ctx.Err()
+	f.stopDeadline, _ = ctx.Deadline()
 	if f.stopErr != nil {
 		return nil, f.stopErr
 	}
@@ -605,6 +610,37 @@ func TestNavigateStopsAutoStartedSessionOnMetadataError(t *testing.T) {
 	}
 	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
 		t.Fatalf("auto-started session was not stopped: %#v", api.lastStop)
+	}
+}
+
+func TestCleanupStartedSessionIgnoresCallerCancellation(t *testing.T) {
+	t.Parallel()
+	api := &fakeAgentCoreAPI{}
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	bt := tl.(*browserTool)
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+	ctx := &fakeToolContext{
+		StrictContextMock: agent.StrictContextMock{Ctx: parent},
+		functionCallID:    "tooluse_cleanup",
+	}
+	cause := errors.New("navigation failed")
+
+	err := bt.cleanupStartedSession(ctx, "session-1", cause)
+	if !errors.Is(err, cause) {
+		t.Fatalf("cleanup error = %v", err)
+	}
+	if api.stopContextErr != nil {
+		t.Fatalf("cleanup inherited caller cancellation: %v", api.stopContextErr)
+	}
+	if api.stopDeadline.IsZero() {
+		t.Fatal("cleanup context has no deadline")
+	}
+	if remaining := time.Until(api.stopDeadline); remaining <= 0 || remaining > defaultCleanupTimeout {
+		t.Fatalf("cleanup deadline remaining = %v", remaining)
+	}
+	if aws.ToString(api.lastStop.SessionId) != "session-1" {
+		t.Fatalf("stop session id = %q", aws.ToString(api.lastStop.SessionId))
 	}
 }
 

@@ -33,6 +33,7 @@ const (
 	defaultBrowserIdentifier = "aws.browser.v1"
 	defaultSessionTimeout    = int32(900)
 	defaultNavigationTimeout = 30 * time.Second
+	defaultCleanupTimeout    = 10 * time.Second
 	defaultMaxTextBytes      = 64 << 10
 	minClientTokenLen        = 33
 	maxClientTokenLen        = 256
@@ -323,7 +324,7 @@ func (t *browserTool) runStop(ctx agent.Context, m map[string]any) (map[string]a
 	if err != nil {
 		return nil, err
 	}
-	out, err := t.stopSession(ctx, sessionID)
+	out, err := t.stopSession(ctx, sessionID, ctx.FunctionCallID())
 	if err != nil {
 		return nil, fmt.Errorf("stop browser session %q: %w", sessionID, err)
 	}
@@ -337,18 +338,21 @@ func (t *browserTool) runStop(ctx agent.Context, m map[string]any) (map[string]a
 }
 
 func (t *browserTool) stopSession(
-	ctx agent.Context,
+	ctx context.Context,
 	sessionID string,
+	functionCallID string,
 ) (*bedrockagentcore.StopBrowserSessionOutput, error) {
 	return t.api.StopBrowserSession(ctx, &bedrockagentcore.StopBrowserSessionInput{
 		BrowserIdentifier: aws.String(t.browserIdentifier),
 		SessionId:         aws.String(sessionID),
-		ClientToken:       aws.String(clientToken(ctx.FunctionCallID())),
+		ClientToken:       aws.String(clientToken(functionCallID)),
 	})
 }
 
 func (t *browserTool) cleanupStartedSession(ctx agent.Context, sessionID string, cause error) error {
-	if _, err := t.stopSession(ctx, sessionID); err != nil {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaultCleanupTimeout)
+	defer cancel()
+	if _, err := t.stopSession(cleanupCtx, sessionID, ctx.FunctionCallID()); err != nil {
 		return errors.Join(cause, fmt.Errorf("cleanup stop browser session %q: %w", sessionID, err))
 	}
 	return cause
