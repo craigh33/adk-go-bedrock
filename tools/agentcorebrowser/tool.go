@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -32,6 +33,7 @@ const (
 
 	defaultBrowserIdentifier = "aws.browser.v1"
 	defaultSessionTimeout    = int32(900)
+	maxSessionTimeout        = int32(28_800)
 	defaultNavigationTimeout = 30 * time.Second
 	defaultCleanupTimeout    = 10 * time.Second
 	defaultMaxTextBytes      = 64 << 10
@@ -60,6 +62,10 @@ const (
 	screenshotFormatPNG    = "png"
 	screenshotFormatJPEG   = "jpeg"
 	screenshotFormatJPG    = "jpg"
+	mimeTypeJPEG           = "image/jpeg"
+	cdpResourceDocument    = "Document"
+	cdpKeyMethod           = "method"
+	cdpKeyRequestID        = "requestId"
 
 	statusSuccess = "success"
 	serviceID     = "bedrock-agentcore"
@@ -140,6 +146,9 @@ func New(cfg Config) (tool.Tool, error) {
 	if sessionTimeout < 0 {
 		return nil, errors.New("agentcorebrowser: SessionTimeoutSeconds cannot be negative")
 	}
+	if sessionTimeout > maxSessionTimeout {
+		return nil, fmt.Errorf("agentcorebrowser: SessionTimeoutSeconds cannot exceed %d", maxSessionTimeout)
+	}
 	if (cfg.ViewportWidth == 0) != (cfg.ViewportHeight == 0) {
 		return nil, errors.New("agentcorebrowser: ViewportWidth and ViewportHeight must be set together")
 	}
@@ -160,6 +169,14 @@ func New(cfg Config) (tool.Tool, error) {
 	if maxText < 0 {
 		return nil, errors.New("agentcorebrowser: MaxTextBytes cannot be negative")
 	}
+	allowedHosts, err := normalizeHosts("AllowedHosts", cfg.AllowedHosts)
+	if err != nil {
+		return nil, err
+	}
+	deniedHosts, err := normalizeHosts("DeniedHosts", cfg.DeniedHosts)
+	if err != nil {
+		return nil, err
+	}
 
 	return &browserTool{
 		api:                   cfg.API,
@@ -169,8 +186,8 @@ func New(cfg Config) (tool.Tool, error) {
 		sessionTimeoutSeconds: sessionTimeout,
 		viewportWidth:         cfg.ViewportWidth,
 		viewportHeight:        cfg.ViewportHeight,
-		allowedHosts:          normalizeHosts(cfg.AllowedHosts),
-		deniedHosts:           normalizeHosts(cfg.DeniedHosts),
+		allowedHosts:          allowedHosts,
+		deniedHosts:           deniedHosts,
 		navigationTimeout:     navTimeout,
 		maxTextBytes:          maxText,
 		decl:                  newFunctionDeclaration(),
@@ -297,7 +314,7 @@ func (t *browserTool) Run(ctx agent.Context, args any) (map[string]any, error) {
 }
 
 func (t *browserTool) runStart(ctx agent.Context) (map[string]any, error) {
-	out, err := t.startSession(ctx)
+	out, err := t.startSession(ctx, ctx.FunctionCallID())
 	if err != nil {
 		return nil, err
 	}
@@ -366,12 +383,14 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 	if err := t.checkURL(rawURL); err != nil {
 		return nil, err
 	}
+	navCtx, cancel := context.WithTimeout(ctx, t.navigationTimeout)
+	defer cancel()
 
 	sessionID := optionalString(m, paramSessionID)
 	autoStarted := false
 	var streams *types.BrowserSessionStream
 	if sessionID == "" {
-		started, err := t.startSession(ctx)
+		started, err := t.startSession(navCtx, ctx.FunctionCallID())
 		if err != nil {
 			return nil, err
 		}
@@ -379,7 +398,7 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 		sessionID = aws.ToString(started.SessionId)
 		streams = started.Streams
 	} else {
-		current, err := t.api.GetBrowserSession(ctx, &bedrockagentcore.GetBrowserSessionInput{
+		current, err := t.api.GetBrowserSession(navCtx, &bedrockagentcore.GetBrowserSessionInput{
 			BrowserIdentifier: aws.String(t.browserIdentifier),
 			SessionId:         aws.String(sessionID),
 		})
@@ -389,7 +408,7 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 		streams = current.Streams
 	}
 
-	cdp, err := t.openCDP(ctx, automationEndpoint(streams))
+	cdp, err := t.openCDP(navCtx, automationEndpoint(streams))
 	if err != nil {
 		if autoStarted {
 			return nil, t.cleanupStartedSession(ctx, sessionID, err)
@@ -398,9 +417,7 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 	}
 	defer cdp.close()
 
-	navCtx, cancel := context.WithTimeout(ctx, t.navigationTimeout)
-	defer cancel()
-	if err := cdp.navigate(navCtx, rawURL); err != nil {
+	if err := cdp.navigate(navCtx, rawURL, t.checkURL); err != nil {
 		if autoStarted {
 			return nil, t.cleanupStartedSession(ctx, sessionID, err)
 		}
@@ -437,24 +454,31 @@ func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[s
 		return nil, err
 	}
 	selector := optionalString(m, paramSelector)
-	streams, err := t.sessionStreams(ctx, sessionID)
+	actionCtx, cancel := context.WithTimeout(ctx, t.navigationTimeout)
+	defer cancel()
+	streams, err := t.sessionStreams(actionCtx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	cdp, err := t.openCDP(ctx, automationEndpoint(streams))
+	cdp, err := t.openCDP(actionCtx, automationEndpoint(streams))
 	if err != nil {
 		return nil, err
 	}
 	defer cdp.close()
+	if err := cdp.enableDocumentPolicy(actionCtx, t.checkURL); err != nil {
+		return nil, err
+	}
 
-	result, err := cdp.extractText(ctx, selector)
+	result, err := cdp.extractText(actionCtx, selector, t.maxTextBytes)
 	if err != nil {
 		return nil, err
 	}
 	if err := t.checkURL(result.URL); err != nil {
 		return nil, fmt.Errorf("current url: %w", err)
 	}
-	result.Text, result.Truncated = truncateUTF8(result.Text, t.maxTextBytes)
+	text, truncated := truncateUTF8(result.Text, t.maxTextBytes)
+	result.Text = text
+	result.Truncated = result.Truncated || truncated
 	return map[string]any{
 		resultKeyStatus:    statusSuccess,
 		paramAction:        actionExtractText,
@@ -472,40 +496,61 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 	if err != nil {
 		return nil, err
 	}
+	fileName := optionalString(m, paramFileName)
+	if strings.ContainsAny(fileName, `/\`) {
+		return nil, errors.New("file_name cannot contain path separators")
+	}
 	format, mimeType, err := screenshotFormat(m)
 	if err != nil {
 		return nil, err
 	}
-	fileName := optionalString(m, paramFileName)
 	if fileName == "" {
 		fileName = "browser_screenshot." + format
 	}
-	streams, err := t.sessionStreams(ctx, sessionID)
+	lowerFileName := strings.ToLower(fileName)
+	if (format == screenshotFormatPNG &&
+		(strings.HasSuffix(lowerFileName, ".jpg") || strings.HasSuffix(lowerFileName, ".jpeg"))) ||
+		(format == screenshotFormatJPEG && strings.HasSuffix(lowerFileName, ".png")) {
+		return nil, errors.New("file_name extension does not match format")
+	}
+	artifacts := ctx.Artifacts()
+	if artifacts == nil {
+		return nil, errors.New("agentcorebrowser: artifact service is unavailable")
+	}
+	actionCtx, cancel := context.WithTimeout(ctx, t.navigationTimeout)
+	defer cancel()
+	streams, err := t.sessionStreams(actionCtx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	cdp, err := t.openCDP(ctx, automationEndpoint(streams))
+	cdp, err := t.openCDP(actionCtx, automationEndpoint(streams))
 	if err != nil {
 		return nil, err
 	}
 	defer cdp.close()
+	if err := cdp.enableDocumentPolicy(actionCtx, t.checkURL); err != nil {
+		return nil, err
+	}
 
-	meta, err := cdp.pageMetadata(ctx)
+	meta, err := cdp.pageMetadata(actionCtx)
 	if err != nil {
 		return nil, err
 	}
 	if err := t.checkURL(meta.URL); err != nil {
 		return nil, fmt.Errorf("current url: %w", err)
 	}
-	data, err := cdp.screenshot(ctx, format)
+	data, err := cdp.screenshot(actionCtx, format)
 	if err != nil {
 		return nil, err
 	}
-	artifacts := ctx.Artifacts()
-	if artifacts == nil {
-		return nil, errors.New("agentcorebrowser: artifact service is unavailable")
+	meta, err = cdp.pageMetadata(actionCtx)
+	if err != nil {
+		return nil, err
 	}
-	saveResp, err := artifacts.Save(ctx, fileName, genai.NewPartFromBytes(data, mimeType))
+	if err := t.checkURL(meta.URL); err != nil {
+		return nil, fmt.Errorf("current url after capture: %w", err)
+	}
+	saveResp, err := artifacts.Save(actionCtx, fileName, genai.NewPartFromBytes(data, mimeType))
 	if err != nil {
 		return nil, fmt.Errorf("save artifact %q: %w", fileName, err)
 	}
@@ -517,11 +562,16 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 		paramFileName:      fileName,
 		"version":          saveResp.Version,
 		"mime_type":        mimeType,
+		paramURL:           meta.URL,
+		resultKeyTitle:     meta.Title,
 	}, nil
 }
 
-func (t *browserTool) startSession(ctx agent.Context) (*bedrockagentcore.StartBrowserSessionOutput, error) {
-	token := clientToken(ctx.FunctionCallID())
+func (t *browserTool) startSession(
+	ctx context.Context,
+	functionCallID string,
+) (*bedrockagentcore.StartBrowserSessionOutput, error) {
+	token := clientToken(functionCallID)
 	in := &bedrockagentcore.StartBrowserSessionInput{
 		BrowserIdentifier:     aws.String(t.browserIdentifier),
 		ClientToken:           aws.String(token),
@@ -668,11 +718,20 @@ func optionalString(m map[string]any, key string) string {
 
 func screenshotFormat(m map[string]any) (string, string, error) {
 	format := optionalString(m, paramFormat)
+	if format == "" {
+		fileName := strings.ToLower(optionalString(m, paramFileName))
+		switch {
+		case strings.HasSuffix(fileName, ".jpg"), strings.HasSuffix(fileName, ".jpeg"):
+			format = screenshotFormatJPEG
+		case strings.HasSuffix(fileName, ".png"):
+			format = screenshotFormatPNG
+		}
+	}
 	switch strings.ToLower(format) {
 	case "", screenshotFormatPNG:
 		return screenshotFormatPNG, "image/png", nil
 	case screenshotFormatJPEG, screenshotFormatJPG:
-		return screenshotFormatJPEG, "image/jpeg", nil
+		return screenshotFormatJPEG, mimeTypeJPEG, nil
 	default:
 		return "", "", fmt.Errorf("format must be png, jpeg, or jpg, got %q", format)
 	}
@@ -740,16 +799,29 @@ func sanitizeToken(s string) string {
 	return strings.TrimRight(b.String(), "-")
 }
 
-func normalizeHosts(hosts []string) []string {
+func normalizeHosts(name string, hosts []string) ([]string, error) {
 	out := make([]string, 0, len(hosts))
-	for _, host := range hosts {
-		h := strings.TrimPrefix(strings.TrimSpace(host), "*.")
+	for _, raw := range hosts {
+		h := strings.TrimPrefix(strings.TrimSpace(raw), "*.")
 		h = strings.TrimPrefix(h, ".")
-		if h = normalizeHost(h); h != "" {
-			out = append(out, h)
+		h = normalizeHost(h)
+		if h == "" {
+			continue
 		}
+		if strings.ContainsAny(h, "/?#@ \t\r\n") || strings.Contains(h, "..") {
+			return nil, fmt.Errorf("agentcorebrowser: %s contains invalid host %q", name, raw)
+		}
+		if strings.Contains(h, ":") {
+			h = strings.Trim(h, "[]")
+			hostWithoutZone, _, _ := strings.Cut(h, "%")
+			_, err := netip.ParseAddr(hostWithoutZone)
+			if err != nil {
+				return nil, fmt.Errorf("agentcorebrowser: %s contains invalid host %q", name, raw)
+			}
+		}
+		out = append(out, h)
 	}
-	return out
+	return out, nil
 }
 
 func normalizeHost(host string) string {
@@ -772,7 +844,7 @@ func requiresExplicitAllow(host string) bool {
 	host, _, _ = strings.Cut(host, "%")
 	addr, err := netip.ParseAddr(host)
 	if err != nil {
-		return false
+		return looksLikeLegacyIPv4(host)
 	}
 	addr = addr.Unmap()
 	if !addr.IsGlobalUnicast() {
@@ -810,6 +882,24 @@ func requiresExplicitAllow(host string) bool {
 	return false
 }
 
+func looksLikeLegacyIPv4(host string) bool {
+	for part := range strings.SplitSeq(host, ".") {
+		if part == "" {
+			return false
+		}
+		digits := part
+		base := 10
+		if len(part) > 2 && strings.EqualFold(part[:2], "0x") {
+			digits = part[2:]
+			base = 16
+		}
+		if _, err := strconv.ParseUint(digits, base, 32); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 func truncateUTF8(s string, maxBytes int) (string, bool) {
 	if maxBytes <= 0 || len(s) <= maxBytes {
 		return s, false
@@ -822,11 +912,12 @@ func truncateUTF8(s string, maxBytes int) (string, bool) {
 }
 
 type cdpConn struct {
-	conn          *websocket.Conn
-	nextID        int64
-	pageSessionID string
-	events        []cdpMessage
-	responses     map[int64]cdpMessage
+	conn           *websocket.Conn
+	nextID         int64
+	pageSessionID  string
+	events         []cdpMessage
+	responses      map[int64]cdpMessage
+	documentPolicy func(string) error
 }
 
 type cdpMessage struct {
@@ -866,28 +957,72 @@ type textResult struct {
 	Text      string `json:"text"`
 	URL       string `json:"url"`
 	Title     string `json:"title"`
-	Truncated bool   `json:"-"`
+	Truncated bool   `json:"truncated"`
+}
+
+type pausedRequest struct {
+	RequestID    string `json:"requestId"`
+	ResourceType string `json:"resourceType"`
+	Request      struct {
+		URL string `json:"url"`
+	} `json:"request"`
 }
 
 func (c *cdpConn) close() {
 	_ = c.conn.Close()
 }
 
-func (c *cdpConn) navigate(ctx context.Context, rawURL string) error {
+func (c *cdpConn) navigate(ctx context.Context, rawURL string, policy func(string) error) error {
 	sessionID, err := c.pageSession(ctx)
 	if err != nil {
+		return err
+	}
+	if err := c.enableDocumentPolicy(ctx, policy); err != nil {
 		return err
 	}
 	if _, err := c.call(ctx, "Page.enable", nil, sessionID); err != nil {
 		return err
 	}
-	if _, err := c.call(ctx, "Page.navigate", map[string]any{paramURL: rawURL}, sessionID); err != nil {
+	raw, err := c.call(ctx, "Page.navigate", map[string]any{paramURL: rawURL}, sessionID)
+	if err != nil {
 		return err
+	}
+	var result struct {
+		ErrorText  string `json:"errorText"`
+		IsDownload bool   `json:"isDownload"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("parse navigation result: %w", err)
+	}
+	if result.ErrorText != "" {
+		return fmt.Errorf("navigate: %s", result.ErrorText)
+	}
+	if result.IsDownload {
+		return errors.New("navigate: URL started a download")
 	}
 	return c.waitEvent(ctx, sessionID, "Page.loadEventFired")
 }
 
-func (c *cdpConn) extractText(ctx context.Context, selector string) (*textResult, error) {
+func (c *cdpConn) enableDocumentPolicy(ctx context.Context, policy func(string) error) error {
+	sessionID, err := c.pageSession(ctx)
+	if err != nil {
+		return err
+	}
+	c.documentPolicy = policy
+	_, err = c.call(ctx, "Fetch.enable", map[string]any{
+		"patterns": []map[string]any{{
+			"urlPattern":   "*",
+			"resourceType": cdpResourceDocument,
+			"requestStage": "Request",
+		}},
+	}, sessionID)
+	if err != nil {
+		c.documentPolicy = nil
+	}
+	return err
+}
+
+func (c *cdpConn) extractText(ctx context.Context, selector string, maxBytes int) (*textResult, error) {
 	sessionID, err := c.pageSession(ctx)
 	if err != nil {
 		return nil, err
@@ -899,8 +1034,19 @@ func (c *cdpConn) extractText(ctx context.Context, selector string) (*textResult
 	}
 	expr := `(() => {
 const selector = ` + selectorJSON + `;
+const maxBytes = ` + strconv.Itoa(maxBytes) + `;
 const node = selector ? document.querySelector(selector) : document.body;
-return {text: node ? (node.innerText || node.textContent || "") : "", url: location.href, title: document.title};
+let text = node ? (node.innerText || node.textContent || "") : "";
+const bytes = new TextEncoder().encode(text);
+const truncated = maxBytes > 0 && bytes.length > maxBytes;
+if (truncated) {
+    let end = maxBytes;
+    while (end > 0 && (bytes[end] & 0xc0) === 0x80) {
+        end--;
+    }
+    text = new TextDecoder().decode(bytes.subarray(0, end));
+}
+return {text, url: location.href, title: document.title, truncated};
 })()`
 	raw, err := c.call(ctx, "Runtime.evaluate", map[string]any{
 		"expression":    expr,
@@ -1048,8 +1194,8 @@ func (c *cdpConn) call(ctx context.Context, method string, params any, sessionID
 	c.nextID++
 	id := c.nextID
 	msg := map[string]any{
-		"id":     id,
-		"method": method,
+		"id":         id,
+		cdpKeyMethod: method,
 	}
 	if params != nil {
 		msg["params"] = params
@@ -1063,13 +1209,19 @@ func (c *cdpConn) call(ctx context.Context, method string, params any, sessionID
 	if err := c.conn.WriteJSON(msg); err != nil {
 		return nil, fmt.Errorf("cdp %s: %w", method, err)
 	}
-	if resp, ok := c.takeResponse(id); ok {
-		return c.callResult(method, resp)
-	}
 	for {
+		if resp, ok := c.takeResponse(id); ok {
+			return c.callResult(method, resp)
+		}
 		resp, err := c.readMessage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("cdp %s: %w", method, err)
+		}
+		if handled, err := c.handlePausedRequest(ctx, resp); handled {
+			if err != nil {
+				return nil, err
+			}
+			continue
 		}
 		if resp.ID != id {
 			c.bufferMessage(resp)
@@ -1088,11 +1240,55 @@ func (c *cdpConn) waitEvent(ctx context.Context, sessionID, method string) error
 		if err != nil {
 			return fmt.Errorf("wait for %s: %w", method, err)
 		}
+		if handled, err := c.handlePausedRequest(ctx, msg); handled {
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		if msg.Method == method && (sessionID == "" || msg.SessionID == sessionID) {
 			return nil
 		}
 		c.bufferMessage(msg)
 	}
+}
+
+func (c *cdpConn) handlePausedRequest(ctx context.Context, msg cdpMessage) (bool, error) {
+	if msg.Method != "Fetch.requestPaused" || c.documentPolicy == nil {
+		return false, nil
+	}
+	var paused pausedRequest
+	if err := json.Unmarshal(msg.Params, &paused); err != nil {
+		return true, fmt.Errorf("parse paused document request: %w", err)
+	}
+	sessionID := msg.SessionID
+	if sessionID == "" {
+		sessionID = c.pageSessionID
+	}
+	if paused.RequestID == "" {
+		return true, errors.New("paused document request has no requestId")
+	}
+	if paused.ResourceType != cdpResourceDocument {
+		_, err := c.call(ctx, "Fetch.continueRequest", map[string]any{
+			cdpKeyRequestID: paused.RequestID,
+		}, sessionID)
+		return true, err
+	}
+	if err := c.documentPolicy(paused.Request.URL); err != nil {
+		_, failErr := c.call(ctx, "Fetch.failRequest", map[string]any{
+			cdpKeyRequestID: paused.RequestID,
+			"errorReason":   "BlockedByClient",
+		}, sessionID)
+		policyErr := fmt.Errorf("navigation url: %w", err)
+		if failErr != nil {
+			return true, errors.Join(policyErr, failErr)
+		}
+		return true, policyErr
+	}
+	_, err := c.call(ctx, "Fetch.continueRequest", map[string]any{
+		cdpKeyRequestID: paused.RequestID,
+	}, sessionID)
+	return true, err
 }
 
 func (c *cdpConn) callResult(method string, resp cdpMessage) (json.RawMessage, error) {

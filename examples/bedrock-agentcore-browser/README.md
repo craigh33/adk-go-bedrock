@@ -6,7 +6,7 @@ This example runs an ADK agent with the `agentcore_browser` tool for Amazon Bedr
 
 ```bash
 export AWS_REGION=us-east-1
-export BEDROCK_MODEL_ID=eu.amazon.nova-2-lite-v1:0
+export BEDROCK_MODEL_ID=us.amazon.nova-2-lite-v1:0
 
 # Optional:
 export AGENTCORE_BROWSER_ID=aws.browser.v1
@@ -31,4 +31,4 @@ The Bedrock model client needs normal Bedrock inference permissions. The AgentCo
 - `bedrock-agentcore:StopBrowserSession`
 - `bedrock-agentcore:ConnectBrowserAutomationStream`
 
-Browser sessions have runtime cost and remain active until stopped or timed out. This tool defaults sessions to 900 seconds.
+Browser sessions have runtime cost and remain active until stopped or timed out. This tool defaults sessions to 900 seconds and browser actions to 30 seconds. The example asks the agent to stop each session when finished; keep the host allowlist set for constrained or private-network workflows.

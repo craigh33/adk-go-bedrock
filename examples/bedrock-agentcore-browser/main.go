@@ -47,7 +47,7 @@ func run(ctx context.Context) error {
 
 	modelID := strings.TrimSpace(os.Getenv("BEDROCK_MODEL_ID"))
 	if modelID == "" {
-		modelID = "eu.amazon.nova-2-lite-v1:0"
+		modelID = "us.amazon.nova-2-lite-v1:0"
 	}
 	br := bedrockruntime.NewFromConfig(awsCfg)
 	llm, err := converse.NewWithAPI(modelID, converse.NewRuntimeAPI(br))

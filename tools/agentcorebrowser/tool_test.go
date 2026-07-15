@@ -164,6 +164,7 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string)) s
 			return
 		}
 		defer conn.Close()
+		captured := false
 		for {
 			var req struct {
 				ID        int64          `json:"id"`
@@ -197,9 +198,28 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string)) s
 					"id":     req.ID,
 					"result": map[string]any{"sessionId": "session-1"},
 				})
-			case "Page.enable":
+			case "Fetch.enable", "Fetch.continueRequest", "Fetch.failRequest", "Page.enable":
 				_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{}})
 			case "Page.navigate":
+				requestURL, _ := req.Params[paramURL].(string)
+				if failMethod == "Page.navigate.redirect" {
+					requestURL = "https://blocked.example.net/redirect"
+				}
+				_ = conn.WriteJSON(map[string]any{
+					"method":    "Fetch.requestPaused",
+					"sessionId": "session-1",
+					"params": map[string]any{
+						"requestId":    "request-1",
+						"resourceType": "Document",
+						"request":      map[string]any{"url": requestURL},
+					},
+				})
+				if failMethod == "Page.navigate.errorText" {
+					_ = conn.WriteJSON(map[string]any{
+						"id": req.ID, "result": map[string]any{"errorText": "net::ERR_NAME_NOT_RESOLVED"},
+					})
+					continue
+				}
 				_ = conn.WriteJSON(map[string]any{"method": "Page.loadEventFired", "sessionId": "session-1"})
 				_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{"frameId": "frame-1"}})
 			case "Runtime.evaluate":
@@ -218,11 +238,16 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string)) s
 					continue
 				}
 				value := map[string]any{"url": "https://example.com/after", "title": "Example"}
-				if failMethod == "Runtime.evaluate.redirect" {
+				if failMethod == "Runtime.evaluate.redirect" ||
+					(failMethod == "Runtime.evaluate.redirectAfterCapture" && captured) {
 					value["url"] = "https://blocked.example.net/after"
 				}
 				if expr, _ := req.Params["expression"].(string); strings.Contains(expr, "document.querySelector") {
 					value["text"] = "hello world"
+					if strings.Contains(expr, "const maxBytes = 5;") {
+						value["text"] = "hello"
+						value["truncated"] = true
+					}
 				}
 				_ = conn.WriteJSON(map[string]any{
 					"id": req.ID,
@@ -231,6 +256,7 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string)) s
 					},
 				})
 			case "Page.captureScreenshot":
+				captured = true
 				_ = conn.WriteJSON(map[string]any{
 					"id":     req.ID,
 					"result": map[string]any{"data": base64.StdEncoding.EncodeToString([]byte("shot"))},
@@ -257,6 +283,30 @@ func TestNewValidationAndDefaults(t *testing.T) {
 	}
 	if _, err := New(Config{API: &fakeAgentCoreAPI{}, Region: "us-east-1"}); err == nil {
 		t.Fatal("expected missing credentials error")
+	}
+	if _, err := New(Config{
+		API:                   &fakeAgentCoreAPI{},
+		Region:                "us-east-1",
+		Credentials:           testCreds(),
+		SessionTimeoutSeconds: maxSessionTimeout + 1,
+	}); err == nil {
+		t.Fatal("expected maximum session timeout error")
+	}
+	if _, err := New(Config{
+		API:          &fakeAgentCoreAPI{},
+		Region:       "us-east-1",
+		Credentials:  testCreds(),
+		AllowedHosts: []string{"https://example.com"},
+	}); err == nil {
+		t.Fatal("expected invalid allowed host error")
+	}
+	if _, err := New(Config{
+		API:         &fakeAgentCoreAPI{},
+		Region:      "us-east-1",
+		Credentials: testCreds(),
+		DeniedHosts: []string{"example.com:443"},
+	}); err == nil {
+		t.Fatal("expected invalid denied host error")
 	}
 
 	tl, err := New(Config{API: &fakeAgentCoreAPI{}, Region: " us-east-1 ", Credentials: testCreds()})
@@ -466,12 +516,34 @@ func TestHostPolicyRejectsLocalTargetsByDefault(t *testing.T) {
 	}
 }
 
+func TestHostPolicyRejectsLegacyIPv4TargetsByDefault(t *testing.T) {
+	t.Parallel()
+	tl, _ := New(Config{API: &fakeAgentCoreAPI{}, Region: "us-east-1", Credentials: testCreds()})
+	bt := tl.(*browserTool)
+
+	for _, rawURL := range []string{
+		"https://2130706433",
+		"https://127.1",
+		"https://0177.0.0.1",
+		"https://0x7f000001",
+		"https://0x7f.0.0.1",
+	} {
+		if err := bt.checkURL(rawURL); err == nil {
+			t.Fatalf("expected legacy IPv4 target rejection for %s", rawURL)
+		}
+	}
+}
+
 func TestNavigateStartsSessionAndUsesCDP(t *testing.T) {
 	t.Parallel()
 	var attachCount atomic.Int32
+	var continueCount atomic.Int32
 	wsURL := fakeCDPServerWithHook(t, "", func(method string) {
 		if method == "Target.attachToTarget" {
 			attachCount.Add(1)
+		}
+		if method == "Fetch.continueRequest" {
+			continueCount.Add(1)
 		}
 	})
 	api := &fakeAgentCoreAPI{
@@ -499,6 +571,47 @@ func TestNavigateStartsSessionAndUsesCDP(t *testing.T) {
 	}
 	if attachCount.Load() != 1 {
 		t.Errorf("attach count = %d", attachCount.Load())
+	}
+	if continueCount.Load() != 1 {
+		t.Errorf("continued document requests = %d", continueCount.Load())
+	}
+}
+
+func TestNavigateBlocksDeniedRedirectBeforeRequest(t *testing.T) {
+	t.Parallel()
+	var failCount atomic.Int32
+	wsURL := fakeCDPServerWithHook(t, "Page.navigate.redirect", func(method string) {
+		if method == "Fetch.failRequest" {
+			failCount.Add(1)
+		}
+	})
+	api := &fakeAgentCoreAPI{
+		startOut: &bedrockagentcore.StartBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	tl, _ := New(Config{
+		API:          api,
+		Region:       "us-east-1",
+		Credentials:  testCreds(),
+		AllowedHosts: []string{"example.com"},
+	})
+	bt := tl.(*browserTool)
+
+	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction: actionNavigate,
+		paramURL:    "https://example.com",
+	})
+	if err == nil || !strings.Contains(err.Error(), "navigation url") {
+		t.Fatalf("expected redirect policy error, got %v", err)
+	}
+	if failCount.Load() != 1 {
+		t.Fatalf("failed document requests = %d", failCount.Load())
+	}
+	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
+		t.Fatalf("auto-started session was not stopped: %#v", api.lastStop)
 	}
 }
 
@@ -585,6 +698,42 @@ func TestExtractTextRejectsDisallowedCurrentURL(t *testing.T) {
 	}
 	if api.lastStop != nil {
 		t.Fatal("extract_text should not stop caller-owned session")
+	}
+}
+
+func TestExtractTextAppliesTimeout(t *testing.T) {
+	t.Parallel()
+	var evaluateCalls atomic.Int32
+	wsURL := fakeCDPServerWithHook(t, "", func(method string) {
+		if method == "Runtime.evaluate" {
+			evaluateCalls.Add(1)
+			time.Sleep(500 * time.Millisecond)
+		}
+	})
+	api := &fakeAgentCoreAPI{
+		getOut: &bedrockagentcore.GetBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	tl, _ := New(Config{
+		API:               api,
+		Region:            "us-east-1",
+		Credentials:       testCreds(),
+		NavigationTimeout: 100 * time.Millisecond,
+	})
+	bt := tl.(*browserTool)
+
+	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction:    actionExtractText,
+		paramSessionID: "session-1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "i/o timeout") {
+		t.Fatalf("expected extract_text timeout, got %v", err)
+	}
+	if evaluateCalls.Load() != 1 {
+		t.Fatalf("runtime evaluate calls = %d", evaluateCalls.Load())
 	}
 }
 
@@ -752,6 +901,73 @@ func TestScreenshotRejectsDisallowedCurrentURLBeforeSaving(t *testing.T) {
 	}
 }
 
+func TestScreenshotRejectsRedirectAfterCapture(t *testing.T) {
+	t.Parallel()
+	wsURL := fakeCDPServer(t, "Runtime.evaluate.redirectAfterCapture")
+	api := &fakeAgentCoreAPI{
+		getOut: &bedrockagentcore.GetBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	arts := &fakeArtifacts{}
+	tl, _ := New(Config{
+		API:          api,
+		Region:       "us-east-1",
+		Credentials:  testCreds(),
+		AllowedHosts: []string{"example.com"},
+	})
+	bt := tl.(*browserTool)
+
+	_, err := bt.Run(newFakeToolCtx(arts), map[string]any{
+		paramAction:    actionScreenshot,
+		paramSessionID: "session-1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "current url after capture") {
+		t.Fatalf("expected post-capture URL policy error, got %v", err)
+	}
+	if arts.savedName != "" {
+		t.Fatalf("artifact saved after redirect: %q", arts.savedName)
+	}
+}
+
+func TestScreenshotAppliesTimeout(t *testing.T) {
+	t.Parallel()
+	var evaluateCalls atomic.Int32
+	wsURL := fakeCDPServerWithHook(t, "", func(method string) {
+		if method == "Runtime.evaluate" {
+			evaluateCalls.Add(1)
+			time.Sleep(500 * time.Millisecond)
+		}
+	})
+	api := &fakeAgentCoreAPI{
+		getOut: &bedrockagentcore.GetBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	tl, _ := New(Config{
+		API:               api,
+		Region:            "us-east-1",
+		Credentials:       testCreds(),
+		NavigationTimeout: 100 * time.Millisecond,
+	})
+	bt := tl.(*browserTool)
+
+	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction:    actionScreenshot,
+		paramSessionID: "session-1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "i/o timeout") {
+		t.Fatalf("expected screenshot timeout, got %v", err)
+	}
+	if evaluateCalls.Load() != 1 {
+		t.Fatalf("runtime evaluate calls = %d", evaluateCalls.Load())
+	}
+}
+
 func TestScreenshotSavesArtifact(t *testing.T) {
 	t.Parallel()
 	wsURL := fakeCDPServer(t, "")
@@ -784,8 +1000,42 @@ func TestScreenshotSavesArtifact(t *testing.T) {
 	if string(arts.savedPart.InlineData.Data) != "shot" {
 		t.Errorf("artifact bytes = %q", arts.savedPart.InlineData.Data)
 	}
-	if arts.savedPart.InlineData.MIMEType != "image/jpeg" {
+	if arts.savedPart.InlineData.MIMEType != mimeTypeJPEG {
 		t.Errorf("mime = %q", arts.savedPart.InlineData.MIMEType)
+	}
+	if out[paramURL] != "https://example.com/after" || out[resultKeyTitle] != "Example" {
+		t.Errorf("metadata = url %v title %v", out[paramURL], out[resultKeyTitle])
+	}
+}
+
+func TestScreenshotInfersFormatAndRejectsArtifactPaths(t *testing.T) {
+	t.Parallel()
+	format, mimeType, err := screenshotFormat(map[string]any{paramFileName: "page.JPG"})
+	if err != nil || format != screenshotFormatJPEG || mimeType != mimeTypeJPEG {
+		t.Fatalf("inferred screenshot format = %q %q, err %v", format, mimeType, err)
+	}
+	api := &fakeAgentCoreAPI{}
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	bt := tl.(*browserTool)
+	_, err = bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction:    actionScreenshot,
+		paramSessionID: "session-1",
+		paramFileName:  "screenshots/page.png",
+	})
+	if err == nil || !strings.Contains(err.Error(), "path separators") {
+		t.Fatalf("expected artifact path error, got %v", err)
+	}
+	if api.lastGet != nil {
+		t.Fatal("browser session fetched before file_name validation")
+	}
+	_, err = bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction:    actionScreenshot,
+		paramSessionID: "session-1",
+		paramFileName:  "page.png",
+		paramFormat:    screenshotFormatJPEG,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("expected artifact extension error, got %v", err)
 	}
 }
 
@@ -808,6 +1058,31 @@ func TestCDPErrorIsReturned(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "fake cdp failure") {
 		t.Fatalf("expected CDP failure, got %v", err)
+	}
+	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
+		t.Fatalf("auto-started session was not stopped: %#v", api.lastStop)
+	}
+}
+
+func TestNavigateReturnsPageErrorText(t *testing.T) {
+	t.Parallel()
+	wsURL := fakeCDPServer(t, "Page.navigate.errorText")
+	api := &fakeAgentCoreAPI{
+		startOut: &bedrockagentcore.StartBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	bt := tl.(*browserTool)
+
+	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction: actionNavigate,
+		paramURL:    "https://example.com",
+	})
+	if err == nil || !strings.Contains(err.Error(), "ERR_NAME_NOT_RESOLVED") {
+		t.Fatalf("expected navigation errorText, got %v", err)
 	}
 	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
 		t.Fatalf("auto-started session was not stopped: %#v", api.lastStop)
