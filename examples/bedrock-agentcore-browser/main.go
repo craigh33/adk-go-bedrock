@@ -1,6 +1,4 @@
 // Bedrock AgentCore Browser example for adk-go. Set AWS_REGION and credentials.
-// Optionally set AGENTCORE_BROWSER_ID, AGENTCORE_BROWSER_ALLOWED_HOSTS, and
-// AGENTCORE_BROWSER_DENIED_HOSTS.
 package main
 
 import (
@@ -9,8 +7,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -55,14 +56,11 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("bedrock model: %w", err)
 	}
 
-	browserTool, err := agentcorebrowser.New(agentcorebrowser.Config{
-		API:               bedrockagentcore.NewFromConfig(awsCfg),
-		Region:            awsCfg.Region,
-		Credentials:       awsCfg.Credentials,
-		BrowserIdentifier: strings.TrimSpace(os.Getenv("AGENTCORE_BROWSER_ID")),
-		AllowedHosts:      csvEnv("AGENTCORE_BROWSER_ALLOWED_HOSTS"),
-		DeniedHosts:       csvEnv("AGENTCORE_BROWSER_DENIED_HOSTS"),
-	})
+	browserCfg, err := browserConfigFromEnv(awsCfg)
+	if err != nil {
+		return err
+	}
+	browserTool, err := agentcorebrowser.New(browserCfg)
 	if err != nil {
 		return fmt.Errorf("browser tool: %w", err)
 	}
@@ -100,6 +98,99 @@ Navigate first, keep the returned session_id for follow-up extract_text or scree
 
 	fmt.Printf("User: %s\n\n", userMsg)
 	return printRunEvents(ctx, r, a, userMsg)
+}
+
+func browserConfigFromEnv(awsCfg aws.Config) (agentcorebrowser.Config, error) {
+	sessionTimeout, err := int32Env("AGENTCORE_BROWSER_SESSION_TIMEOUT_SECONDS")
+	if err != nil {
+		return agentcorebrowser.Config{}, err
+	}
+	viewportWidth, err := int32Env("AGENTCORE_BROWSER_VIEWPORT_WIDTH")
+	if err != nil {
+		return agentcorebrowser.Config{}, err
+	}
+	viewportHeight, err := int32Env("AGENTCORE_BROWSER_VIEWPORT_HEIGHT")
+	if err != nil {
+		return agentcorebrowser.Config{}, err
+	}
+	maxTextBytes, err := intEnv("AGENTCORE_BROWSER_MAX_TEXT_BYTES")
+	if err != nil {
+		return agentcorebrowser.Config{}, err
+	}
+	maxScreenshotBytes, err := int64Env("AGENTCORE_BROWSER_MAX_SCREENSHOT_BYTES")
+	if err != nil {
+		return agentcorebrowser.Config{}, err
+	}
+	navigationTimeout, err := durationEnv("AGENTCORE_BROWSER_NAVIGATION_TIMEOUT")
+	if err != nil {
+		return agentcorebrowser.Config{}, err
+	}
+	cleanupTimeout, err := durationEnv("AGENTCORE_BROWSER_CLEANUP_TIMEOUT")
+	if err != nil {
+		return agentcorebrowser.Config{}, err
+	}
+	return agentcorebrowser.Config{
+		API:                   bedrockagentcore.NewFromConfig(awsCfg),
+		Region:                awsCfg.Region,
+		Credentials:           awsCfg.Credentials,
+		BrowserIdentifier:     strings.TrimSpace(os.Getenv("AGENTCORE_BROWSER_ID")),
+		SessionTimeoutSeconds: sessionTimeout,
+		ViewportWidth:         viewportWidth,
+		ViewportHeight:        viewportHeight,
+		AllowedHosts:          csvEnv("AGENTCORE_BROWSER_ALLOWED_HOSTS"),
+		DeniedHosts:           csvEnv("AGENTCORE_BROWSER_DENIED_HOSTS"),
+		NavigationTimeout:     navigationTimeout,
+		CleanupTimeout:        cleanupTimeout,
+		MaxTextBytes:          maxTextBytes,
+		MaxScreenshotBytes:    maxScreenshotBytes,
+		WaitUntil: agentcorebrowser.WaitUntil(
+			strings.TrimSpace(os.Getenv("AGENTCORE_BROWSER_WAIT_UNTIL")),
+		),
+	}, nil
+}
+
+func int32Env(name string) (int32, error) {
+	value, err := int64EnvWithSize(name, 32)
+	if err != nil {
+		return 0, err
+	}
+	return int32(value), nil //nolint:gosec // ParseInt enforces the signed 32-bit range.
+}
+
+func intEnv(name string) (int, error) {
+	value, err := int64EnvWithSize(name, strconv.IntSize)
+	if err != nil {
+		return 0, err
+	}
+	return int(value), nil
+}
+
+func int64Env(name string) (int64, error) {
+	return int64EnvWithSize(name, 64)
+}
+
+func int64EnvWithSize(name string, bitSize int) (int64, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.ParseInt(raw, 10, bitSize)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer: %w", name, err)
+	}
+	return value, nil
+}
+
+func durationEnv(name string) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a duration: %w", name, err)
+	}
+	return value, nil
 }
 
 func printRunEvents(ctx context.Context, r *runner.Runner, a agent.Agent, userMsg string) error {

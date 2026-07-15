@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -36,21 +37,29 @@ import (
 const (
 	ToolName = "agentcore_browser"
 
-	defaultBrowserIdentifier = "aws.browser.v1"
-	defaultSessionTimeout    = int32(900)
-	maxSessionTimeout        = int32(28_800)
-	defaultNavigationTimeout = 30 * time.Second
-	defaultCleanupTimeout    = 10 * time.Second
-	defaultMaxTextBytes      = 64 << 10
-	minClientTokenLen        = 33
-	maxClientTokenLen        = 256
+	defaultBrowserIdentifier  = "aws.browser.v1"
+	defaultSessionTimeout     = int32(900)
+	maxSessionTimeout         = int32(28_800)
+	defaultNavigationTimeout  = 30 * time.Second
+	defaultCleanupTimeout     = 10 * time.Second
+	defaultMaxTextBytes       = 64 << 10
+	defaultMaxScreenshotBytes = int64(16 << 20)
+	cdpMessageOverhead        = int64(1 << 20)
+	base64DecodedBlockBytes   = int64(3)
+	base64EncodedBlockBytes   = int64(4)
+	minClientTokenLen         = 33
+	maxClientTokenLen         = 256
 
-	paramAction    = "action"
-	paramSessionID = "session_id"
-	paramURL       = "url"
-	paramSelector  = "selector"
-	paramFileName  = "file_name"
-	paramFormat    = "format"
+	paramAction          = "action"
+	paramSessionID       = "session_id"
+	paramURL             = "url"
+	paramSelector        = "selector"
+	paramFileName        = "file_name"
+	paramFormat          = "format"
+	paramWaitUntil       = "wait_until"
+	paramWaitForSelector = "wait_for_selector"
+	paramFullPage        = "full_page"
+	paramQuality         = "quality"
 
 	actionStart       = "start"
 	actionNavigate    = "navigate"
@@ -60,6 +69,9 @@ const (
 	actionStop        = "stop"
 
 	schemaTypeString       = "STRING"
+	schemaTypeBoolean      = "BOOLEAN"
+	schemaTypeInteger      = "INTEGER"
+	schemaFormatEnum       = "enum"
 	resultKeyStatus        = actionStatus
 	resultKeyBrowserID     = "browser_identifier"
 	resultKeySessionStatus = "session_status"
@@ -70,9 +82,17 @@ const (
 	mimeTypeJPEG           = "image/jpeg"
 	cdpKeyMethod           = "method"
 	cdpKeyRequestID        = "requestId"
+	cdpKeyExpression       = "expression"
+	cdpKeyReturnByValue    = "returnByValue"
 	cdpEventRequestPaused  = "Fetch.requestPaused"
+	cdpEventAuthRequired   = "Fetch.authRequired"
 	schemeHTTP             = "http"
 	schemeHTTPS            = "https"
+	schemeData             = "data"
+	schemeBlob             = "blob"
+	cdpAuthDefault         = "Default"
+	cdpAuthCancel          = "CancelAuth"
+	cdpAuthCredentials     = "ProvideCredentials"
 
 	statusSuccess = "success"
 	serviceID     = "bedrock-agentcore"
@@ -126,6 +146,71 @@ type RequestHandler func(context.Context, *BrowserRequest) (*BrowserResponse, er
 // and built-in host policy; middleware may deliberately omit next to replace that behavior.
 type RequestMiddleware func(RequestHandler) RequestHandler
 
+// URLStage identifies where a URL was observed in a browser action.
+type URLStage string
+
+const (
+	URLStageNavigate URLStage = "navigate"
+	URLStageRequest  URLStage = "request"
+	URLStageCurrent  URLStage = "current"
+	URLStageFinal    URLStage = "final"
+)
+
+// URLCheck is passed through URL policy middleware.
+type URLCheck struct {
+	URL   url.URL
+	Stage URLStage
+}
+
+// URLHandler accepts or rejects a browser URL.
+type URLHandler func(context.Context, URLCheck) error
+
+// URLMiddleware wraps URL policy. Calling next applies the remaining middleware
+// and built-in host policy; omitting next replaces the host policy.
+type URLMiddleware func(URLHandler) URLHandler
+
+// WebSocketDialer opens an AgentCore Browser automation stream.
+type WebSocketDialer interface {
+	DialContext(context.Context, string, http.Header) (*websocket.Conn, *http.Response, error)
+}
+
+// WaitUntil controls which page lifecycle event navigation waits for.
+type WaitUntil string
+
+const (
+	WaitUntilLoad             WaitUntil = "load"
+	WaitUntilDOMContentLoaded WaitUntil = "dom_content_loaded"
+	WaitUntilNone             WaitUntil = "none"
+)
+
+// AuthAction controls how an HTTP authentication challenge is answered.
+type AuthAction string
+
+const (
+	AuthActionDefault            AuthAction = "default"
+	AuthActionCancel             AuthAction = "cancel"
+	AuthActionProvideCredentials AuthAction = "provide_credentials"
+)
+
+// AuthChallenge describes an HTTP authentication challenge from the browser.
+type AuthChallenge struct {
+	Request BrowserRequest
+	Source  string
+	Origin  string
+	Scheme  string
+	Realm   string
+}
+
+// AuthResponse answers an HTTP authentication challenge.
+type AuthResponse struct {
+	Action   AuthAction
+	Username string
+	Password string
+}
+
+// AuthHandler handles HTTP authentication challenges.
+type AuthHandler func(context.Context, AuthChallenge) (AuthResponse, error)
+
 // Config configures an AgentCore Browser ADK tool.
 type Config struct {
 	API         AgentCoreAPI
@@ -141,9 +226,15 @@ type Config struct {
 	DeniedHosts  []string
 
 	RequestMiddlewares []RequestMiddleware
+	URLMiddlewares     []URLMiddleware
+	Dialer             WebSocketDialer
+	AuthHandler        AuthHandler
 
-	NavigationTimeout time.Duration
-	MaxTextBytes      int
+	NavigationTimeout  time.Duration
+	CleanupTimeout     time.Duration
+	MaxTextBytes       int
+	MaxScreenshotBytes int64
+	WaitUntil          WaitUntil
 }
 
 type browserTool struct {
@@ -157,12 +248,21 @@ type browserTool struct {
 	allowedHosts          []string
 	deniedHosts           []string
 	requestHandler        RequestHandler
+	urlHandler            URLHandler
+	dialer                WebSocketDialer
+	authHandler           AuthHandler
 	navigationTimeout     time.Duration
+	cleanupTimeout        time.Duration
 	maxTextBytes          int
+	maxScreenshotBytes    int64
+	automationReadLimit   int64
+	waitUntil             WaitUntil
 	decl                  *genai.FunctionDeclaration
 }
 
 // New creates an ADK-compatible AgentCore Browser tool.
+//
+//nolint:funlen,gocognit // Keeping public configuration validation in one constructor makes defaults auditable.
 func New(cfg Config) (tool.Tool, error) {
 	if cfg.API == nil {
 		return nil, errors.New("agentcorebrowser: API is required")
@@ -201,12 +301,34 @@ func New(cfg Config) (tool.Tool, error) {
 	if navTimeout < 0 {
 		return nil, errors.New("agentcorebrowser: NavigationTimeout cannot be negative")
 	}
+	cleanupTimeout := cfg.CleanupTimeout
+	if cleanupTimeout == 0 {
+		cleanupTimeout = defaultCleanupTimeout
+	}
+	if cleanupTimeout < 0 {
+		return nil, errors.New("agentcorebrowser: CleanupTimeout cannot be negative")
+	}
 	maxText := cfg.MaxTextBytes
 	if maxText == 0 {
 		maxText = defaultMaxTextBytes
 	}
 	if maxText < 0 {
 		return nil, errors.New("agentcorebrowser: MaxTextBytes cannot be negative")
+	}
+	maxScreenshot := cfg.MaxScreenshotBytes
+	if maxScreenshot == 0 {
+		maxScreenshot = defaultMaxScreenshotBytes
+	}
+	if maxScreenshot < 0 {
+		return nil, errors.New("agentcorebrowser: MaxScreenshotBytes cannot be negative")
+	}
+	readLimit, err := automationReadLimit(maxScreenshot, maxText)
+	if err != nil {
+		return nil, err
+	}
+	waitUntil, err := normalizeWaitUntil(cfg.WaitUntil)
+	if err != nil {
+		return nil, err
 	}
 	allowedHosts, err := normalizeHosts("AllowedHosts", cfg.AllowedHosts)
 	if err != nil {
@@ -227,15 +349,29 @@ func New(cfg Config) (tool.Tool, error) {
 		viewportHeight:        cfg.ViewportHeight,
 		allowedHosts:          allowedHosts,
 		deniedHosts:           deniedHosts,
+		dialer:                cfg.Dialer,
+		authHandler:           cfg.AuthHandler,
 		navigationTimeout:     navTimeout,
+		cleanupTimeout:        cleanupTimeout,
 		maxTextBytes:          maxText,
+		maxScreenshotBytes:    maxScreenshot,
+		automationReadLimit:   readLimit,
+		waitUntil:             waitUntil,
 		decl:                  newFunctionDeclaration(),
+	}
+	if bt.dialer == nil {
+		bt.dialer = websocket.DefaultDialer
 	}
 	handler, err := applyRequestMiddleware(bt.handleBrowserRequest, cfg.RequestMiddlewares)
 	if err != nil {
 		return nil, err
 	}
 	bt.requestHandler = handler
+	urlHandler, err := applyURLMiddleware(bt.handleURLCheck, cfg.URLMiddlewares)
+	if err != nil {
+		return nil, err
+	}
+	bt.urlHandler = urlHandler
 	return bt, nil
 }
 
@@ -248,6 +384,20 @@ func applyRequestMiddleware(base RequestHandler, middleware []RequestMiddleware)
 		handler = wrap(handler)
 		if handler == nil {
 			return nil, fmt.Errorf("agentcorebrowser: RequestMiddlewares[%d] returned a nil handler", i)
+		}
+	}
+	return handler, nil
+}
+
+func applyURLMiddleware(base URLHandler, middleware []URLMiddleware) (URLHandler, error) {
+	handler := base
+	for i, wrap := range slices.Backward(middleware) {
+		if wrap == nil {
+			return nil, fmt.Errorf("agentcorebrowser: URLMiddlewares[%d] is nil", i)
+		}
+		handler = wrap(handler)
+		if handler == nil {
+			return nil, fmt.Errorf("agentcorebrowser: URLMiddlewares[%d] returned a nil handler", i)
 		}
 	}
 	return handler, nil
@@ -272,7 +422,7 @@ func newFunctionDeclaration() *genai.FunctionDeclaration {
 			Properties: map[string]*genai.Schema{
 				paramAction: {
 					Type:   schemaTypeString,
-					Format: "enum",
+					Format: schemaFormatEnum,
 					Enum: []string{
 						actionStart,
 						actionNavigate,
@@ -301,9 +451,31 @@ func newFunctionDeclaration() *genai.FunctionDeclaration {
 				},
 				paramFormat: {
 					Type:        schemaTypeString,
-					Format:      "enum",
+					Format:      schemaFormatEnum,
 					Enum:        []string{screenshotFormatPNG, screenshotFormatJPEG, screenshotFormatJPG},
 					Description: "Screenshot format. Defaults to png.",
+				},
+				paramWaitUntil: {
+					Type:   schemaTypeString,
+					Format: schemaFormatEnum,
+					Enum: []string{
+						string(WaitUntilLoad),
+						string(WaitUntilDOMContentLoaded),
+						string(WaitUntilNone),
+					},
+					Description: "Optional navigation completion event. Overrides the configured default for navigate.",
+				},
+				paramWaitForSelector: {
+					Type:        schemaTypeString,
+					Description: "Optional CSS selector to wait for during navigate or extract_text.",
+				},
+				paramFullPage: {
+					Type:        schemaTypeBoolean,
+					Description: "Capture beyond the viewport for screenshots. Defaults to true.",
+				},
+				paramQuality: {
+					Type:        schemaTypeInteger,
+					Description: "Optional JPEG quality from 0 through 100.",
 				},
 			},
 			Required: []string{paramAction},
@@ -426,7 +598,7 @@ func (t *browserTool) stopSession(
 }
 
 func (t *browserTool) cleanupStartedSession(ctx agent.Context, sessionID string, cause error) error {
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaultCleanupTimeout)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), t.cleanupTimeout)
 	defer cancel()
 	if _, err := t.stopSession(cleanupCtx, sessionID, ctx.FunctionCallID()); err != nil {
 		return errors.Join(cause, fmt.Errorf("cleanup stop browser session %q: %w", sessionID, err))
@@ -434,12 +606,28 @@ func (t *browserTool) cleanupStartedSession(ctx agent.Context, sessionID string,
 	return cause
 }
 
+//nolint:funlen,gocognit // Navigation keeps ownership-aware cleanup beside each failure point.
 func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[string]any, error) {
 	rawURL, err := requiredString(m, paramURL)
 	if err != nil {
 		return nil, err
 	}
-	if err := t.checkURL(rawURL); err != nil {
+	if err := t.checkURL(ctx, rawURL, URLStageNavigate); err != nil {
+		return nil, err
+	}
+	waitUntil := t.waitUntil
+	rawWaitUntil, err := optionalStringArg(m, paramWaitUntil)
+	if err != nil {
+		return nil, err
+	}
+	if rawWaitUntil != "" {
+		waitUntil, err = normalizeWaitUntil(WaitUntil(rawWaitUntil))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", paramWaitUntil, err)
+		}
+	}
+	waitForSelector, err := optionalStringArg(m, paramWaitForSelector)
+	if err != nil {
 		return nil, err
 	}
 	navCtx, cancel := context.WithTimeout(ctx, t.navigationTimeout)
@@ -476,11 +664,19 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 	}
 	defer cdp.close()
 
-	if err := cdp.navigate(navCtx, rawURL, t.requestHandler); err != nil {
+	if err := cdp.navigate(navCtx, rawURL, waitUntil, t.requestHandler, t.authHandler); err != nil {
 		if autoStarted {
 			return nil, t.cleanupStartedSession(ctx, sessionID, err)
 		}
 		return nil, err
+	}
+	if waitForSelector != "" {
+		if err := cdp.waitForSelector(navCtx, waitForSelector); err != nil {
+			if autoStarted {
+				return nil, t.cleanupStartedSession(ctx, sessionID, err)
+			}
+			return nil, err
+		}
 	}
 	meta, err := cdp.pageMetadata(navCtx)
 	if err != nil {
@@ -489,7 +685,7 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 		}
 		return nil, err
 	}
-	if err := t.checkURL(meta.URL); err != nil {
+	if err := t.checkURL(navCtx, meta.URL, URLStageFinal); err != nil {
 		err = fmt.Errorf("final url: %w", err)
 		if autoStarted {
 			return nil, t.cleanupStartedSession(ctx, sessionID, err)
@@ -513,6 +709,13 @@ func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[s
 		return nil, err
 	}
 	selector := optionalString(m, paramSelector)
+	waitForSelector, err := optionalStringArg(m, paramWaitForSelector)
+	if err != nil {
+		return nil, err
+	}
+	if selector == "" {
+		selector = waitForSelector
+	}
 	actionCtx, cancel := context.WithTimeout(ctx, t.navigationTimeout)
 	defer cancel()
 	streams, err := t.sessionStreams(actionCtx, sessionID)
@@ -524,15 +727,20 @@ func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[s
 		return nil, err
 	}
 	defer cdp.close()
-	if err := cdp.enableRequestInterception(actionCtx, t.requestHandler); err != nil {
+	if err := cdp.enableRequestInterception(actionCtx, t.requestHandler, t.authHandler); err != nil {
 		return nil, err
+	}
+	if waitForSelector != "" {
+		if err := cdp.waitForSelector(actionCtx, waitForSelector); err != nil {
+			return nil, err
+		}
 	}
 
 	result, err := cdp.extractText(actionCtx, selector, t.maxTextBytes)
 	if err != nil {
 		return nil, err
 	}
-	if err := t.checkURL(result.URL); err != nil {
+	if err := t.checkURL(actionCtx, result.URL, URLStageCurrent); err != nil {
 		return nil, fmt.Errorf("current url: %w", err)
 	}
 	text, truncated := truncateUTF8(result.Text, t.maxTextBytes)
@@ -550,6 +758,7 @@ func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[s
 	}, nil
 }
 
+//nolint:funlen,gocognit // Validate every model-facing option before touching the session or artifact service.
 func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[string]any, error) {
 	sessionID, err := requiredString(m, paramSessionID)
 	if err != nil {
@@ -569,6 +778,22 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 	if err := validateScreenshotFileName(fileName, format); err != nil {
 		return nil, err
 	}
+	fullPage, err := optionalBool(m, paramFullPage, true)
+	if err != nil {
+		return nil, err
+	}
+	quality, err := optionalInt(m, paramQuality)
+	if err != nil {
+		return nil, err
+	}
+	if quality != nil {
+		if *quality < 0 || *quality > 100 {
+			return nil, errors.New("quality must be between 0 and 100")
+		}
+		if format == screenshotFormatPNG {
+			return nil, errors.New("quality is only supported for JPEG screenshots")
+		}
+	}
 	artifacts := ctx.Artifacts()
 	if artifacts == nil {
 		return nil, errors.New("agentcorebrowser: artifact service is unavailable")
@@ -584,7 +809,7 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 		return nil, err
 	}
 	defer cdp.close()
-	if err := cdp.enableRequestInterception(actionCtx, t.requestHandler); err != nil {
+	if err := cdp.enableRequestInterception(actionCtx, t.requestHandler, t.authHandler); err != nil {
 		return nil, err
 	}
 
@@ -592,10 +817,10 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 	if err != nil {
 		return nil, err
 	}
-	if err := t.checkURL(meta.URL); err != nil {
+	if err := t.checkURL(actionCtx, meta.URL, URLStageCurrent); err != nil {
 		return nil, fmt.Errorf("current url: %w", err)
 	}
-	data, err := cdp.screenshot(actionCtx, format)
+	data, err := cdp.screenshot(actionCtx, format, fullPage, quality, t.maxScreenshotBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -603,8 +828,11 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 	if err != nil {
 		return nil, err
 	}
-	if err := t.checkURL(meta.URL); err != nil {
+	if err := t.checkURL(actionCtx, meta.URL, URLStageCurrent); err != nil {
 		return nil, fmt.Errorf("current url after capture: %w", err)
+	}
+	if int64(len(data)) > t.maxScreenshotBytes {
+		return nil, fmt.Errorf("screenshot exceeds MaxScreenshotBytes (%d)", t.maxScreenshotBytes)
 	}
 	saveResp, err := artifacts.Save(actionCtx, fileName, genai.NewPartFromBytes(data, mimeType))
 	if err != nil {
@@ -693,13 +921,17 @@ func (t *browserTool) openCDP(ctx context.Context, endpoint string) (*cdpConn, e
 	if err != nil {
 		return nil, err
 	}
-	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, endpoint, headers)
+	conn, resp, err := t.dialer.DialContext(ctx, endpoint, headers)
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("connect automation stream: %w", err)
 	}
+	if conn == nil {
+		return nil, errors.New("connect automation stream: dialer returned a nil connection")
+	}
+	conn.SetReadLimit(t.automationReadLimit)
 	return &cdpConn{conn: conn}, nil
 }
 
@@ -732,21 +964,62 @@ func (t *browserTool) signedWebSocketHeaders(ctx context.Context, endpoint strin
 	return req.Header, nil
 }
 
-func (t *browserTool) checkURL(raw string) error {
+func (t *browserTool) checkURL(ctx context.Context, raw string, stage URLStage) error {
+	check, err := parseURLCheck(raw, stage)
+	if err != nil {
+		return err
+	}
+	return t.urlHandler(ctx, check)
+}
+
+func parseURLCheck(raw string, stage URLStage) (URLCheck, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
-		return fmt.Errorf("url: %w", err)
+		return URLCheck{}, fmt.Errorf("url: %w", err)
 	}
-	if u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS {
-		return fmt.Errorf("url: scheme must be http or https, got %q", u.Scheme)
+	check := URLCheck{URL: *u, Stage: stage}
+	if err := validateURLStructure(check); err != nil {
+		return URLCheck{}, err
 	}
+	return check, nil
+}
+
+func validateURLStructure(check URLCheck) error {
+	u := &check.URL
 	if u.User != nil {
 		return errors.New("url: user info is not allowed")
 	}
-	host := normalizeHost(u.Hostname())
-	if host == "" {
+	switch check.Stage {
+	case URLStageNavigate, URLStageCurrent, URLStageFinal:
+		if u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS {
+			return fmt.Errorf("url: scheme must be http or https, got %q", u.Scheme)
+		}
+	case URLStageRequest:
+		switch u.Scheme {
+		case schemeHTTP, schemeHTTPS:
+		case schemeData, schemeBlob:
+			return nil
+		default:
+			return fmt.Errorf("url: scheme %q is not allowed", u.Scheme)
+		}
+	default:
+		return fmt.Errorf("url: invalid stage %q", check.Stage)
+	}
+	if u.Hostname() == "" {
 		return errors.New("url: host is required")
 	}
+	return nil
+}
+
+func (t *browserTool) handleURLCheck(_ context.Context, check URLCheck) error {
+	if err := validateURLStructure(check); err != nil {
+		return err
+	}
+	u := &check.URL
+	if check.Stage == URLStageRequest && (u.Scheme == schemeData || u.Scheme == schemeBlob) {
+		return nil
+	}
+	host := normalizeHost(u.Hostname())
 	if hostMatches(t.deniedHosts, host) {
 		return fmt.Errorf("url: host %q is denied", host)
 	}
@@ -760,21 +1033,49 @@ func (t *browserTool) checkURL(raw string) error {
 }
 
 func (t *browserTool) handleBrowserRequest(
-	_ context.Context,
+	ctx context.Context,
 	request *BrowserRequest,
 ) (*BrowserResponse, error) {
-	u, err := url.Parse(request.URL)
-	if err != nil || u.Scheme == "" {
-		return nil, t.checkURL(request.URL)
+	if err := t.checkURL(ctx, request.URL, URLStageRequest); err != nil {
+		return nil, err
 	}
-	switch strings.ToLower(u.Scheme) {
-	case schemeHTTP, schemeHTTPS:
-		return nil, t.checkURL(request.URL)
-	case "data", "blob":
-		return nil, nil //nolint:nilnil // A nil response and error means continue unchanged.
+	return nil, nil //nolint:nilnil // A nil response and error means continue unchanged.
+}
+
+func normalizeWaitUntil(value WaitUntil) (WaitUntil, error) {
+	switch value {
+	case "", WaitUntilLoad:
+		return WaitUntilLoad, nil
+	case WaitUntilDOMContentLoaded, WaitUntilNone:
+		return value, nil
 	default:
-		return nil, fmt.Errorf("url: scheme %q is not allowed", u.Scheme)
+		return "", fmt.Errorf("agentcorebrowser: WaitUntil must be load, dom_content_loaded, or none, got %q", value)
 	}
+}
+
+func automationReadLimit(maxScreenshot int64, maxText int) (int64, error) {
+	const maxInt64 = int64(^uint64(0) >> 1)
+	groups := maxScreenshot / base64DecodedBlockBytes
+	if groups > maxInt64/base64EncodedBlockBytes {
+		return 0, errors.New("agentcorebrowser: MaxScreenshotBytes is too large")
+	}
+	base64Bytes := groups * base64EncodedBlockBytes
+	if maxScreenshot%base64DecodedBlockBytes != 0 {
+		if base64Bytes > maxInt64-base64EncodedBlockBytes {
+			return 0, errors.New("agentcorebrowser: MaxScreenshotBytes is too large")
+		}
+		base64Bytes += base64EncodedBlockBytes
+	}
+	textBytes := int64(maxText)
+	if textBytes > maxInt64/6 {
+		return 0, errors.New("agentcorebrowser: MaxTextBytes is too large")
+	}
+	textBytes *= 6
+	limit := max(base64Bytes, textBytes)
+	if limit > maxInt64-cdpMessageOverhead {
+		return 0, errors.New("agentcorebrowser: configured response limits are too large")
+	}
+	return limit + cdpMessageOverhead, nil
 }
 
 func requiredString(m map[string]any, key string) (string, error) {
@@ -788,6 +1089,100 @@ func requiredString(m map[string]any, key string) (string, error) {
 func optionalString(m map[string]any, key string) string {
 	value, _ := m[key].(string)
 	return strings.TrimSpace(value)
+}
+
+func optionalStringArg(m map[string]any, key string) (string, error) {
+	value, ok := m[key]
+	if !ok {
+		return "", nil
+	}
+	result, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("%s must be a string", key)
+	}
+	return strings.TrimSpace(result), nil
+}
+
+func optionalBool(m map[string]any, key string, defaultValue bool) (bool, error) {
+	value, ok := m[key]
+	if !ok {
+		return defaultValue, nil
+	}
+	result, ok := value.(bool)
+	if !ok {
+		return false, fmt.Errorf("%s must be a boolean", key)
+	}
+	return result, nil
+}
+
+func optionalInt(m map[string]any, key string) (*int, error) {
+	value, ok := m[key]
+	if !ok {
+		return nil, nil //nolint:nilnil // A nil pointer represents an omitted optional argument.
+	}
+	var result int64
+	switch value := value.(type) {
+	case int:
+		result = int64(value)
+	case int8:
+		result = int64(value)
+	case int16:
+		result = int64(value)
+	case int32:
+		result = int64(value)
+	case int64:
+		result = value
+	case uint:
+		if uint64(value) > math.MaxInt64 {
+			return nil, fmt.Errorf("%s must be an integer", key)
+		}
+		result = int64(value)
+	case uint8:
+		result = int64(value)
+	case uint16:
+		result = int64(value)
+	case uint32:
+		result = int64(value)
+	case uint64:
+		if value > math.MaxInt64 {
+			return nil, fmt.Errorf("%s must be an integer", key)
+		}
+		result = int64(value)
+	case float32:
+		parsed, valid := integralInt64(float64(value))
+		if !valid {
+			return nil, fmt.Errorf("%s must be an integer", key)
+		}
+		result = parsed
+	case float64:
+		parsed, valid := integralInt64(value)
+		if !valid {
+			return nil, fmt.Errorf("%s must be an integer", key)
+		}
+		result = parsed
+	case json.Number:
+		parsed, err := value.Int64()
+		if err != nil {
+			return nil, fmt.Errorf("%s must be an integer", key)
+		}
+		result = parsed
+	default:
+		return nil, fmt.Errorf("%s must be an integer", key)
+	}
+	converted := int(result)
+	if int64(converted) != result {
+		return nil, fmt.Errorf("%s must be an integer", key)
+	}
+	return &converted, nil
+}
+
+func integralInt64(value float64) (int64, bool) {
+	const int64UpperBound = float64(1 << 63)
+	if math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value ||
+		value < -int64UpperBound || value >= int64UpperBound {
+		return 0, false
+	}
+	return int64(value), true
 }
 
 func screenshotFormat(m map[string]any) (string, string, error) {
@@ -1011,6 +1406,7 @@ type cdpConn struct {
 	events         []cdpMessage
 	responses      map[int64]cdpMessage
 	requestHandler RequestHandler
+	authHandler    AuthHandler
 }
 
 type cdpMessage struct {
@@ -1067,16 +1463,40 @@ type pausedRequest struct {
 	} `json:"request"`
 }
 
+type authRequired struct {
+	RequestID    string `json:"requestId"`
+	ResourceType string `json:"resourceType"`
+	FrameID      string `json:"frameId"`
+	Request      struct {
+		URL      string            `json:"url"`
+		Method   string            `json:"method"`
+		Headers  map[string]string `json:"headers"`
+		PostData *string           `json:"postData"`
+	} `json:"request"`
+	AuthChallenge struct {
+		Source string `json:"source"`
+		Origin string `json:"origin"`
+		Scheme string `json:"scheme"`
+		Realm  string `json:"realm"`
+	} `json:"authChallenge"`
+}
+
 func (c *cdpConn) close() {
 	_ = c.conn.Close()
 }
 
-func (c *cdpConn) navigate(ctx context.Context, rawURL string, handler RequestHandler) error {
+func (c *cdpConn) navigate(
+	ctx context.Context,
+	rawURL string,
+	waitUntil WaitUntil,
+	handler RequestHandler,
+	authHandler AuthHandler,
+) error {
 	sessionID, err := c.pageSession(ctx)
 	if err != nil {
 		return err
 	}
-	if err := c.enableRequestInterception(ctx, handler); err != nil {
+	if err := c.enableRequestInterception(ctx, handler, authHandler); err != nil {
 		return err
 	}
 	if _, err := c.call(ctx, "Page.enable", nil, sessionID); err != nil {
@@ -1099,25 +1519,95 @@ func (c *cdpConn) navigate(ctx context.Context, rawURL string, handler RequestHa
 	if result.IsDownload {
 		return errors.New("navigate: URL started a download")
 	}
-	return c.waitEvent(ctx, sessionID, "Page.loadEventFired")
+	event := navigationEvent(waitUntil)
+	if event == "" {
+		return nil
+	}
+	return c.waitEvent(ctx, sessionID, event)
 }
 
-func (c *cdpConn) enableRequestInterception(ctx context.Context, handler RequestHandler) error {
+func navigationEvent(waitUntil WaitUntil) string {
+	switch waitUntil {
+	case WaitUntilNone:
+		return ""
+	case WaitUntilDOMContentLoaded:
+		return "Page.domContentEventFired"
+	case WaitUntilLoad:
+		return "Page.loadEventFired"
+	default:
+		return ""
+	}
+}
+
+func (c *cdpConn) enableRequestInterception(
+	ctx context.Context,
+	handler RequestHandler,
+	authHandler AuthHandler,
+) error {
 	sessionID, err := c.pageSession(ctx)
 	if err != nil {
 		return err
 	}
 	c.requestHandler = handler
-	_, err = c.call(ctx, "Fetch.enable", map[string]any{
+	c.authHandler = authHandler
+	params := map[string]any{
 		"patterns": []map[string]any{{
 			"urlPattern":   "*",
 			"requestStage": "Request",
 		}},
-	}, sessionID)
+	}
+	if authHandler != nil {
+		params["handleAuthRequests"] = true
+	}
+	_, err = c.call(ctx, "Fetch.enable", params, sessionID)
 	if err != nil {
 		c.requestHandler = nil
+		c.authHandler = nil
 	}
 	return err
+}
+
+func (c *cdpConn) waitForSelector(ctx context.Context, selector string) error {
+	sessionID, err := c.pageSession(ctx)
+	if err != nil {
+		return err
+	}
+	selectorJSON, _ := json.Marshal(selector)
+	expr := `new Promise((resolve, reject) => {
+const selector = ` + string(selectorJSON) + `;
+let observer;
+const find = () => {
+    try {
+        if (!document.querySelector(selector)) return false;
+        if (observer) observer.disconnect();
+        resolve(true);
+        return true;
+    } catch (error) {
+        if (observer) observer.disconnect();
+        reject(error);
+        return true;
+    }
+};
+if (find()) return;
+observer = new MutationObserver(find);
+observer.observe(document.documentElement || document, {attributes: true, childList: true, subtree: true});
+})`
+	raw, err := c.call(ctx, "Runtime.evaluate", map[string]any{
+		cdpKeyExpression:    expr,
+		"awaitPromise":      true,
+		cdpKeyReturnByValue: true,
+	}, sessionID)
+	if err != nil {
+		return err
+	}
+	var found bool
+	if err := unmarshalRuntimeValue(raw, "wait_for_selector", &found); err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("wait_for_selector %q did not resolve", selector)
+	}
+	return nil
 }
 
 func (c *cdpConn) extractText(ctx context.Context, selector string, maxBytes int) (*textResult, error) {
@@ -1147,8 +1637,8 @@ if (truncated) {
 return {text, url: location.href, title: document.title, truncated};
 })()`
 	raw, err := c.call(ctx, "Runtime.evaluate", map[string]any{
-		"expression":    expr,
-		"returnByValue": true,
+		cdpKeyExpression:    expr,
+		cdpKeyReturnByValue: true,
 	}, sessionID)
 	if err != nil {
 		return nil, err
@@ -1166,8 +1656,8 @@ func (c *cdpConn) pageMetadata(ctx context.Context) (*pageMetadata, error) {
 		return nil, err
 	}
 	raw, err := c.call(ctx, "Runtime.evaluate", map[string]any{
-		"expression":    `({url: location.href, title: document.title})`,
-		"returnByValue": true,
+		cdpKeyExpression:    `({url: location.href, title: document.title})`,
+		cdpKeyReturnByValue: true,
 	}, sessionID)
 	if err != nil {
 		return nil, err
@@ -1179,15 +1669,25 @@ func (c *cdpConn) pageMetadata(ctx context.Context) (*pageMetadata, error) {
 	return &result, nil
 }
 
-func (c *cdpConn) screenshot(ctx context.Context, format string) ([]byte, error) {
+func (c *cdpConn) screenshot(
+	ctx context.Context,
+	format string,
+	fullPage bool,
+	quality *int,
+	maxBytes int64,
+) ([]byte, error) {
 	sessionID, err := c.pageSession(ctx)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := c.call(ctx, "Page.captureScreenshot", map[string]any{
+	params := map[string]any{
 		"format":                format,
-		"captureBeyondViewport": true,
-	}, sessionID)
+		"captureBeyondViewport": fullPage,
+	}
+	if quality != nil {
+		params[paramQuality] = *quality
+	}
+	raw, err := c.call(ctx, "Page.captureScreenshot", params, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1197,11 +1697,29 @@ func (c *cdpConn) screenshot(ctx context.Context, format string) ([]byte, error)
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("parse screenshot result: %w", err)
 	}
+	decodedLen := base64DecodedLen(out.Data)
+	if decodedLen > maxBytes {
+		return nil, fmt.Errorf("screenshot exceeds MaxScreenshotBytes (%d)", maxBytes)
+	}
 	data, err := base64.StdEncoding.DecodeString(out.Data)
 	if err != nil {
 		return nil, fmt.Errorf("decode screenshot: %w", err)
 	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("screenshot exceeds MaxScreenshotBytes (%d)", maxBytes)
+	}
 	return data, nil
+}
+
+func base64DecodedLen(encoded string) int64 {
+	decodedLen := base64.StdEncoding.DecodedLen(len(encoded))
+	if strings.HasSuffix(encoded, "=") {
+		decodedLen--
+	}
+	if strings.HasSuffix(encoded, "==") {
+		decodedLen--
+	}
+	return int64(max(decodedLen, 0))
 }
 
 func (c *cdpConn) pageSession(ctx context.Context) (string, error) {
@@ -1315,7 +1833,7 @@ func (c *cdpConn) call(ctx context.Context, method string, params any, sessionID
 		if err != nil {
 			return nil, fmt.Errorf("cdp %s: %w", method, err)
 		}
-		if handled, err := c.handlePausedRequest(ctx, resp); handled {
+		if handled, err := c.handleInterceptedEvent(ctx, resp); handled {
 			if err != nil {
 				return nil, err
 			}
@@ -1338,7 +1856,7 @@ func (c *cdpConn) waitEvent(ctx context.Context, sessionID, method string) error
 		if err != nil {
 			return fmt.Errorf("wait for %s: %w", method, err)
 		}
-		if handled, err := c.handlePausedRequest(ctx, msg); handled {
+		if handled, err := c.handleInterceptedEvent(ctx, msg); handled {
 			if err != nil {
 				return err
 			}
@@ -1351,8 +1869,19 @@ func (c *cdpConn) waitEvent(ctx context.Context, sessionID, method string) error
 	}
 }
 
+func (c *cdpConn) handleInterceptedEvent(ctx context.Context, msg cdpMessage) (bool, error) {
+	switch msg.Method {
+	case cdpEventRequestPaused:
+		return c.handlePausedRequest(ctx, msg)
+	case cdpEventAuthRequired:
+		return c.handleAuthRequired(ctx, msg)
+	default:
+		return false, nil
+	}
+}
+
 func (c *cdpConn) handlePausedRequest(ctx context.Context, msg cdpMessage) (bool, error) {
-	if msg.Method != cdpEventRequestPaused || c.requestHandler == nil {
+	if c.requestHandler == nil {
 		return false, nil
 	}
 	var paused pausedRequest
@@ -1376,6 +1905,121 @@ func (c *cdpConn) handlePausedRequest(ctx context.Context, msg cdpMessage) (bool
 		return true, c.fulfillPausedRequest(ctx, sessionID, paused.RequestID, response)
 	}
 	return true, c.continuePausedRequest(ctx, sessionID, paused.RequestID, original, request)
+}
+
+func (c *cdpConn) handleAuthRequired(ctx context.Context, msg cdpMessage) (bool, error) {
+	if c.authHandler == nil {
+		return false, nil
+	}
+	var required authRequired
+	if err := json.Unmarshal(msg.Params, &required); err != nil {
+		return true, fmt.Errorf("parse browser authentication challenge: %w", err)
+	}
+	if required.RequestID == "" {
+		return true, errors.New("browser authentication challenge has no requestId")
+	}
+	sessionID := msg.SessionID
+	if sessionID == "" {
+		sessionID = c.pageSessionID
+	}
+	challenge := AuthChallenge{
+		Request: BrowserRequest{
+			URL:          required.Request.URL,
+			Method:       required.Request.Method,
+			Headers:      stringMapHeader(required.Request.Headers),
+			ResourceType: required.ResourceType,
+			FrameID:      required.FrameID,
+		},
+		Source: required.AuthChallenge.Source,
+		Origin: required.AuthChallenge.Origin,
+		Scheme: required.AuthChallenge.Scheme,
+		Realm:  required.AuthChallenge.Realm,
+	}
+	if required.Request.PostData != nil {
+		challenge.Request.PostData = []byte(*required.Request.PostData)
+	}
+	response, err := c.authHandler(ctx, challenge)
+	if err != nil {
+		return true, c.cancelAuthChallenge(
+			ctx,
+			sessionID,
+			required.RequestID,
+			fmt.Errorf("authentication handler: %w", err),
+		)
+	}
+	response, err = normalizeAuthResponse(response)
+	if err != nil {
+		return true, c.cancelAuthChallenge(ctx, sessionID, required.RequestID, err)
+	}
+	return true, c.continueWithAuth(ctx, sessionID, required.RequestID, response)
+}
+
+func stringMapHeader(values map[string]string) http.Header {
+	headers := make(http.Header, len(values))
+	for name, value := range values {
+		headers.Set(name, value)
+	}
+	return headers
+}
+
+func normalizeAuthResponse(response AuthResponse) (AuthResponse, error) {
+	if response.Action == "" {
+		response.Action = AuthActionDefault
+	}
+	switch response.Action {
+	case AuthActionDefault, AuthActionCancel:
+		if response.Username != "" || response.Password != "" {
+			return AuthResponse{}, fmt.Errorf(
+				"authentication action %q cannot include credentials",
+				response.Action,
+			)
+		}
+	case AuthActionProvideCredentials:
+	default:
+		return AuthResponse{}, fmt.Errorf("invalid authentication action %q", response.Action)
+	}
+	return response, nil
+}
+
+func (c *cdpConn) cancelAuthChallenge(
+	ctx context.Context,
+	sessionID string,
+	requestID string,
+	cause error,
+) error {
+	cancelErr := c.continueWithAuth(ctx, sessionID, requestID, AuthResponse{Action: AuthActionCancel})
+	if cancelErr != nil {
+		return errors.Join(cause, cancelErr)
+	}
+	return cause
+}
+
+func (c *cdpConn) continueWithAuth(
+	ctx context.Context,
+	sessionID string,
+	requestID string,
+	response AuthResponse,
+) error {
+	protocolAction := cdpAuthDefault
+	switch response.Action {
+	case AuthActionDefault:
+	case AuthActionCancel:
+		protocolAction = cdpAuthCancel
+	case AuthActionProvideCredentials:
+		protocolAction = cdpAuthCredentials
+	default:
+		return fmt.Errorf("invalid authentication action %q", response.Action)
+	}
+	authResponse := map[string]any{"response": protocolAction}
+	if response.Action == AuthActionProvideCredentials {
+		authResponse["username"] = response.Username
+		authResponse["password"] = response.Password
+	}
+	_, err := c.call(ctx, "Fetch.continueWithAuth", map[string]any{
+		cdpKeyRequestID:         requestID,
+		"authChallengeResponse": authResponse,
+	}, sessionID)
+	return err
 }
 
 func newBrowserRequest(paused pausedRequest) *BrowserRequest {

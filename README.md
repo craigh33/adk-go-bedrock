@@ -97,7 +97,6 @@ make -C examples/bedrock-stream run
 - **System instruction**: `GenerateContentConfig.SystemInstruction` is sent as Bedrock system content.
 - **Tools**: the mapper converts `GenerateContentConfig.Tools` entries:
   - `FunctionDeclarations` → Bedrock `ToolSpecification` (custom function tools)
-  - **Nova Web Grounding (Bedrock-only)**: the reserved sentinel from [`tools/novagrounding`](tools/novagrounding) maps to Bedrock Converse `types.SystemTool{Name: "nova_grounding"}` (not a custom `ToolSpecification`; see [Amazon Nova Web Grounding](https://docs.aws.amazon.com/nova/latest/userguide/grounding.html))
   - Non-function ADK variants (Google Search, Code Execution, Retrieval, MCP Servers, Computer Use, File Search, Google Maps, URL Context, etc.) are rejected early with a clear provider error because they are not currently mapped to Bedrock Converse
   - MCP: use ADK `mcptoolset` so MCP tools become function declarations before they reach this provider ([MCP support](#mcp-support)). Other `genai.Tool` variants (Google Search, code execution, etc.) are not supported here.
 - **Multimodal parts**: ADK `Part` text, thoughts/reasoning, inline/file-backed images, audio, video, and documents are mapped on the Bedrock-compatible subset. Rich user media is sent as Bedrock content blocks; assistant reasoning is preserved as Bedrock reasoning content.

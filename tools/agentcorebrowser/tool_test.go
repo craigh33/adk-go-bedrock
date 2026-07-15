@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -85,6 +86,31 @@ type fakeArtifacts struct {
 	version   int64
 }
 
+type dialerFunc func(
+	context.Context,
+	string,
+	http.Header,
+) (*websocket.Conn, *http.Response, error)
+
+func (f dialerFunc) DialContext(
+	ctx context.Context,
+	rawURL string,
+	header http.Header,
+) (*websocket.Conn, *http.Response, error) {
+	return f(ctx, rawURL, header)
+}
+
+type trackingBody struct {
+	*bytes.Reader
+
+	closed atomic.Bool
+}
+
+func (b *trackingBody) Close() error {
+	b.closed.Store(true)
+	return nil
+}
+
 func (f *fakeArtifacts) Save(_ context.Context, name string, data *genai.Part) (*artifact.SaveResponse, error) {
 	f.savedName = name
 	f.savedPart = data
@@ -155,7 +181,7 @@ func fakeCDPServer(t *testing.T, failMethod string) string {
 	return fakeCDPServerWithHook(t, failMethod, nil)
 }
 
-//nolint:gocognit // Keeping the fake CDP request table in one place is clearer for these tests.
+//nolint:cyclop,gocognit,gocyclo // Keeping the fake CDP request table in one place is clearer for these tests.
 func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, map[string]any)) string {
 	t.Helper()
 	upgrader := websocket.Upgrader{}
@@ -200,7 +226,12 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 					"id":     req.ID,
 					"result": map[string]any{"sessionId": "session-1"},
 				})
-			case "Fetch.enable", "Fetch.continueRequest", "Fetch.failRequest", "Fetch.fulfillRequest", "Page.enable":
+			case "Fetch.enable",
+				"Fetch.continueRequest",
+				"Fetch.failRequest",
+				"Fetch.fulfillRequest",
+				"Fetch.continueWithAuth",
+				"Page.enable":
 				_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{}})
 			case "Page.navigate":
 				requestURL, _ := req.Params[paramURL].(string)
@@ -253,10 +284,45 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 					})
 					continue
 				}
-				_ = conn.WriteJSON(map[string]any{"method": "Page.loadEventFired", "sessionId": "session-1"})
+				if failMethod == "Page.navigate.auth" || failMethod == "Page.navigate.authError" {
+					_ = conn.WriteJSON(map[string]any{
+						"method":    "Fetch.authRequired",
+						"sessionId": "session-1",
+						"params": map[string]any{
+							"requestId":    "auth-1",
+							"resourceType": "Document",
+							"frameId":      "frame-1",
+							"request": map[string]any{
+								"url":      requestURL,
+								"method":   "GET",
+								"headers":  map[string]string{"Accept": "text/html"},
+								"postData": "",
+							},
+							"authChallenge": map[string]any{
+								"source": "Server",
+								"origin": "https://example.com",
+								"scheme": "basic",
+								"realm":  "test realm",
+							},
+						},
+					})
+				}
+				if failMethod != "Page.navigate.noEvents" {
+					if failMethod != "Page.navigate.loadOnly" {
+						_ = conn.WriteJSON(map[string]any{
+							"method":    "Page.domContentEventFired",
+							"sessionId": "session-1",
+						})
+					}
+					if failMethod != "Page.navigate.domOnly" {
+						_ = conn.WriteJSON(map[string]any{"method": "Page.loadEventFired", "sessionId": "session-1"})
+					}
+				}
 				_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{"frameId": "frame-1"}})
 			case "Runtime.evaluate":
-				if failMethod == "Runtime.evaluate.exception" {
+				expr, _ := req.Params["expression"].(string)
+				if failMethod == "Runtime.evaluate.exception" ||
+					(failMethod == "Runtime.evaluate.selectorException" && strings.HasPrefix(expr, "new Promise")) {
 					_ = conn.WriteJSON(map[string]any{
 						"id": req.ID,
 						"result": map[string]any{
@@ -270,16 +336,18 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 					})
 					continue
 				}
-				value := map[string]any{"url": "https://example.com/after", "title": "Example"}
+				var value any = map[string]any{"url": "https://example.com/after", "title": "Example"}
 				if failMethod == "Runtime.evaluate.redirect" ||
 					(failMethod == "Runtime.evaluate.redirectAfterCapture" && captured) {
-					value["url"] = "https://blocked.example.net/after"
+					value.(map[string]any)["url"] = "https://blocked.example.net/after"
 				}
-				if expr, _ := req.Params["expression"].(string); strings.Contains(expr, "document.querySelector") {
-					value["text"] = "hello world"
+				if strings.HasPrefix(expr, "new Promise") {
+					value = true
+				} else if strings.Contains(expr, "document.querySelector") {
+					value.(map[string]any)["text"] = "hello world"
 					if strings.Contains(expr, "const maxBytes = 5;") {
-						value["text"] = "hello"
-						value["truncated"] = true
+						value.(map[string]any)["text"] = "hello"
+						value.(map[string]any)["truncated"] = true
 					}
 				}
 				_ = conn.WriteJSON(map[string]any{
@@ -290,9 +358,13 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 				})
 			case "Page.captureScreenshot":
 				captured = true
+				data := []byte("shot")
+				if failMethod == "Page.captureScreenshot.oversized" {
+					data = []byte("oversized")
+				}
 				_ = conn.WriteJSON(map[string]any{
 					"id":     req.ID,
-					"result": map[string]any{"data": base64.StdEncoding.EncodeToString([]byte("shot"))},
+					"result": map[string]any{"data": base64.StdEncoding.EncodeToString(data)},
 				})
 			default:
 				_ = conn.WriteJSON(map[string]any{
@@ -306,6 +378,7 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 	return "ws" + strings.TrimPrefix(srv.URL, "http")
 }
 
+//nolint:gocognit // This table validates the constructor's complete public configuration surface.
 func TestNewValidationAndDefaults(t *testing.T) {
 	t.Parallel()
 	if _, err := New(Config{Region: "us-east-1", Credentials: testCreds()}); err == nil {
@@ -359,6 +432,47 @@ func TestNewValidationAndDefaults(t *testing.T) {
 	}); err == nil {
 		t.Fatal("expected nil request handler error")
 	}
+	if _, err := New(Config{
+		API:            &fakeAgentCoreAPI{},
+		Region:         "us-east-1",
+		Credentials:    testCreds(),
+		URLMiddlewares: []URLMiddleware{nil},
+	}); err == nil {
+		t.Fatal("expected nil URL middleware error")
+	}
+	if _, err := New(Config{
+		API:         &fakeAgentCoreAPI{},
+		Region:      "us-east-1",
+		Credentials: testCreds(),
+		URLMiddlewares: []URLMiddleware{
+			func(URLHandler) URLHandler { return nil },
+		},
+	}); err == nil {
+		t.Fatal("expected nil URL handler error")
+	}
+
+	for _, tc := range []struct {
+		name   string
+		change func(*Config)
+	}{
+		{name: "negative session timeout", change: func(c *Config) { c.SessionTimeoutSeconds = -1 }},
+		{name: "negative viewport", change: func(c *Config) { c.ViewportWidth, c.ViewportHeight = -1, -1 }},
+		{name: "negative navigation timeout", change: func(c *Config) { c.NavigationTimeout = -1 }},
+		{name: "negative cleanup timeout", change: func(c *Config) { c.CleanupTimeout = -1 }},
+		{name: "negative max text", change: func(c *Config) { c.MaxTextBytes = -1 }},
+		{name: "negative max screenshot", change: func(c *Config) { c.MaxScreenshotBytes = -1 }},
+		{name: "invalid wait mode", change: func(c *Config) { c.WaitUntil = "network_idle" }},
+		{name: "oversized response limit", change: func(c *Config) { c.MaxScreenshotBytes = int64(^uint64(0) >> 1) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := Config{API: &fakeAgentCoreAPI{}, Region: "us-east-1", Credentials: testCreds()}
+			tc.change(&cfg)
+			if _, err := New(cfg); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
 
 	tl, err := New(Config{API: &fakeAgentCoreAPI{}, Region: " us-east-1 ", Credentials: testCreds()})
 	if err != nil {
@@ -373,6 +487,21 @@ func TestNewValidationAndDefaults(t *testing.T) {
 	}
 	if bt.maxTextBytes != defaultMaxTextBytes {
 		t.Errorf("max text = %d", bt.maxTextBytes)
+	}
+	if bt.cleanupTimeout != defaultCleanupTimeout {
+		t.Errorf("cleanup timeout = %s", bt.cleanupTimeout)
+	}
+	if bt.maxScreenshotBytes != defaultMaxScreenshotBytes {
+		t.Errorf("max screenshot = %d", bt.maxScreenshotBytes)
+	}
+	if bt.waitUntil != WaitUntilLoad {
+		t.Errorf("wait until = %q", bt.waitUntil)
+	}
+	if bt.dialer != websocket.DefaultDialer {
+		t.Errorf("dialer = %#v", bt.dialer)
+	}
+	if bt.automationReadLimit <= defaultMaxScreenshotBytes {
+		t.Errorf("automation read limit = %d", bt.automationReadLimit)
 	}
 }
 
@@ -392,6 +521,16 @@ func TestDeclarationAndProcessRequest(t *testing.T) {
 	}
 	if got := strings.Join(decl.Parameters.Properties[paramFormat].Enum, ","); got != "png,jpeg,jpg" {
 		t.Errorf("format enum = %v", got)
+	}
+	waitUntilEnum := strings.Join(decl.Parameters.Properties[paramWaitUntil].Enum, ",")
+	if waitUntilEnum != "load,dom_content_loaded,none" {
+		t.Errorf("wait_until enum = %v", waitUntilEnum)
+	}
+	if got := decl.Parameters.Properties[paramFullPage].Type; got != schemaTypeBoolean {
+		t.Errorf("full_page type = %q", got)
+	}
+	if got := decl.Parameters.Properties[paramQuality].Type; got != schemaTypeInteger {
+		t.Errorf("quality type = %q", got)
 	}
 
 	req := &model.LLMRequest{}
@@ -418,6 +557,137 @@ func TestSignedWebSocketHeadersRejectsUnsupportedScheme(t *testing.T) {
 	bt := tl.(*browserTool)
 	if _, err := bt.signedWebSocketHeaders(context.Background(), "https://example.com/stream"); err == nil {
 		t.Fatal("expected unsupported scheme error")
+	}
+}
+
+func TestOpenCDPUsesConfiguredDialerAndSignedHeaders(t *testing.T) {
+	t.Parallel()
+	wsURL := fakeCDPServer(t, "")
+	var gotURL string
+	var gotHeaders http.Header
+	dialer := dialerFunc(func(
+		ctx context.Context,
+		rawURL string,
+		headers http.Header,
+	) (*websocket.Conn, *http.Response, error) {
+		gotURL = rawURL
+		gotHeaders = headers.Clone()
+		return websocket.DefaultDialer.DialContext(ctx, rawURL, headers)
+	})
+	tl, err := New(Config{
+		API:         &fakeAgentCoreAPI{},
+		Region:      "us-east-1",
+		Credentials: testCreds(),
+		Dialer:      dialer,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cdp, err := tl.(*browserTool).openCDP(context.Background(), wsURL)
+	if err != nil {
+		t.Fatalf("openCDP: %v", err)
+	}
+	cdp.close()
+	if gotURL != wsURL {
+		t.Errorf("dial URL = %q", gotURL)
+	}
+	if gotHeaders.Get("Authorization") == "" || gotHeaders.Get("X-Amz-Date") == "" {
+		t.Errorf("signed headers = %v", gotHeaders)
+	}
+}
+
+func TestOpenCDPClosesDialResponseOnError(t *testing.T) {
+	t.Parallel()
+	body := &trackingBody{Reader: bytes.NewReader(nil)}
+	dialErr := errors.New("dial failed")
+	dialer := dialerFunc(func(
+		context.Context,
+		string,
+		http.Header,
+	) (*websocket.Conn, *http.Response, error) {
+		return nil, &http.Response{Body: body}, dialErr
+	})
+	tl, err := New(Config{
+		API:         &fakeAgentCoreAPI{},
+		Region:      "us-east-1",
+		Credentials: testCreds(),
+		Dialer:      dialer,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tl.(*browserTool).openCDP(context.Background(), "wss://example.com/stream")
+	if !errors.Is(err, dialErr) {
+		t.Fatalf("openCDP error = %v", err)
+	}
+	if !body.closed.Load() {
+		t.Fatal("dial response body was not closed")
+	}
+}
+
+func TestOpenCDPRejectsNilConnection(t *testing.T) {
+	t.Parallel()
+	dialer := dialerFunc(func(
+		context.Context,
+		string,
+		http.Header,
+	) (*websocket.Conn, *http.Response, error) {
+		return nil, nil, nil
+	})
+	tl, err := New(Config{
+		API:         &fakeAgentCoreAPI{},
+		Region:      "us-east-1",
+		Credentials: testCreds(),
+		Dialer:      dialer,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tl.(*browserTool).openCDP(context.Background(), "wss://example.com/stream")
+	if err == nil || !strings.Contains(err.Error(), "nil connection") {
+		t.Fatalf("expected nil connection error, got %v", err)
+	}
+}
+
+func TestOpenCDPRejectsOversizedMessage(t *testing.T) {
+	t.Parallel()
+	upgrader := websocket.Upgrader{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer conn.Close()
+		var req map[string]any
+		if err := conn.ReadJSON(&req); err != nil {
+			return
+		}
+		_ = conn.WriteJSON(map[string]any{
+			"id":     req["id"],
+			"result": map[string]any{"padding": strings.Repeat("x", 2<<20)},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	tl, err := New(Config{
+		API:                &fakeAgentCoreAPI{},
+		Region:             "us-east-1",
+		Credentials:        testCreds(),
+		MaxTextBytes:       1,
+		MaxScreenshotBytes: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cdp, err := tl.(*browserTool).openCDP(context.Background(), wsURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cdp.close()
+	_, err = cdp.pageSession(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "read limit") {
+		t.Fatalf("expected WebSocket read limit error, got %v", err)
 	}
 }
 
@@ -516,17 +786,103 @@ func TestHostPolicy(t *testing.T) {
 	})
 	bt := tl.(*browserTool)
 
-	if err := bt.checkURL("https://sub.example.com/path"); err != nil {
+	if err := bt.checkURL(context.Background(), "https://sub.example.com/path", URLStageNavigate); err != nil {
 		t.Fatalf("allowed subdomain rejected: %v", err)
 	}
-	if err := bt.checkURL("https://bad.example.com"); err == nil {
+	if err := bt.checkURL(context.Background(), "https://bad.example.com", URLStageNavigate); err == nil {
 		t.Fatal("expected denied host error")
 	}
-	if err := bt.checkURL("https://other.test"); err == nil {
+	if err := bt.checkURL(context.Background(), "https://other.test", URLStageNavigate); err == nil {
 		t.Fatal("expected not allowed host error")
 	}
-	if err := bt.checkURL("file:///etc/passwd"); err == nil {
+	if err := bt.checkURL(context.Background(), "file:///etc/passwd", URLStageNavigate); err == nil {
 		t.Fatal("expected scheme error")
+	}
+}
+
+func TestURLMiddlewareOrderingAndStages(t *testing.T) {
+	t.Parallel()
+	var calls []string
+	middleware := func(name string) URLMiddleware {
+		return func(next URLHandler) URLHandler {
+			return func(ctx context.Context, check URLCheck) error {
+				calls = append(calls, name+":before:"+string(check.Stage))
+				err := next(ctx, check)
+				calls = append(calls, name+":after:"+string(check.Stage))
+				return err
+			}
+		}
+	}
+	tl, err := New(Config{
+		API:            &fakeAgentCoreAPI{},
+		Region:         "us-east-1",
+		Credentials:    testCreds(),
+		URLMiddlewares: []URLMiddleware{middleware("first"), middleware("second")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bt := tl.(*browserTool)
+	for _, stage := range []URLStage{URLStageNavigate, URLStageRequest, URLStageCurrent, URLStageFinal} {
+		if err := bt.checkURL(context.Background(), "https://example.com", stage); err != nil {
+			t.Fatalf("stage %q: %v", stage, err)
+		}
+	}
+	want := []string{
+		"first:before:navigate", "second:before:navigate", "second:after:navigate", "first:after:navigate",
+		"first:before:request", "second:before:request", "second:after:request", "first:after:request",
+		"first:before:current", "second:before:current", "second:after:current", "first:after:current",
+		"first:before:final", "second:before:final", "second:after:final", "first:after:final",
+	}
+	if strings.Join(calls, ",") != strings.Join(want, ",") {
+		t.Fatalf("middleware calls = %v", calls)
+	}
+}
+
+func TestURLMiddlewareCanReplaceHostPolicy(t *testing.T) {
+	t.Parallel()
+	replace := func(URLHandler) URLHandler {
+		return func(context.Context, URLCheck) error { return nil }
+	}
+	tl, err := New(Config{
+		API:            &fakeAgentCoreAPI{},
+		Region:         "us-east-1",
+		Credentials:    testCreds(),
+		AllowedHosts:   []string{"example.com"},
+		URLMiddlewares: []URLMiddleware{replace},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bt := tl.(*browserTool)
+	if err := bt.checkURL(context.Background(), "https://other.test", URLStageNavigate); err != nil {
+		t.Fatalf("replacement middleware did not replace host policy: %v", err)
+	}
+	if err := bt.checkURL(context.Background(), "file:///etc/passwd", URLStageNavigate); err == nil {
+		t.Fatal("replacement middleware bypassed structural URL validation")
+	}
+}
+
+func TestURLMiddlewareRewriteIsValidatedByNext(t *testing.T) {
+	t.Parallel()
+	rewrite := func(next URLHandler) URLHandler {
+		return func(ctx context.Context, check URLCheck) error {
+			check.URL.Host = "127.0.0.1"
+			return next(ctx, check)
+		}
+	}
+	tl, err := New(Config{
+		API:            &fakeAgentCoreAPI{},
+		Region:         "us-east-1",
+		Credentials:    testCreds(),
+		URLMiddlewares: []URLMiddleware{rewrite},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tl.(*browserTool).checkURL(context.Background(), "https://example.com", URLStageRequest)
+	if err == nil || !strings.Contains(err.Error(), "explicit allowlist") {
+		t.Fatalf("expected rewritten URL policy error, got %v", err)
 	}
 }
 
@@ -544,11 +900,11 @@ func TestHostPolicyRejectsLocalTargetsByDefault(t *testing.T) {
 		"https://10.0.0.1",
 		"https://[fc00::1]",
 	} {
-		if err := bt.checkURL(rawURL); err == nil {
+		if err := bt.checkURL(context.Background(), rawURL, URLStageNavigate); err == nil {
 			t.Fatalf("expected local target rejection for %s", rawURL)
 		}
 	}
-	if err := bt.checkURL("https://93.184.216.34"); err != nil {
+	if err := bt.checkURL(context.Background(), "https://93.184.216.34", URLStageNavigate); err != nil {
 		t.Fatalf("public IP rejected: %v", err)
 	}
 
@@ -559,10 +915,10 @@ func TestHostPolicyRejectsLocalTargetsByDefault(t *testing.T) {
 		AllowedHosts: []string{"localhost", "127.0.0.1"},
 	})
 	bt = tl.(*browserTool)
-	if err := bt.checkURL("https://localhost"); err != nil {
+	if err := bt.checkURL(context.Background(), "https://localhost", URLStageNavigate); err != nil {
 		t.Fatalf("explicit localhost allow rejected: %v", err)
 	}
-	if err := bt.checkURL("https://127.0.0.1"); err != nil {
+	if err := bt.checkURL(context.Background(), "https://127.0.0.1", URLStageNavigate); err != nil {
 		t.Fatalf("explicit loopback allow rejected: %v", err)
 	}
 }
@@ -579,7 +935,7 @@ func TestHostPolicyRejectsLegacyIPv4TargetsByDefault(t *testing.T) {
 		"https://0x7f000001",
 		"https://0x7f.0.0.1",
 	} {
-		if err := bt.checkURL(rawURL); err == nil {
+		if err := bt.checkURL(context.Background(), rawURL, URLStageNavigate); err == nil {
 			t.Fatalf("expected legacy IPv4 target rejection for %s", rawURL)
 		}
 	}
@@ -856,6 +1212,327 @@ func TestRequestMiddlewareCanReplaceDefaultPolicy(t *testing.T) {
 	}
 }
 
+func TestNavigateWaitModesAndOverride(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		serverMode string
+		configured WaitUntil
+		override   string
+	}{
+		{name: "load default", serverMode: "Page.navigate.loadOnly"},
+		{name: "DOMContentLoaded", serverMode: "Page.navigate.domOnly", configured: WaitUntilDOMContentLoaded},
+		{name: "none", serverMode: "Page.navigate.noEvents", configured: WaitUntilNone},
+		{name: "per action override", serverMode: "Page.navigate.noEvents", override: string(WaitUntilNone)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			wsURL := fakeCDPServer(t, tc.serverMode)
+			api := &fakeAgentCoreAPI{startOut: &bedrockagentcore.StartBrowserSessionOutput{
+				BrowserIdentifier: aws.String("aws.browser.v1"),
+				SessionId:         aws.String("session-1"),
+				Streams:           browserStreams(wsURL),
+			}}
+			tl, err := New(Config{
+				API:         api,
+				Region:      "us-east-1",
+				Credentials: testCreds(),
+				WaitUntil:   tc.configured,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := map[string]any{paramAction: actionNavigate, paramURL: "https://example.com"}
+			if tc.override != "" {
+				args[paramWaitUntil] = tc.override
+			}
+			if _, err := tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), args); err != nil {
+				t.Fatalf("navigate: %v", err)
+			}
+		})
+	}
+}
+
+func TestNavigateRejectsInvalidWaitOverrideBeforeStartingSession(t *testing.T) {
+	t.Parallel()
+	api := &fakeAgentCoreAPI{}
+	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction:    actionNavigate,
+		paramURL:       "https://example.com",
+		paramWaitUntil: "network_idle",
+	})
+	if err == nil || !strings.Contains(err.Error(), paramWaitUntil) {
+		t.Fatalf("expected wait_until validation error, got %v", err)
+	}
+	if api.lastStart != nil {
+		t.Fatal("session started for invalid wait_until")
+	}
+}
+
+func TestSelectorAndWaitArgumentsRejectInvalidTypes(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		key  string
+	}{
+		{name: "wait_until", key: paramWaitUntil},
+		{name: "wait_for_selector", key: paramWaitForSelector},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			api := &fakeAgentCoreAPI{}
+			tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := map[string]any{
+				paramAction: actionNavigate,
+				paramURL:    "https://example.com",
+				tc.key:      true,
+			}
+			_, err = tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), args)
+			if err == nil || !strings.Contains(err.Error(), tc.key+" must be a string") {
+				t.Fatalf("expected argument type error, got %v", err)
+			}
+			if api.lastStart != nil {
+				t.Fatal("session started before argument validation")
+			}
+		})
+	}
+}
+
+func TestNavigateWaitsForSelector(t *testing.T) {
+	t.Parallel()
+	evaluations := make(chan map[string]any, 4)
+	wsURL := fakeCDPServerWithHook(t, "", func(method string, params map[string]any) {
+		if method == "Runtime.evaluate" {
+			evaluations <- params
+		}
+	})
+	api := &fakeAgentCoreAPI{startOut: &bedrockagentcore.StartBrowserSessionOutput{
+		BrowserIdentifier: aws.String("aws.browser.v1"),
+		SessionId:         aws.String("session-1"),
+		Streams:           browserStreams(wsURL),
+	}}
+	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction:          actionNavigate,
+		paramURL:             "https://example.com",
+		paramWaitForSelector: "main[data-ready]",
+	})
+	if err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+	waitParams := <-evaluations
+	if waitParams["awaitPromise"] != true || waitParams["returnByValue"] != true {
+		t.Errorf("selector evaluation params = %v", waitParams)
+	}
+	if expr, _ := waitParams["expression"].(string); !strings.Contains(expr, `main[data-ready]`) ||
+		!strings.Contains(expr, "MutationObserver") || !strings.Contains(expr, "attributes: true") {
+		t.Errorf("selector expression = %q", expr)
+	}
+}
+
+func TestExtractTextUsesWaitSelectorAsExtractionSelector(t *testing.T) {
+	t.Parallel()
+	evaluations := make(chan string, 4)
+	wsURL := fakeCDPServerWithHook(t, "", func(method string, params map[string]any) {
+		if method == "Runtime.evaluate" {
+			expr, _ := params["expression"].(string)
+			evaluations <- expr
+		}
+	})
+	api := &fakeAgentCoreAPI{getOut: &bedrockagentcore.GetBrowserSessionOutput{
+		BrowserIdentifier: aws.String("aws.browser.v1"),
+		SessionId:         aws.String("session-1"),
+		Streams:           browserStreams(wsURL),
+	}}
+	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction:          actionExtractText,
+		paramSessionID:       "session-1",
+		paramWaitForSelector: "article.ready",
+	})
+	if err != nil {
+		t.Fatalf("extract_text: %v", err)
+	}
+	waitExpr := <-evaluations
+	extractExpr := <-evaluations
+	if !strings.HasPrefix(waitExpr, "new Promise") {
+		t.Errorf("wait expression = %q", waitExpr)
+	}
+	if !strings.Contains(extractExpr, `const selector = "article.ready";`) {
+		t.Errorf("extract expression = %q", extractExpr)
+	}
+}
+
+//nolint:gocognit // The cases share one CDP setup and differ only in selector timing behavior.
+func TestSelectorWaitErrorsAndTimeout(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		serverMode string
+		timeout    time.Duration
+		delay      time.Duration
+		want       string
+	}{
+		{name: "invalid selector", serverMode: "Runtime.evaluate.selectorException", timeout: time.Second, want: "SyntaxError: invalid selector"},
+		{name: "timeout", timeout: 50 * time.Millisecond, delay: 200 * time.Millisecond, want: "i/o timeout"},
+		{name: "delayed resolution", timeout: time.Second, delay: 20 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			wsURL := fakeCDPServerWithHook(t, tc.serverMode, func(method string, params map[string]any) {
+				if method == "Runtime.evaluate" && tc.delay > 0 {
+					expr, _ := params["expression"].(string)
+					if strings.HasPrefix(expr, "new Promise") {
+						time.Sleep(tc.delay)
+					}
+				}
+			})
+			api := &fakeAgentCoreAPI{startOut: &bedrockagentcore.StartBrowserSessionOutput{
+				BrowserIdentifier: aws.String("aws.browser.v1"),
+				SessionId:         aws.String("session-1"),
+				Streams:           browserStreams(wsURL),
+			}}
+			tl, err := New(Config{
+				API:               api,
+				Region:            "us-east-1",
+				Credentials:       testCreds(),
+				NavigationTimeout: tc.timeout,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+				paramAction:          actionNavigate,
+				paramURL:             "https://example.com",
+				paramWaitForSelector: "main",
+			})
+			if tc.want == "" && err != nil {
+				t.Fatalf("navigate: %v", err)
+			}
+			if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+//nolint:gocognit // A table keeps every public authentication response on the same protocol path.
+func TestAuthenticationFlows(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name         string
+		response     AuthResponse
+		handlerError error
+		wantProtocol string
+		wantError    string
+	}{
+		{name: "default", response: AuthResponse{}, wantProtocol: "Default"},
+		{name: "cancel", response: AuthResponse{Action: AuthActionCancel}, wantProtocol: "CancelAuth"},
+		{name: "credentials", response: AuthResponse{Action: AuthActionProvideCredentials, Username: "user", Password: "pass"}, wantProtocol: "ProvideCredentials"},
+		{name: "handler error", handlerError: errors.New("no credentials"), wantProtocol: "CancelAuth", wantError: "no credentials"},
+		{name: "invalid action", response: AuthResponse{Action: "retry"}, wantProtocol: "CancelAuth", wantError: "invalid authentication action"},
+		{name: "credentials with default", response: AuthResponse{Username: "user"}, wantProtocol: "CancelAuth", wantError: "cannot include credentials"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			authParams := make(chan map[string]any, 1)
+			enableParams := make(chan map[string]any, 1)
+			wsURL := fakeCDPServerWithHook(t, "Page.navigate.auth", func(method string, params map[string]any) {
+				switch method {
+				case "Fetch.enable":
+					enableParams <- params
+				case "Fetch.continueWithAuth":
+					authParams <- params
+				}
+			})
+			api := &fakeAgentCoreAPI{startOut: &bedrockagentcore.StartBrowserSessionOutput{
+				BrowserIdentifier: aws.String("aws.browser.v1"),
+				SessionId:         aws.String("session-1"),
+				Streams:           browserStreams(wsURL),
+			}}
+			handler := func(_ context.Context, challenge AuthChallenge) (AuthResponse, error) {
+				if challenge.Source != "Server" || challenge.Origin != "https://example.com" ||
+					challenge.Scheme != "basic" || challenge.Realm != "test realm" ||
+					challenge.Request.URL != "https://example.com" {
+					t.Errorf("challenge = %#v", challenge)
+				}
+				return tc.response, tc.handlerError
+			}
+			tl, err := New(Config{
+				API:         api,
+				Region:      "us-east-1",
+				Credentials: testCreds(),
+				AuthHandler: handler,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+				paramAction: actionNavigate,
+				paramURL:    "https://example.com",
+			})
+			if tc.wantError == "" && err != nil {
+				t.Fatalf("navigate: %v", err)
+			}
+			if tc.wantError != "" && (err == nil || !strings.Contains(err.Error(), tc.wantError)) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantError, err)
+			}
+			if (<-enableParams)["handleAuthRequests"] != true {
+				t.Error("Fetch.enable did not enable auth handling")
+			}
+			response, _ := (<-authParams)["authChallengeResponse"].(map[string]any)
+			if response["response"] != tc.wantProtocol {
+				t.Errorf("auth response = %v", response)
+			}
+			if tc.wantProtocol == "ProvideCredentials" &&
+				(response["username"] != "user" || response["password"] != "pass") {
+				t.Errorf("auth credentials = %v", response)
+			}
+		})
+	}
+}
+
+func TestNilAuthHandlerDoesNotEnableAuthInterception(t *testing.T) {
+	t.Parallel()
+	enableParams := make(chan map[string]any, 1)
+	wsURL := fakeCDPServerWithHook(t, "", func(method string, params map[string]any) {
+		if method == "Fetch.enable" {
+			enableParams <- params
+		}
+	})
+	api := &fakeAgentCoreAPI{startOut: &bedrockagentcore.StartBrowserSessionOutput{
+		BrowserIdentifier: aws.String("aws.browser.v1"),
+		SessionId:         aws.String("session-1"),
+		Streams:           browserStreams(wsURL),
+	}}
+	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction: actionNavigate,
+		paramURL:    "https://example.com",
+	}); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+	if _, ok := (<-enableParams)["handleAuthRequests"]; ok {
+		t.Fatal("Fetch.enable unexpectedly enabled auth handling")
+	}
+}
+
 func TestExtractTextGetsSessionAndTruncates(t *testing.T) {
 	t.Parallel()
 	wsURL := fakeCDPServer(t, "")
@@ -1006,7 +1683,13 @@ func TestNavigateStopsAutoStartedSessionOnMetadataError(t *testing.T) {
 func TestCleanupStartedSessionIgnoresCallerCancellation(t *testing.T) {
 	t.Parallel()
 	api := &fakeAgentCoreAPI{}
-	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	const cleanupTimeout = 2 * time.Second
+	tl, _ := New(Config{
+		API:            api,
+		Region:         "us-east-1",
+		Credentials:    testCreds(),
+		CleanupTimeout: cleanupTimeout,
+	})
 	bt := tl.(*browserTool)
 	parent, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -1026,7 +1709,7 @@ func TestCleanupStartedSessionIgnoresCallerCancellation(t *testing.T) {
 	if api.stopDeadline.IsZero() {
 		t.Fatal("cleanup context has no deadline")
 	}
-	if remaining := time.Until(api.stopDeadline); remaining <= 0 || remaining > defaultCleanupTimeout {
+	if remaining := time.Until(api.stopDeadline); remaining <= 0 || remaining > cleanupTimeout {
 		t.Fatalf("cleanup deadline remaining = %v", remaining)
 	}
 	if aws.ToString(api.lastStop.SessionId) != "session-1" {
@@ -1246,6 +1929,157 @@ func TestScreenshotSavesArtifact(t *testing.T) {
 	}
 	if out[paramURL] != "https://example.com/after" || out[resultKeyTitle] != "Example" {
 		t.Errorf("metadata = url %v title %v", out[paramURL], out[resultKeyTitle])
+	}
+}
+
+//nolint:gocognit // The table verifies option boundaries and their exact CDP parameter mapping.
+func TestScreenshotOptions(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		args     map[string]any
+		wantFull bool
+		quality  *float64
+	}{
+		{
+			name:     "defaults to full page",
+			args:     map[string]any{paramFormat: screenshotFormatPNG},
+			wantFull: true,
+		},
+		{
+			name:     "viewport JPEG at minimum quality",
+			args:     map[string]any{paramFormat: screenshotFormatJPEG, paramFullPage: false, paramQuality: float64(0)},
+			wantFull: false,
+			quality:  func() *float64 { value := float64(0); return &value }(),
+		},
+		{
+			name:     "JPEG maximum quality",
+			args:     map[string]any{paramFormat: screenshotFormatJPEG, paramQuality: float64(100)},
+			wantFull: true,
+			quality:  func() *float64 { value := float64(100); return &value }(),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			captured := make(chan map[string]any, 1)
+			wsURL := fakeCDPServerWithHook(t, "", func(method string, params map[string]any) {
+				if method == "Page.captureScreenshot" {
+					captured <- params
+				}
+			})
+			api := &fakeAgentCoreAPI{getOut: &bedrockagentcore.GetBrowserSessionOutput{
+				BrowserIdentifier: aws.String("aws.browser.v1"),
+				SessionId:         aws.String("session-1"),
+				Streams:           browserStreams(wsURL),
+			}}
+			tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := map[string]any{paramAction: actionScreenshot, paramSessionID: "session-1"}
+			maps.Copy(args, tc.args)
+			if _, err := tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), args); err != nil {
+				t.Fatalf("screenshot: %v", err)
+			}
+			params := <-captured
+			if params["captureBeyondViewport"] != tc.wantFull {
+				t.Errorf("captureBeyondViewport = %v", params["captureBeyondViewport"])
+			}
+			gotQuality, qualitySet := params[paramQuality].(float64)
+			if tc.quality == nil && qualitySet {
+				t.Errorf("unexpected quality = %v", gotQuality)
+			}
+			if tc.quality != nil && (!qualitySet || gotQuality != *tc.quality) {
+				t.Errorf("quality = %v, set %v", gotQuality, qualitySet)
+			}
+		})
+	}
+}
+
+func TestScreenshotOptionValidation(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{name: "PNG quality", args: map[string]any{paramQuality: 80}, want: "only supported for JPEG"},
+		{name: "negative quality", args: map[string]any{paramFormat: screenshotFormatJPEG, paramQuality: -1}, want: "between 0 and 100"},
+		{name: "quality above maximum", args: map[string]any{paramFormat: screenshotFormatJPEG, paramQuality: 101}, want: "between 0 and 100"},
+		{name: "fractional quality", args: map[string]any{paramFormat: screenshotFormatJPEG, paramQuality: 80.5}, want: "must be an integer"},
+		{name: "string quality", args: map[string]any{paramFormat: screenshotFormatJPEG, paramQuality: "80"}, want: "must be an integer"},
+		{name: "non boolean full page", args: map[string]any{paramFullPage: "false"}, want: "must be a boolean"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			api := &fakeAgentCoreAPI{}
+			tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := map[string]any{paramAction: actionScreenshot, paramSessionID: "session-1"}
+			maps.Copy(args, tc.args)
+			_, err = tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), args)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+			if api.lastGet != nil {
+				t.Fatal("browser session fetched before screenshot option validation")
+			}
+		})
+	}
+}
+
+//nolint:gocognit // Both size-limit paths intentionally share the artifact persistence assertions.
+func TestScreenshotSizeLimit(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		serverMode string
+		limit      int64
+		wantError  bool
+	}{
+		{name: "exact limit", limit: 4},
+		{name: "oversized", serverMode: "Page.captureScreenshot.oversized", limit: 4, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			wsURL := fakeCDPServer(t, tc.serverMode)
+			api := &fakeAgentCoreAPI{getOut: &bedrockagentcore.GetBrowserSessionOutput{
+				BrowserIdentifier: aws.String("aws.browser.v1"),
+				SessionId:         aws.String("session-1"),
+				Streams:           browserStreams(wsURL),
+			}}
+			arts := &fakeArtifacts{}
+			tl, err := New(Config{
+				API:                api,
+				Region:             "us-east-1",
+				Credentials:        testCreds(),
+				MaxScreenshotBytes: tc.limit,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = tl.(*browserTool).Run(newFakeToolCtx(arts), map[string]any{
+				paramAction:    actionScreenshot,
+				paramSessionID: "session-1",
+			})
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "MaxScreenshotBytes") {
+					t.Fatalf("expected screenshot size error, got %v", err)
+				}
+				if arts.savedName != "" {
+					t.Fatalf("oversized screenshot was saved as %q", arts.savedName)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("screenshot: %v", err)
+			}
+			if arts.savedName == "" {
+				t.Fatal("exact-limit screenshot was not saved")
+			}
+		})
 	}
 }
 
