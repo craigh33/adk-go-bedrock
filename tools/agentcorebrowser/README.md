@@ -9,6 +9,7 @@ awsCfg, err := config.LoadDefaultConfig(ctx)
 if err != nil {
     log.Fatal(err)
 }
+token := os.Getenv("EXAMPLE_TOKEN")
 
 browserTool, err := agentcorebrowser.New(agentcorebrowser.Config{
     API:               bedrockagentcore.NewFromConfig(awsCfg),
@@ -16,6 +17,16 @@ browserTool, err := agentcorebrowser.New(agentcorebrowser.Config{
     Credentials:       awsCfg.Credentials,
     BrowserIdentifier: "aws.browser.v1",
     AllowedHosts:      []string{"example.com"},
+    RequestMiddlewares: []agentcorebrowser.RequestMiddleware{
+        func(next agentcorebrowser.RequestHandler) agentcorebrowser.RequestHandler {
+            return func(ctx context.Context, req *agentcorebrowser.BrowserRequest) (*agentcorebrowser.BrowserResponse, error) {
+                if req.URL == "https://example.com/api" {
+                    req.Headers.Set("Authorization", "Bearer "+token)
+                }
+                return next(ctx, req)
+            }
+        },
+    },
 })
 if err != nil {
     log.Fatal(err)
@@ -34,6 +45,12 @@ The tool is named `agentcore_browser`. Calls use an `action` value:
 ## Behavior
 
 The tool uses AgentCore session APIs plus the automation stream. It only exposes the actions above; it does not expose raw CDP, mouse, keyboard, or arbitrary browser protocol access.
+
+### Request Middleware
+
+`RequestMiddlewares` wraps request-stage browser interception. Middleware receives URL, method, headers, body, resource type, frame, network, and redirect metadata. It may mutate URL, method, headers, or body before calling `next`, return a `BrowserResponse` to fulfill the request without network access, or return an error to block the request. Middleware is applied in list order, with the first entry outermost.
+
+Calling `next` applies the remaining middleware and the built-in host policy. Omitting `next` replaces request-stage host handling for that request, which supports custom routing, mocking, and policy implementations. The explicit `navigate` input and current/final page URLs are still checked against `AllowedHosts` and `DeniedHosts`. Middleware may run concurrently for separate tool calls and must be concurrency-safe. Its context carries the configured action deadline.
 
 By default sessions use `aws.browser.v1` and a 900 second timeout. `NavigationTimeout` defaults to 30 seconds and bounds the AgentCore lookup, WebSocket/CDP work, and artifact save performed by `navigate`, `extract_text`, and `screenshot`. Failed auto-started navigations get a separate best-effort 10 second cleanup window. `MaxTextBytes` defaults to 64 KiB and caps text inside the browser before it crosses the automation stream.
 

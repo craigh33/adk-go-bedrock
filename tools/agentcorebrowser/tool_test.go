@@ -1,8 +1,10 @@
 package agentcorebrowser
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -154,7 +156,7 @@ func fakeCDPServer(t *testing.T, failMethod string) string {
 }
 
 //nolint:gocognit // Keeping the fake CDP request table in one place is clearer for these tests.
-func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string)) string {
+func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, map[string]any)) string {
 	t.Helper()
 	upgrader := websocket.Upgrader{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +178,7 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string)) s
 				return
 			}
 			if hook != nil {
-				hook(req.Method)
+				hook(req.Method, req.Params)
 			}
 			if req.Method == failMethod {
 				_ = conn.WriteJSON(map[string]any{
@@ -198,7 +200,7 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string)) s
 					"id":     req.ID,
 					"result": map[string]any{"sessionId": "session-1"},
 				})
-			case "Fetch.enable", "Fetch.continueRequest", "Fetch.failRequest", "Page.enable":
+			case "Fetch.enable", "Fetch.continueRequest", "Fetch.failRequest", "Fetch.fulfillRequest", "Page.enable":
 				_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{}})
 			case "Page.navigate":
 				requestURL, _ := req.Params[paramURL].(string)
@@ -211,13 +213,25 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string)) s
 					"params": map[string]any{
 						"requestId":    "request-1",
 						"resourceType": "Document",
-						"request":      map[string]any{"url": requestURL},
+						"frameId":      "frame-1",
+						"networkId":    "network-1",
+						"request": map[string]any{
+							"url":      requestURL,
+							"method":   "GET",
+							"headers":  map[string]string{"Accept": "text/html"},
+							"postData": "",
+						},
 					},
 				})
-				if failMethod == "Page.navigate.subresource" || failMethod == "Page.navigate.dataSubresource" {
+				if failMethod == "Page.navigate.subresource" ||
+					failMethod == "Page.navigate.dataSubresource" ||
+					failMethod == "Page.navigate.fileSubresource" {
 					subresourceURL := "http://169.254.169.254/latest/meta-data"
 					if failMethod == "Page.navigate.dataSubresource" {
 						subresourceURL = "data:text/plain,hello"
+					}
+					if failMethod == "Page.navigate.fileSubresource" {
+						subresourceURL = "file:///etc/passwd"
 					}
 					_ = conn.WriteJSON(map[string]any{
 						"method":    "Fetch.requestPaused",
@@ -225,7 +239,11 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string)) s
 						"params": map[string]any{
 							"requestId":    "request-2",
 							"resourceType": "Image",
-							"request":      map[string]any{"url": subresourceURL},
+							"request": map[string]any{
+								"url":     subresourceURL,
+								"method":  "GET",
+								"headers": map[string]string{},
+							},
 						},
 					})
 				}
@@ -322,6 +340,24 @@ func TestNewValidationAndDefaults(t *testing.T) {
 		DeniedHosts: []string{"example.com:443"},
 	}); err == nil {
 		t.Fatal("expected invalid denied host error")
+	}
+	if _, err := New(Config{
+		API:                &fakeAgentCoreAPI{},
+		Region:             "us-east-1",
+		Credentials:        testCreds(),
+		RequestMiddlewares: []RequestMiddleware{nil},
+	}); err == nil {
+		t.Fatal("expected nil request middleware error")
+	}
+	if _, err := New(Config{
+		API:         &fakeAgentCoreAPI{},
+		Region:      "us-east-1",
+		Credentials: testCreds(),
+		RequestMiddlewares: []RequestMiddleware{
+			func(RequestHandler) RequestHandler { return nil },
+		},
+	}); err == nil {
+		t.Fatal("expected nil request handler error")
 	}
 
 	tl, err := New(Config{API: &fakeAgentCoreAPI{}, Region: " us-east-1 ", Credentials: testCreds()})
@@ -553,7 +589,7 @@ func TestNavigateStartsSessionAndUsesCDP(t *testing.T) {
 	t.Parallel()
 	var attachCount atomic.Int32
 	var continueCount atomic.Int32
-	wsURL := fakeCDPServerWithHook(t, "", func(method string) {
+	wsURL := fakeCDPServerWithHook(t, "", func(method string, _ map[string]any) {
 		if method == "Target.attachToTarget" {
 			attachCount.Add(1)
 		}
@@ -595,7 +631,7 @@ func TestNavigateStartsSessionAndUsesCDP(t *testing.T) {
 func TestNavigateBlocksDeniedRedirectBeforeRequest(t *testing.T) {
 	t.Parallel()
 	var failCount atomic.Int32
-	wsURL := fakeCDPServerWithHook(t, "Page.navigate.redirect", func(method string) {
+	wsURL := fakeCDPServerWithHook(t, "Page.navigate.redirect", func(method string, _ map[string]any) {
 		if method == "Fetch.failRequest" {
 			failCount.Add(1)
 		}
@@ -619,7 +655,7 @@ func TestNavigateBlocksDeniedRedirectBeforeRequest(t *testing.T) {
 		paramAction: actionNavigate,
 		paramURL:    "https://example.com",
 	})
-	if err == nil || !strings.Contains(err.Error(), "browser request url") {
+	if err == nil || !strings.Contains(err.Error(), "browser request") {
 		t.Fatalf("expected redirect policy error, got %v", err)
 	}
 	if failCount.Load() != 1 {
@@ -639,6 +675,7 @@ func TestNavigateAppliesHostPolicyToSubresources(t *testing.T) {
 	}{
 		{name: "blocks HTTP subresource", serverMode: "Page.navigate.subresource", wantError: true},
 		{name: "allows browser-local scheme", serverMode: "Page.navigate.dataSubresource"},
+		{name: "blocks local file scheme", serverMode: "Page.navigate.fileSubresource", wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -661,13 +698,161 @@ func TestNavigateAppliesHostPolicyToSubresources(t *testing.T) {
 				paramAction: actionNavigate,
 				paramURL:    "https://example.com",
 			})
-			if tc.wantError && (err == nil || !strings.Contains(err.Error(), "169.254.169.254")) {
+			if tc.wantError && err == nil {
 				t.Fatalf("expected subresource policy error, got %v", err)
 			}
 			if !tc.wantError && err != nil {
 				t.Fatalf("navigate: %v", err)
 			}
 		})
+	}
+}
+
+func TestRequestMiddlewareRewritesRequest(t *testing.T) {
+	t.Parallel()
+	continued := make(chan map[string]any, 1)
+	wsURL := fakeCDPServerWithHook(t, "", func(method string, params map[string]any) {
+		if method == "Fetch.continueRequest" {
+			continued <- params
+		}
+	})
+	api := &fakeAgentCoreAPI{
+		startOut: &bedrockagentcore.StartBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	middleware := func(next RequestHandler) RequestHandler {
+		return func(ctx context.Context, request *BrowserRequest) (*BrowserResponse, error) {
+			if request.ResourceType != "Document" || request.FrameID != "frame-1" ||
+				request.NetworkID != "network-1" {
+				t.Errorf("request metadata = %#v", request)
+			}
+			if request.Headers.Get("Accept") != "text/html" {
+				t.Errorf("accept header = %q", request.Headers.Get("Accept"))
+			}
+			request.URL = "https://example.com/rewritten"
+			request.Method = http.MethodPost
+			request.Headers.Set("X-Test", "yes")
+			request.PostData = []byte("payload")
+			return next(ctx, request)
+		}
+	}
+	tl, _ := New(Config{
+		API:                api,
+		Region:             "us-east-1",
+		Credentials:        testCreds(),
+		AllowedHosts:       []string{"example.com"},
+		RequestMiddlewares: []RequestMiddleware{middleware},
+	})
+
+	_, err := tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction: actionNavigate,
+		paramURL:    "https://example.com",
+	})
+	if err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+	params := <-continued
+	encoded, _ := json.Marshal(params)
+	for _, want := range []string{
+		`"url":"https://example.com/rewritten"`,
+		`"method":"POST"`,
+		`"postData":"cGF5bG9hZA=="`,
+		`"name":"X-Test"`,
+		`"value":"yes"`,
+	} {
+		if !bytes.Contains(encoded, []byte(want)) {
+			t.Errorf("continued request %s does not contain %s", encoded, want)
+		}
+	}
+}
+
+func TestRequestMiddlewareFulfillsRequest(t *testing.T) {
+	t.Parallel()
+	fulfilled := make(chan map[string]any, 1)
+	wsURL := fakeCDPServerWithHook(t, "", func(method string, params map[string]any) {
+		if method == "Fetch.fulfillRequest" {
+			fulfilled <- params
+		}
+	})
+	api := &fakeAgentCoreAPI{
+		startOut: &bedrockagentcore.StartBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	middleware := func(RequestHandler) RequestHandler {
+		return func(context.Context, *BrowserRequest) (*BrowserResponse, error) {
+			return &BrowserResponse{
+				StatusCode: http.StatusCreated,
+				StatusText: "Created by middleware",
+				Headers:    http.Header{"Content-Type": []string{"text/plain"}},
+				Body:       []byte("synthetic"),
+			}, nil
+		}
+	}
+	tl, _ := New(Config{
+		API:                api,
+		Region:             "us-east-1",
+		Credentials:        testCreds(),
+		RequestMiddlewares: []RequestMiddleware{middleware},
+	})
+
+	_, err := tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction: actionNavigate,
+		paramURL:    "https://example.com",
+	})
+	if err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+	encoded, _ := json.Marshal(<-fulfilled)
+	for _, want := range []string{
+		`"responseCode":201`,
+		`"responsePhrase":"Created by middleware"`,
+		`"body":"c3ludGhldGlj"`,
+		`"name":"Content-Type"`,
+	} {
+		if !bytes.Contains(encoded, []byte(want)) {
+			t.Errorf("fulfilled request %s does not contain %s", encoded, want)
+		}
+	}
+}
+
+func TestRequestMiddlewareCanReplaceDefaultPolicy(t *testing.T) {
+	t.Parallel()
+	wsURL := fakeCDPServer(t, "Page.navigate.subresource")
+	api := &fakeAgentCoreAPI{
+		startOut: &bedrockagentcore.StartBrowserSessionOutput{
+			BrowserIdentifier: aws.String("aws.browser.v1"),
+			SessionId:         aws.String("session-1"),
+			Streams:           browserStreams(wsURL),
+		},
+	}
+	middleware := func(next RequestHandler) RequestHandler {
+		return func(ctx context.Context, request *BrowserRequest) (*BrowserResponse, error) {
+			if request.ResourceType == "Image" {
+				return nil, nil
+			}
+			return next(ctx, request)
+		}
+	}
+	tl, _ := New(Config{
+		API:                api,
+		Region:             "us-east-1",
+		Credentials:        testCreds(),
+		AllowedHosts:       []string{"example.com"},
+		RequestMiddlewares: []RequestMiddleware{middleware},
+	})
+
+	_, err := tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+		paramAction: actionNavigate,
+		paramURL:    "https://example.com",
+	})
+	if err != nil {
+		t.Fatalf("navigate: %v", err)
 	}
 }
 
@@ -760,7 +945,7 @@ func TestExtractTextRejectsDisallowedCurrentURL(t *testing.T) {
 func TestExtractTextAppliesTimeout(t *testing.T) {
 	t.Parallel()
 	var evaluateCalls atomic.Int32
-	wsURL := fakeCDPServerWithHook(t, "", func(method string) {
+	wsURL := fakeCDPServerWithHook(t, "", func(method string, _ map[string]any) {
 		if method == "Runtime.evaluate" {
 			evaluateCalls.Add(1)
 			time.Sleep(500 * time.Millisecond)
@@ -852,7 +1037,7 @@ func TestCleanupStartedSessionIgnoresCallerCancellation(t *testing.T) {
 func TestNavigateAppliesTimeoutToMetadata(t *testing.T) {
 	t.Parallel()
 	var metadataCalls atomic.Int32
-	wsURL := fakeCDPServerWithHook(t, "", func(method string) {
+	wsURL := fakeCDPServerWithHook(t, "", func(method string, _ map[string]any) {
 		if method == "Runtime.evaluate" {
 			metadataCalls.Add(1)
 			time.Sleep(500 * time.Millisecond)
@@ -921,7 +1106,7 @@ func TestNavigateRejectsDisallowedFinalURL(t *testing.T) {
 func TestScreenshotRejectsDisallowedCurrentURLBeforeSaving(t *testing.T) {
 	t.Parallel()
 	var captureCount atomic.Int32
-	wsURL := fakeCDPServerWithHook(t, "Runtime.evaluate.redirect", func(method string) {
+	wsURL := fakeCDPServerWithHook(t, "Runtime.evaluate.redirect", func(method string, _ map[string]any) {
 		if method == "Page.captureScreenshot" {
 			captureCount.Add(1)
 		}
@@ -991,7 +1176,7 @@ func TestScreenshotRejectsRedirectAfterCapture(t *testing.T) {
 func TestScreenshotAppliesTimeout(t *testing.T) {
 	t.Parallel()
 	var evaluateCalls atomic.Int32
-	wsURL := fakeCDPServerWithHook(t, "", func(method string) {
+	wsURL := fakeCDPServerWithHook(t, "", func(method string, _ map[string]any) {
 		if method == "Runtime.evaluate" {
 			evaluateCalls.Add(1)
 			time.Sleep(500 * time.Millisecond)

@@ -1,6 +1,7 @@
 package agentcorebrowser
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -8,10 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"path"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -67,6 +71,8 @@ const (
 	cdpKeyMethod           = "method"
 	cdpKeyRequestID        = "requestId"
 	cdpEventRequestPaused  = "Fetch.requestPaused"
+	schemeHTTP             = "http"
+	schemeHTTPS            = "https"
 
 	statusSuccess = "success"
 	serviceID     = "bedrock-agentcore"
@@ -91,6 +97,35 @@ type AgentCoreAPI interface {
 	) (*bedrockagentcore.StopBrowserSessionOutput, error)
 }
 
+// BrowserRequest is a request paused before it is sent by the browser.
+// Middleware may modify URL, Method, Headers, or PostData before continuing.
+type BrowserRequest struct {
+	URL                 string
+	Method              string
+	Headers             http.Header
+	PostData            []byte
+	ResourceType        string
+	FrameID             string
+	NetworkID           string
+	RedirectedRequestID string
+}
+
+// BrowserResponse is a synthetic response returned by request middleware.
+type BrowserResponse struct {
+	StatusCode int
+	StatusText string
+	Headers    http.Header
+	Body       []byte
+}
+
+// RequestHandler handles a paused browser request. A nil response continues the request;
+// a non-nil response fulfills it. Returning an error blocks the request.
+type RequestHandler func(context.Context, *BrowserRequest) (*BrowserResponse, error)
+
+// RequestMiddleware wraps request handling. Calling next applies the remaining middleware
+// and built-in host policy; middleware may deliberately omit next to replace that behavior.
+type RequestMiddleware func(RequestHandler) RequestHandler
+
 // Config configures an AgentCore Browser ADK tool.
 type Config struct {
 	API         AgentCoreAPI
@@ -104,6 +139,8 @@ type Config struct {
 
 	AllowedHosts []string
 	DeniedHosts  []string
+
+	RequestMiddlewares []RequestMiddleware
 
 	NavigationTimeout time.Duration
 	MaxTextBytes      int
@@ -119,6 +156,7 @@ type browserTool struct {
 	viewportHeight        int32
 	allowedHosts          []string
 	deniedHosts           []string
+	requestHandler        RequestHandler
 	navigationTimeout     time.Duration
 	maxTextBytes          int
 	decl                  *genai.FunctionDeclaration
@@ -179,7 +217,7 @@ func New(cfg Config) (tool.Tool, error) {
 		return nil, err
 	}
 
-	return &browserTool{
+	bt := &browserTool{
 		api:                   cfg.API,
 		region:                region,
 		credentials:           cfg.Credentials,
@@ -192,7 +230,27 @@ func New(cfg Config) (tool.Tool, error) {
 		navigationTimeout:     navTimeout,
 		maxTextBytes:          maxText,
 		decl:                  newFunctionDeclaration(),
-	}, nil
+	}
+	handler, err := applyRequestMiddleware(bt.handleBrowserRequest, cfg.RequestMiddlewares)
+	if err != nil {
+		return nil, err
+	}
+	bt.requestHandler = handler
+	return bt, nil
+}
+
+func applyRequestMiddleware(base RequestHandler, middleware []RequestMiddleware) (RequestHandler, error) {
+	handler := base
+	for i, wrap := range slices.Backward(middleware) {
+		if wrap == nil {
+			return nil, fmt.Errorf("agentcorebrowser: RequestMiddlewares[%d] is nil", i)
+		}
+		handler = wrap(handler)
+		if handler == nil {
+			return nil, fmt.Errorf("agentcorebrowser: RequestMiddlewares[%d] returned a nil handler", i)
+		}
+	}
+	return handler, nil
 }
 
 func (t *browserTool) Name() string { return ToolName }
@@ -418,7 +476,7 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 	}
 	defer cdp.close()
 
-	if err := cdp.navigate(navCtx, rawURL, t.checkURL); err != nil {
+	if err := cdp.navigate(navCtx, rawURL, t.requestHandler); err != nil {
 		if autoStarted {
 			return nil, t.cleanupStartedSession(ctx, sessionID, err)
 		}
@@ -466,7 +524,7 @@ func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[s
 		return nil, err
 	}
 	defer cdp.close()
-	if err := cdp.enableRequestPolicy(actionCtx, t.checkURL); err != nil {
+	if err := cdp.enableRequestInterception(actionCtx, t.requestHandler); err != nil {
 		return nil, err
 	}
 
@@ -526,7 +584,7 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 		return nil, err
 	}
 	defer cdp.close()
-	if err := cdp.enableRequestPolicy(actionCtx, t.checkURL); err != nil {
+	if err := cdp.enableRequestInterception(actionCtx, t.requestHandler); err != nil {
 		return nil, err
 	}
 
@@ -653,9 +711,9 @@ func (t *browserTool) signedWebSocketHeaders(ctx context.Context, endpoint strin
 	signURL := *u
 	switch signURL.Scheme {
 	case "wss":
-		signURL.Scheme = "https"
+		signURL.Scheme = schemeHTTPS
 	case "ws":
-		signURL.Scheme = "http"
+		signURL.Scheme = schemeHTTP
 	default:
 		return nil, fmt.Errorf("automation stream endpoint scheme must be ws or wss, got %q", signURL.Scheme)
 	}
@@ -679,7 +737,7 @@ func (t *browserTool) checkURL(raw string) error {
 	if err != nil {
 		return fmt.Errorf("url: %w", err)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
+	if u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS {
 		return fmt.Errorf("url: scheme must be http or https, got %q", u.Scheme)
 	}
 	if u.User != nil {
@@ -699,6 +757,24 @@ func (t *browserTool) checkURL(raw string) error {
 		return fmt.Errorf("url: host %q requires an explicit allowlist entry", host)
 	}
 	return nil
+}
+
+func (t *browserTool) handleBrowserRequest(
+	_ context.Context,
+	request *BrowserRequest,
+) (*BrowserResponse, error) {
+	u, err := url.Parse(request.URL)
+	if err != nil || u.Scheme == "" {
+		return nil, t.checkURL(request.URL)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case schemeHTTP, schemeHTTPS:
+		return nil, t.checkURL(request.URL)
+	case "data", "blob":
+		return nil, nil //nolint:nilnil // A nil response and error means continue unchanged.
+	default:
+		return nil, fmt.Errorf("url: scheme %q is not allowed", u.Scheme)
+	}
 }
 
 func requiredString(m map[string]any, key string) (string, error) {
@@ -929,12 +1005,12 @@ func truncateUTF8(s string, maxBytes int) (string, bool) {
 }
 
 type cdpConn struct {
-	conn          *websocket.Conn
-	nextID        int64
-	pageSessionID string
-	events        []cdpMessage
-	responses     map[int64]cdpMessage
-	requestPolicy func(string) error
+	conn           *websocket.Conn
+	nextID         int64
+	pageSessionID  string
+	events         []cdpMessage
+	responses      map[int64]cdpMessage
+	requestHandler RequestHandler
 }
 
 type cdpMessage struct {
@@ -978,9 +1054,16 @@ type textResult struct {
 }
 
 type pausedRequest struct {
-	RequestID string `json:"requestId"`
-	Request   struct {
-		URL string `json:"url"`
+	RequestID           string `json:"requestId"`
+	ResourceType        string `json:"resourceType"`
+	FrameID             string `json:"frameId"`
+	NetworkID           string `json:"networkId"`
+	RedirectedRequestID string `json:"redirectedRequestId"`
+	Request             struct {
+		URL      string            `json:"url"`
+		Method   string            `json:"method"`
+		Headers  map[string]string `json:"headers"`
+		PostData *string           `json:"postData"`
 	} `json:"request"`
 }
 
@@ -988,12 +1071,12 @@ func (c *cdpConn) close() {
 	_ = c.conn.Close()
 }
 
-func (c *cdpConn) navigate(ctx context.Context, rawURL string, policy func(string) error) error {
+func (c *cdpConn) navigate(ctx context.Context, rawURL string, handler RequestHandler) error {
 	sessionID, err := c.pageSession(ctx)
 	if err != nil {
 		return err
 	}
-	if err := c.enableRequestPolicy(ctx, policy); err != nil {
+	if err := c.enableRequestInterception(ctx, handler); err != nil {
 		return err
 	}
 	if _, err := c.call(ctx, "Page.enable", nil, sessionID); err != nil {
@@ -1019,12 +1102,12 @@ func (c *cdpConn) navigate(ctx context.Context, rawURL string, policy func(strin
 	return c.waitEvent(ctx, sessionID, "Page.loadEventFired")
 }
 
-func (c *cdpConn) enableRequestPolicy(ctx context.Context, policy func(string) error) error {
+func (c *cdpConn) enableRequestInterception(ctx context.Context, handler RequestHandler) error {
 	sessionID, err := c.pageSession(ctx)
 	if err != nil {
 		return err
 	}
-	c.requestPolicy = policy
+	c.requestHandler = handler
 	_, err = c.call(ctx, "Fetch.enable", map[string]any{
 		"patterns": []map[string]any{{
 			"urlPattern":   "*",
@@ -1032,7 +1115,7 @@ func (c *cdpConn) enableRequestPolicy(ctx context.Context, policy func(string) e
 		}},
 	}, sessionID)
 	if err != nil {
-		c.requestPolicy = nil
+		c.requestHandler = nil
 	}
 	return err
 }
@@ -1269,7 +1352,7 @@ func (c *cdpConn) waitEvent(ctx context.Context, sessionID, method string) error
 }
 
 func (c *cdpConn) handlePausedRequest(ctx context.Context, msg cdpMessage) (bool, error) {
-	if msg.Method != cdpEventRequestPaused || c.requestPolicy == nil {
+	if msg.Method != cdpEventRequestPaused || c.requestHandler == nil {
 		return false, nil
 	}
 	var paused pausedRequest
@@ -1283,29 +1366,138 @@ func (c *cdpConn) handlePausedRequest(ctx context.Context, msg cdpMessage) (bool
 	if paused.RequestID == "" {
 		return true, errors.New("paused browser request has no requestId")
 	}
-	requestURL, err := url.Parse(paused.Request.URL)
-	if err == nil && requestURL.Scheme != "" && !strings.EqualFold(requestURL.Scheme, "http") &&
-		!strings.EqualFold(requestURL.Scheme, "https") {
-		_, err := c.call(ctx, "Fetch.continueRequest", map[string]any{
-			cdpKeyRequestID: paused.RequestID,
-		}, sessionID)
-		return true, err
+	request := newBrowserRequest(paused)
+	original := cloneBrowserRequest(request)
+	response, err := c.requestHandler(ctx, request)
+	if err != nil {
+		return true, c.failPausedRequest(ctx, sessionID, paused.RequestID, err)
 	}
-	if err := c.requestPolicy(paused.Request.URL); err != nil {
-		_, failErr := c.call(ctx, "Fetch.failRequest", map[string]any{
-			cdpKeyRequestID: paused.RequestID,
-			"errorReason":   "BlockedByClient",
-		}, sessionID)
-		policyErr := fmt.Errorf("browser request url: %w", err)
-		if failErr != nil {
-			return true, errors.Join(policyErr, failErr)
-		}
-		return true, policyErr
+	if response != nil {
+		return true, c.fulfillPausedRequest(ctx, sessionID, paused.RequestID, response)
 	}
-	_, err = c.call(ctx, "Fetch.continueRequest", map[string]any{
-		cdpKeyRequestID: paused.RequestID,
+	return true, c.continuePausedRequest(ctx, sessionID, paused.RequestID, original, request)
+}
+
+func newBrowserRequest(paused pausedRequest) *BrowserRequest {
+	headers := make(http.Header, len(paused.Request.Headers))
+	for name, value := range paused.Request.Headers {
+		headers.Set(name, value)
+	}
+	var postData []byte
+	if paused.Request.PostData != nil {
+		postData = []byte(*paused.Request.PostData)
+	}
+	return &BrowserRequest{
+		URL:                 paused.Request.URL,
+		Method:              paused.Request.Method,
+		Headers:             headers,
+		PostData:            postData,
+		ResourceType:        paused.ResourceType,
+		FrameID:             paused.FrameID,
+		NetworkID:           paused.NetworkID,
+		RedirectedRequestID: paused.RedirectedRequestID,
+	}
+}
+
+func cloneBrowserRequest(request *BrowserRequest) *BrowserRequest {
+	cloned := *request
+	cloned.Headers = request.Headers.Clone()
+	cloned.PostData = slices.Clone(request.PostData)
+	return &cloned
+}
+
+func (c *cdpConn) continuePausedRequest(
+	ctx context.Context,
+	sessionID string,
+	requestID string,
+	original *BrowserRequest,
+	request *BrowserRequest,
+) error {
+	params := map[string]any{cdpKeyRequestID: requestID}
+	if request.URL != original.URL {
+		params[paramURL] = request.URL
+	}
+	if request.Method != original.Method {
+		params["method"] = request.Method
+	}
+	if !headersEqual(request.Headers, original.Headers) {
+		params["headers"] = headerEntries(request.Headers)
+	}
+	if (request.PostData == nil) != (original.PostData == nil) ||
+		!bytes.Equal(request.PostData, original.PostData) {
+		params["postData"] = base64.StdEncoding.EncodeToString(request.PostData)
+	}
+	_, err := c.call(ctx, "Fetch.continueRequest", params, sessionID)
+	return err
+}
+
+func (c *cdpConn) fulfillPausedRequest(
+	ctx context.Context,
+	sessionID string,
+	requestID string,
+	response *BrowserResponse,
+) error {
+	statusCode := response.StatusCode
+	if statusCode == 0 {
+		statusCode = http.StatusOK
+	}
+	if statusCode < 100 || statusCode > 599 {
+		return c.failPausedRequest(ctx, sessionID, requestID, fmt.Errorf(
+			"request middleware returned invalid response status %d",
+			statusCode,
+		))
+	}
+	params := map[string]any{
+		cdpKeyRequestID: requestID,
+		"responseCode":  statusCode,
+	}
+	if response.StatusText != "" {
+		params["responsePhrase"] = response.StatusText
+	}
+	if response.Headers != nil {
+		params["responseHeaders"] = headerEntries(response.Headers)
+	}
+	if response.Body != nil {
+		params["body"] = base64.StdEncoding.EncodeToString(response.Body)
+	}
+	_, err := c.call(ctx, "Fetch.fulfillRequest", params, sessionID)
+	return err
+}
+
+func (c *cdpConn) failPausedRequest(
+	ctx context.Context,
+	sessionID string,
+	requestID string,
+	cause error,
+) error {
+	_, failErr := c.call(ctx, "Fetch.failRequest", map[string]any{
+		cdpKeyRequestID: requestID,
+		"errorReason":   "BlockedByClient",
 	}, sessionID)
-	return true, err
+	requestErr := fmt.Errorf("browser request: %w", cause)
+	if failErr != nil {
+		return errors.Join(requestErr, failErr)
+	}
+	return requestErr
+}
+
+func headersEqual(a, b http.Header) bool {
+	return maps.EqualFunc(a, b, slices.Equal)
+}
+
+func headerEntries(headers http.Header) []map[string]string {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	entries := make([]map[string]string, 0, len(headers))
+	for _, name := range names {
+		for _, value := range headers[name] {
+			entries = append(entries, map[string]string{"name": name, "value": value})
+		}
+	}
+	return entries
 }
 
 func (c *cdpConn) callResult(method string, resp cdpMessage) (json.RawMessage, error) {
