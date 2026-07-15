@@ -1307,7 +1307,7 @@ func normalizeHosts(name string, hosts []string) ([]string, error) {
 		if h == "" {
 			continue
 		}
-		if strings.ContainsAny(h, "/?#@ \t\r\n") || strings.Contains(h, "..") {
+		if strings.ContainsAny(h, "*/?#@ \t\r\n") || strings.Contains(h, "..") {
 			return nil, fmt.Errorf("agentcorebrowser: %s contains invalid host %q", name, raw)
 		}
 		if strings.Contains(h, ":") {

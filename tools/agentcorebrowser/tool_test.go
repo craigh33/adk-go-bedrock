@@ -800,6 +800,22 @@ func TestHostPolicy(t *testing.T) {
 	}
 }
 
+func TestNormalizeHostsRejectsUnsupportedWildcards(t *testing.T) {
+	t.Parallel()
+	for _, host := range []string{"*", "example.*", "*.*.example.com"} {
+		if _, err := normalizeHosts("AllowedHosts", []string{host}); err == nil {
+			t.Errorf("expected invalid wildcard error for %q", host)
+		}
+	}
+	normalized, err := normalizeHosts("AllowedHosts", []string{"*.Example.COM."})
+	if err != nil {
+		t.Fatalf("normalize valid wildcard: %v", err)
+	}
+	if len(normalized) != 1 || normalized[0] != "example.com" {
+		t.Fatalf("normalized hosts = %v", normalized)
+	}
+}
+
 func TestURLMiddlewareOrderingAndStages(t *testing.T) {
 	t.Parallel()
 	var calls []string
