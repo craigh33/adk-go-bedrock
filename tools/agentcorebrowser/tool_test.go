@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -910,6 +911,27 @@ func TestURLMiddlewareRewriteIsValidatedByNext(t *testing.T) {
 	err = tl.(*browserTool).checkURL(context.Background(), "https://example.com", URLStageRequest)
 	if err == nil || !strings.Contains(err.Error(), "explicit allowlist") {
 		t.Fatalf("expected rewritten URL policy error, got %v", err)
+	}
+}
+
+func TestURLStructureRejectsAmbiguousHosts(t *testing.T) {
+	t.Parallel()
+	for _, host := range []string{
+		"example.com@evil.test",
+		"example.com/evil.test",
+		`example.com\evil.test`,
+		"example.com%evil.test",
+	} {
+		check := URLCheck{URL: url.URL{Scheme: schemeHTTPS, Host: host}, Stage: URLStageNavigate}
+		if err := validateURLStructure(check); err == nil {
+			t.Errorf("expected invalid host error for %q", host)
+		}
+	}
+	if _, err := parseURLCheck("https://example.com%25evil.test", URLStageNavigate); err == nil {
+		t.Fatal("expected encoded percent host error")
+	}
+	if _, err := parseURLCheck("https://[fe80::1%25en0]", URLStageNavigate); err != nil {
+		t.Fatalf("valid IPv6 zone identifier rejected: %v", err)
 	}
 }
 

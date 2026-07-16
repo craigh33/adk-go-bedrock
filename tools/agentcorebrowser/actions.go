@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -486,8 +487,18 @@ func validateURLStructure(check URLCheck) error {
 	default:
 		return fmt.Errorf("url: invalid stage %q", check.Stage)
 	}
-	if u.Hostname() == "" {
+	host := u.Hostname()
+	if host == "" {
 		return errors.New("url: host is required")
+	}
+	if strings.ContainsAny(host, `@/\`) {
+		return fmt.Errorf("url: host %q contains invalid characters", host)
+	}
+	if strings.Contains(host, "%") {
+		addr, err := netip.ParseAddr(host)
+		if err != nil || addr.Zone() == "" {
+			return fmt.Errorf("url: host %q contains an invalid percent escape", host)
+		}
 	}
 	return nil
 }
