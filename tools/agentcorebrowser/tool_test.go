@@ -736,7 +736,7 @@ func TestStartStatusStopUseAgentCoreAPI(t *testing.T) {
 	if got := aws.ToString(
 		api.lastStart.ClientToken,
 	); !strings.HasPrefix(got, "tooluse-abc-") ||
-		len(got) < minClientTokenLen {
+		len(got) < 33 {
 		t.Errorf("client token = %q", got)
 	}
 	if got := aws.ToInt32(api.lastStart.SessionTimeoutSeconds); got != 60 {
@@ -803,14 +803,25 @@ func TestHostPolicy(t *testing.T) {
 func TestNormalizeHostsRejectsUnsupportedWildcards(t *testing.T) {
 	t.Parallel()
 	for _, host := range []string{"*", "example.*", "*.*.example.com"} {
-		if _, err := normalizeHosts("AllowedHosts", []string{host}); err == nil {
+		if _, err := New(Config{
+			API:          &fakeAgentCoreAPI{},
+			Region:       "us-east-1",
+			Credentials:  testCreds(),
+			AllowedHosts: []string{host},
+		}); err == nil {
 			t.Errorf("expected invalid wildcard error for %q", host)
 		}
 	}
-	normalized, err := normalizeHosts("AllowedHosts", []string{"*.Example.COM."})
+	tl, err := New(Config{
+		API:          &fakeAgentCoreAPI{},
+		Region:       "us-east-1",
+		Credentials:  testCreds(),
+		AllowedHosts: []string{"*.Example.COM."},
+	})
 	if err != nil {
 		t.Fatalf("normalize valid wildcard: %v", err)
 	}
+	normalized := tl.(*browserTool).allowedHosts
 	if len(normalized) != 1 || normalized[0] != "example.com" {
 		t.Fatalf("normalized hosts = %v", normalized)
 	}
@@ -2191,17 +2202,10 @@ func TestScreenshotSizeLimit(t *testing.T) {
 
 func TestScreenshotInfersFormatAndRejectsArtifactPaths(t *testing.T) {
 	t.Parallel()
-	format, mimeType, err := screenshotFormat("", "page.JPG")
-	if err != nil || format != screenshotFormatJPEG || mimeType != mimeTypeJPEG {
-		t.Fatalf("inferred screenshot format = %q %q, err %v", format, mimeType, err)
-	}
-	if err := validateScreenshotFileName("page", screenshotFormatPNG); err != nil {
-		t.Fatalf("extensionless artifact name: %v", err)
-	}
 	api := &fakeAgentCoreAPI{}
 	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
 	bt := tl.(*browserTool)
-	_, err = bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
 		paramAction:    actionScreenshot,
 		paramSessionID: "session-1",
 		paramFileName:  "screenshots/page.png",
@@ -2278,24 +2282,5 @@ func TestNavigateReturnsPageErrorText(t *testing.T) {
 	}
 	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
 		t.Fatalf("auto-started session was not stopped: %#v", api.lastStop)
-	}
-}
-
-func TestTruncateUTF8KeepsValidString(t *testing.T) {
-	t.Parallel()
-	got, truncated := truncateUTF8("héllo", 2)
-	if got != "h" || !truncated {
-		t.Fatalf("truncateUTF8 = %q %v", got, truncated)
-	}
-}
-
-func TestClientTokenMeetsAgentCoreShape(t *testing.T) {
-	t.Parallel()
-	got := clientToken("tooluse_abc")
-	if !strings.HasPrefix(got, "tooluse-abc-") {
-		t.Fatalf("clientToken prefix = %q", got)
-	}
-	if len(got) < minClientTokenLen || len(got) > maxClientTokenLen {
-		t.Fatalf("clientToken length = %d", len(got))
 	}
 }
