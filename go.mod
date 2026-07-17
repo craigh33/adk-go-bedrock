@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime v1.54.1
 	github.com/aws/aws-sdk-go-v2/service/bedrockdataautomationruntime v1.12.1
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.55.1
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.105.0
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.105.2
 	github.com/aws/smithy-go v1.27.3
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
