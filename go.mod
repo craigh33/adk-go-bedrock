@@ -1,6 +1,6 @@
 module github.com/craigh33/adk-go-bedrock
 
-go 1.25.0
+go 1.26.5
 
 require (
 	github.com/a2aproject/a2a-go/v2 v2.3.1
@@ -19,13 +19,14 @@ require (
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
 	golang.org/x/oauth2 v0.36.0
-	google.golang.org/adk/v2 v2.0.0
+	google.golang.org/adk/v2 v2.1.0
 	google.golang.org/genai v1.63.0
 )
 
 require (
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.20.0 // indirect
+	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.31.0 // indirect
 	github.com/a2aproject/a2a-go v0.3.15 // indirect
