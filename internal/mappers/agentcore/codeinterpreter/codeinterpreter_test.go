@@ -1,4 +1,4 @@
-package mappers
+package codeinterpreter
 
 import (
 	"strings"
@@ -7,11 +7,13 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	agentcoretypes "github.com/aws/aws-sdk-go-v2/service/bedrockagentcore/types"
+
+	codeinterpretermodels "github.com/craigh33/adk-go-bedrock/internal/models/agentcore/codeinterpreter"
 )
 
-func TestAgentCoreCodeInterpreterStartInput(t *testing.T) {
+func TestStartInput(t *testing.T) {
 	t.Parallel()
-	in := AgentCoreCodeInterpreterStartInput(AgentCoreCodeInterpreterStartParams{
+	in := StartInput(codeinterpretermodels.StartSessionParams{
 		CodeInterpreterIdentifier: " interp ",
 		ClientToken:               "__tooluse_abc 123!!",
 		MaxExecutionTime:          90 * time.Second,
@@ -19,7 +21,7 @@ func TestAgentCoreCodeInterpreterStartInput(t *testing.T) {
 	if aws.ToString(in.CodeInterpreterIdentifier) != "interp" {
 		t.Fatalf("identifier = %q", aws.ToString(in.CodeInterpreterIdentifier))
 	}
-	if aws.ToString(in.Name) != AgentCoreCodeInterpreterDefaultSessionName {
+	if aws.ToString(in.Name) != DefaultSessionName {
 		t.Fatalf("name = %q", aws.ToString(in.Name))
 	}
 	if token := aws.ToString(in.ClientToken); !strings.HasPrefix(token, "tooluse-abc-123-") ||
@@ -32,22 +34,22 @@ func TestAgentCoreCodeInterpreterStartInput(t *testing.T) {
 	}
 }
 
-func TestAgentCoreCodeInterpreterSessionTimeoutSecondsClamps(t *testing.T) {
+func TestSessionTimeoutSecondsClamps(t *testing.T) {
 	t.Parallel()
-	if got := AgentCoreCodeInterpreterSessionTimeoutSeconds(time.Second); got == nil || *got != 60 {
+	if got := SessionTimeoutSeconds(time.Second); got == nil || *got != 60 {
 		t.Fatalf("short timeout = %v, want 60", got)
 	}
-	if got := AgentCoreCodeInterpreterSessionTimeoutSeconds(9 * time.Hour); got == nil || *got != 28800 {
+	if got := SessionTimeoutSeconds(9 * time.Hour); got == nil || *got != 28800 {
 		t.Fatalf("long timeout = %v, want 28800", got)
 	}
-	if got := AgentCoreCodeInterpreterSessionTimeoutSeconds(0); got != nil {
+	if got := SessionTimeoutSeconds(0); got != nil {
 		t.Fatalf("zero timeout = %v, want nil", got)
 	}
 }
 
-func TestAgentCoreCodeInterpreterInvokeInputs(t *testing.T) {
+func TestInvokeInputs(t *testing.T) {
 	t.Parallel()
-	exec := AgentCoreCodeInterpreterExecuteInput(AgentCoreCodeInterpreterInvokeParams{
+	exec := ExecuteInput(codeinterpretermodels.ExecuteParams{
 		CodeInterpreterIdentifier: "interp",
 		SessionID:                 "session",
 		Code:                      "print('hi')",
@@ -63,7 +65,7 @@ func TestAgentCoreCodeInterpreterInvokeInputs(t *testing.T) {
 		t.Fatalf("execute input = %+v", exec)
 	}
 
-	write := AgentCoreCodeInterpreterWriteFilesInput("interp", "session", []AgentCoreCodeInterpreterInputFile{{
+	write := WriteFilesInput("interp", "session", []codeinterpretermodels.InputFile{{
 		Path:   " data.csv ",
 		Text:   "a,b\n1,2\n",
 		IsText: true,
@@ -75,7 +77,7 @@ func TestAgentCoreCodeInterpreterInvokeInputs(t *testing.T) {
 		t.Fatalf("write input = %+v", write)
 	}
 
-	read := AgentCoreCodeInterpreterReadFilesInput("interp", "session", []string{" out.txt "})
+	read := ReadFilesInput("interp", "session", []string{" out.txt "})
 	if read.Name != agentcoretypes.ToolNameReadFiles ||
 		len(read.Arguments.Paths) != 1 ||
 		read.Arguments.Paths[0] != "out.txt" {
@@ -83,43 +85,43 @@ func TestAgentCoreCodeInterpreterInvokeInputs(t *testing.T) {
 	}
 }
 
-func TestAgentCoreCodeInterpreterIdentifierNormalizesAWSOwnedARN(t *testing.T) {
+func TestIdentifierNormalizesAWSOwnedARN(t *testing.T) {
 	t.Parallel()
 	const arn = "arn:aws:bedrock-agentcore:eu-west-2:aws:code-interpreter/aws.codeinterpreter.v1"
-	if got := AgentCoreCodeInterpreterIdentifier(arn); got != "aws.codeinterpreter.v1" {
+	if got := Identifier(arn); got != "aws.codeinterpreter.v1" {
 		t.Fatalf("identifier = %q", got)
 	}
 
 	custom := "arn:aws:bedrock-agentcore:eu-west-2:123456789012:code-interpreter/custom-a1b2c3d4e5"
-	if got := AgentCoreCodeInterpreterIdentifier(custom); got != custom {
+	if got := Identifier(custom); got != custom {
 		t.Fatalf("custom identifier = %q", got)
 	}
 }
 
-func TestAgentCoreCodeInterpreterNormalizeLanguageAndRuntime(t *testing.T) {
+func TestNormalizeLanguageAndRuntime(t *testing.T) {
 	t.Parallel()
-	got, err := AgentCoreCodeInterpreterNormalizeLanguage("", " Python ", []string{"python"})
+	got, err := NormalizeLanguage("", " Python ", []string{"python"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != "python" {
 		t.Fatalf("language = %q", got)
 	}
-	if _, err := AgentCoreCodeInterpreterNormalizeLanguage("typescript", "python", []string{"python"}); err == nil {
+	if _, err := NormalizeLanguage("typescript", "python", []string{"python"}); err == nil {
 		t.Fatal("expected disallowed language error")
 	}
-	if _, err := AgentCoreCodeInterpreterNormalizeLanguage("ruby", "python", nil); err == nil {
+	if _, err := NormalizeLanguage("ruby", "python", nil); err == nil {
 		t.Fatal("expected unsupported language error")
 	}
-	if got, err := AgentCoreCodeInterpreterNormalizeRuntime(" NodeJS "); err != nil || got != "nodejs" {
+	if got, err := NormalizeRuntime(" NodeJS "); err != nil || got != "nodejs" {
 		t.Fatalf("runtime = %q, err = %v", got, err)
 	}
-	if _, err := AgentCoreCodeInterpreterNormalizeRuntime("ruby"); err == nil {
+	if _, err := NormalizeRuntime("ruby"); err == nil {
 		t.Fatal("expected unsupported runtime error")
 	}
 }
 
-func TestAgentCoreCodeInterpreterResultMapsStructuredContent(t *testing.T) {
+func TestResultMapsStructuredContent(t *testing.T) {
 	t.Parallel()
 	exitCode := int32(2)
 	executionTime := 12.5
@@ -133,7 +135,7 @@ func TestAgentCoreCodeInterpreterResultMapsStructuredContent(t *testing.T) {
 			TaskStatus:    agentcoretypes.TaskStatusFailed,
 		},
 	}
-	got, artifacts, err := AgentCoreCodeInterpreterResult(result, 1024)
+	got, artifacts, err := Result(result, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +154,7 @@ func TestAgentCoreCodeInterpreterResultMapsStructuredContent(t *testing.T) {
 	}
 }
 
-func TestAgentCoreCodeInterpreterResultMapsContentArtifacts(t *testing.T) {
+func TestResultMapsContentArtifacts(t *testing.T) {
 	t.Parallel()
 	result := agentcoretypes.CodeInterpreterResult{
 		Content: []agentcoretypes.ContentBlock{
@@ -174,7 +176,7 @@ func TestAgentCoreCodeInterpreterResultMapsContentArtifacts(t *testing.T) {
 			},
 		},
 	}
-	got, artifacts, err := AgentCoreCodeInterpreterResult(result, 1024)
+	got, artifacts, err := Result(result, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,9 +192,9 @@ func TestAgentCoreCodeInterpreterResultMapsContentArtifacts(t *testing.T) {
 	}
 }
 
-func TestAgentCoreCodeInterpreterResultTruncatesText(t *testing.T) {
+func TestResultTruncatesText(t *testing.T) {
 	t.Parallel()
-	got, _, err := AgentCoreCodeInterpreterResult(agentcoretypes.CodeInterpreterResult{
+	got, _, err := Result(agentcoretypes.CodeInterpreterResult{
 		StructuredContent: &agentcoretypes.ToolResultStructuredContent{Stdout: aws.String("abcdef")},
 	}, 3)
 	if err != nil {
@@ -203,9 +205,9 @@ func TestAgentCoreCodeInterpreterResultTruncatesText(t *testing.T) {
 	}
 }
 
-func TestAgentCoreCodeInterpreterResultRejectsLargeArtifact(t *testing.T) {
+func TestResultRejectsLargeArtifact(t *testing.T) {
 	t.Parallel()
-	_, _, err := AgentCoreCodeInterpreterResult(agentcoretypes.CodeInterpreterResult{
+	_, _, err := Result(agentcoretypes.CodeInterpreterResult{
 		Content: []agentcoretypes.ContentBlock{{
 			Type: agentcoretypes.ContentBlockTypeEmbeddedResource,
 			Name: aws.String("large.bin"),
@@ -217,19 +219,19 @@ func TestAgentCoreCodeInterpreterResultRejectsLargeArtifact(t *testing.T) {
 	}
 }
 
-func TestAgentCoreCodeInterpreterArtifactName(t *testing.T) {
+func TestArtifactName(t *testing.T) {
 	t.Parallel()
-	if got := AgentCoreCodeInterpreterArtifactName("/tmp/out.txt", 0); got != "out.txt" {
+	if got := ArtifactName("/tmp/out.txt", 0); got != "out.txt" {
 		t.Fatalf("artifact name = %q", got)
 	}
-	if got := AgentCoreCodeInterpreterArtifactName("", 2); got != "code_interpreter_output_3" {
+	if got := ArtifactName("", 2); got != "code_interpreter_output_3" {
 		t.Fatalf("fallback artifact name = %q", got)
 	}
 }
 
-func TestAgentCoreCodeInterpreterClientTokenMeetsAgentCoreLength(t *testing.T) {
+func TestClientTokenMeetsAgentCoreLength(t *testing.T) {
 	t.Parallel()
-	token := AgentCoreCodeInterpreterClientToken("tooluse_abc")
+	token := ClientToken("tooluse_abc")
 	if !strings.HasPrefix(token, "tooluse-abc-") ||
 		len(token) < agentCoreCodeInterpreterMinClientTokenLength ||
 		len(token) > agentCoreCodeInterpreterMaxClientTokenLength {
@@ -237,7 +239,7 @@ func TestAgentCoreCodeInterpreterClientTokenMeetsAgentCoreLength(t *testing.T) {
 	}
 
 	long := strings.Repeat("a", 300)
-	if got := AgentCoreCodeInterpreterClientToken(long); len(got) < agentCoreCodeInterpreterMinClientTokenLength ||
+	if got := ClientToken(long); len(got) < agentCoreCodeInterpreterMinClientTokenLength ||
 		len(got) > agentCoreCodeInterpreterMaxClientTokenLength {
 		t.Fatalf("long token length = %d", len(got))
 	}

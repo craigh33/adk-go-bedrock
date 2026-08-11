@@ -18,7 +18,8 @@ import (
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/genai"
 
-	bedrockmappers "github.com/craigh33/adk-go-bedrock/internal/mappers"
+	codeinterpretermappers "github.com/craigh33/adk-go-bedrock/internal/mappers/agentcore/codeinterpreter"
+	codeinterpretermodels "github.com/craigh33/adk-go-bedrock/internal/models/agentcore/codeinterpreter"
 )
 
 const (
@@ -118,7 +119,7 @@ func New(cfg Config) (tool.Tool, error) {
 		return nil, errors.New("agentcorecodeinterpreter: MaxOutputBytes cannot be negative")
 	}
 
-	allowed, err := bedrockmappers.AgentCoreCodeInterpreterNormalizeAllowedLanguages(cfg.AllowedLanguages)
+	allowed, err := codeinterpretermappers.NormalizeAllowedLanguages(cfg.AllowedLanguages)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +127,7 @@ func New(cfg Config) (tool.Tool, error) {
 	if strings.TrimSpace(defaultLanguageRaw) == "" && !slices.Contains(allowed, "python") {
 		defaultLanguageRaw = allowed[0]
 	}
-	defaultLanguage, err := bedrockmappers.AgentCoreCodeInterpreterNormalizeLanguage("", defaultLanguageRaw, allowed)
+	defaultLanguage, err := codeinterpretermappers.NormalizeLanguage("", defaultLanguageRaw, allowed)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +145,7 @@ func New(cfg Config) (tool.Tool, error) {
 	}
 	sessionName := strings.TrimSpace(cfg.SessionName)
 	if sessionName == "" {
-		sessionName = bedrockmappers.AgentCoreCodeInterpreterDefaultSessionName
+		sessionName = codeinterpretermappers.DefaultSessionName
 	}
 
 	t := &codeInterpreterTool{
@@ -289,7 +290,7 @@ func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[strin
 		return nil, errors.New("code is required")
 	}
 	languageRaw, _ := m[paramLanguage].(string)
-	language, err := bedrockmappers.AgentCoreCodeInterpreterNormalizeLanguage(
+	language, err := codeinterpretermappers.NormalizeLanguage(
 		languageRaw,
 		t.defaultLanguage,
 		t.allowedLanguages,
@@ -298,7 +299,7 @@ func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[strin
 		return nil, err
 	}
 	runtimeRaw, _ := m[paramRuntime].(string)
-	runtime, err := bedrockmappers.AgentCoreCodeInterpreterNormalizeRuntime(runtimeRaw)
+	runtime, err := codeinterpretermappers.NormalizeRuntime(runtimeRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -314,9 +315,9 @@ func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[strin
 	runCtx, cancel := context.WithTimeout(ctx, t.maxExecutionTime)
 	defer cancel()
 
-	clientToken := bedrockmappers.AgentCoreCodeInterpreterClientToken(ctx.FunctionCallID())
-	startOut, err := t.api.StartCodeInterpreterSession(runCtx, bedrockmappers.AgentCoreCodeInterpreterStartInput(
-		bedrockmappers.AgentCoreCodeInterpreterStartParams{
+	clientToken := codeinterpretermappers.ClientToken(ctx.FunctionCallID())
+	startOut, err := t.api.StartCodeInterpreterSession(runCtx, codeinterpretermappers.StartInput(
+		codeinterpretermodels.StartSessionParams{
 			CodeInterpreterIdentifier: t.codeInterpreterIdentifier,
 			SessionName:               t.sessionName,
 			ClientToken:               clientToken,
@@ -349,7 +350,7 @@ func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[strin
 		if err != nil {
 			return nil, err
 		}
-		results, err := t.invoke(runCtx, bedrockmappers.AgentCoreCodeInterpreterWriteFilesInput(
+		results, err := t.invoke(runCtx, codeinterpretermappers.WriteFilesInput(
 			t.codeInterpreterIdentifier,
 			sessionID,
 			files,
@@ -362,8 +363,8 @@ func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[strin
 		}
 	}
 
-	execResults, err := t.invoke(runCtx, bedrockmappers.AgentCoreCodeInterpreterExecuteInput(
-		bedrockmappers.AgentCoreCodeInterpreterInvokeParams{
+	execResults, err := t.invoke(runCtx, codeinterpretermappers.ExecuteInput(
+		codeinterpretermodels.ExecuteParams{
 			CodeInterpreterIdentifier: t.codeInterpreterIdentifier,
 			SessionID:                 sessionID,
 			Code:                      code,
@@ -403,7 +404,7 @@ func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[strin
 func (t *codeInterpreterTool) stopSession(sessionID, clientToken string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 	defer cancel()
-	_, err := t.api.StopCodeInterpreterSession(ctx, bedrockmappers.AgentCoreCodeInterpreterStopInput(
+	_, err := t.api.StopCodeInterpreterSession(ctx, codeinterpretermappers.StopInput(
 		t.codeInterpreterIdentifier,
 		sessionID,
 		clientToken+"-stop",
@@ -454,7 +455,7 @@ func (t *codeInterpreterTool) invoke(
 
 func (t *codeInterpreterTool) resultFailure(op string, results []agentcoretypes.CodeInterpreterResult) error {
 	for _, result := range results {
-		m, _, err := bedrockmappers.AgentCoreCodeInterpreterResult(result, t.maxOutputBytes)
+		m, _, err := codeinterpretermappers.Result(result, t.maxOutputBytes)
 		if err != nil {
 			return err
 		}
@@ -467,14 +468,14 @@ func (t *codeInterpreterTool) resultFailure(op string, results []agentcoretypes.
 
 func (t *codeInterpreterTool) mapResults(
 	results []agentcoretypes.CodeInterpreterResult,
-) (map[string]any, []bedrockmappers.AgentCoreCodeInterpreterOutputArtifact, error) {
+) (map[string]any, []codeinterpretermodels.OutputArtifact, error) {
 	merged := map[string]any{"status": resultStatusSuccess, "is_error": false}
-	var artifacts []bedrockmappers.AgentCoreCodeInterpreterOutputArtifact
+	var artifacts []codeinterpretermodels.OutputArtifact
 	var content []map[string]any
 	var stdout []string
 	var stderr []string
 	for _, result := range results {
-		m, arts, err := bedrockmappers.AgentCoreCodeInterpreterResult(result, t.maxOutputBytes)
+		m, arts, err := codeinterpretermappers.Result(result, t.maxOutputBytes)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -520,12 +521,12 @@ func (t *codeInterpreterTool) loadInputArtifacts(
 	ctx context.Context,
 	toolCtx agent.Context,
 	args []inputArtifactArg,
-) ([]bedrockmappers.AgentCoreCodeInterpreterInputFile, error) {
+) ([]codeinterpretermodels.InputFile, error) {
 	artifacts := toolCtx.Artifacts()
 	if artifacts == nil {
 		return nil, errors.New("agentcorecodeinterpreter: artifact service is unavailable")
 	}
-	files := make([]bedrockmappers.AgentCoreCodeInterpreterInputFile, 0, len(args))
+	files := make([]codeinterpretermodels.InputFile, 0, len(args))
 	for _, arg := range args {
 		resp, err := artifacts.Load(ctx, arg.ArtifactName)
 		if err != nil {
@@ -544,31 +545,31 @@ func inputFileFromPart(
 	path string,
 	part *genai.Part,
 	maxBytes int64,
-) (bedrockmappers.AgentCoreCodeInterpreterInputFile, error) {
+) (codeinterpretermodels.InputFile, error) {
 	if part == nil {
-		return bedrockmappers.AgentCoreCodeInterpreterInputFile{}, errors.New("loaded artifact has nil part")
+		return codeinterpretermodels.InputFile{}, errors.New("loaded artifact has nil part")
 	}
 	if part.InlineData != nil {
 		if int64(len(part.InlineData.Data)) > maxBytes {
-			return bedrockmappers.AgentCoreCodeInterpreterInputFile{}, fmt.Errorf(
+			return codeinterpretermodels.InputFile{}, fmt.Errorf(
 				"size (%d bytes) exceeds maximum input artifact size (%d bytes)",
 				len(part.InlineData.Data),
 				maxBytes,
 			)
 		}
-		return bedrockmappers.AgentCoreCodeInterpreterInputFile{Path: path, Blob: part.InlineData.Data}, nil
+		return codeinterpretermodels.InputFile{Path: path, Blob: part.InlineData.Data}, nil
 	}
 	if part.Text != "" {
 		if int64(len(part.Text)) > maxBytes {
-			return bedrockmappers.AgentCoreCodeInterpreterInputFile{}, fmt.Errorf(
+			return codeinterpretermodels.InputFile{}, fmt.Errorf(
 				"size (%d bytes) exceeds maximum input artifact size (%d bytes)",
 				len(part.Text),
 				maxBytes,
 			)
 		}
-		return bedrockmappers.AgentCoreCodeInterpreterInputFile{Path: path, Text: part.Text, IsText: true}, nil
+		return codeinterpretermodels.InputFile{Path: path, Text: part.Text, IsText: true}, nil
 	}
-	return bedrockmappers.AgentCoreCodeInterpreterInputFile{}, errors.New(
+	return codeinterpretermodels.InputFile{}, errors.New(
 		"loaded artifact must contain InlineData or Text",
 	)
 }
@@ -577,10 +578,10 @@ func (t *codeInterpreterTool) readOutputArtifacts(
 	ctx context.Context,
 	sessionID string,
 	args []outputArtifactArg,
-) ([]bedrockmappers.AgentCoreCodeInterpreterOutputArtifact, error) {
-	var artifacts []bedrockmappers.AgentCoreCodeInterpreterOutputArtifact
+) ([]codeinterpretermodels.OutputArtifact, error) {
+	var artifacts []codeinterpretermodels.OutputArtifact
 	for _, arg := range args {
-		results, err := t.invoke(ctx, bedrockmappers.AgentCoreCodeInterpreterReadFilesInput(
+		results, err := t.invoke(ctx, codeinterpretermappers.ReadFilesInput(
 			t.codeInterpreterIdentifier,
 			sessionID,
 			[]string{arg.Path},
@@ -607,7 +608,7 @@ func (t *codeInterpreterTool) readOutputArtifacts(
 func (t *codeInterpreterTool) saveArtifacts(
 	ctx context.Context,
 	toolCtx agent.Context,
-	artifacts []bedrockmappers.AgentCoreCodeInterpreterOutputArtifact,
+	artifacts []codeinterpretermodels.OutputArtifact,
 ) ([]map[string]any, error) {
 	service := toolCtx.Artifacts()
 	if service == nil {
@@ -681,7 +682,7 @@ func parseOutputArtifactArgs(raw any) ([]outputArtifactArg, error) {
 			artifactName = pathpkg.Base(strings.ReplaceAll(path, "\\", "/"))
 		}
 		if artifactName == "." || artifactName == "/" || artifactName == "" {
-			artifactName = bedrockmappers.AgentCoreCodeInterpreterArtifactName(path, i)
+			artifactName = codeinterpretermappers.ArtifactName(path, i)
 		}
 		if strings.ContainsAny(artifactName, `/\`) {
 			return nil, fmt.Errorf("%s.%s must not contain path separators, got %q",

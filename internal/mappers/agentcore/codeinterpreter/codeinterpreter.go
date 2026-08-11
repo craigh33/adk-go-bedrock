@@ -1,4 +1,4 @@
-package mappers
+package codeinterpreter
 
 import (
 	"errors"
@@ -13,10 +13,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
 	agentcoretypes "github.com/aws/aws-sdk-go-v2/service/bedrockagentcore/types"
 	"github.com/google/uuid"
+
+	bedrockmappers "github.com/craigh33/adk-go-bedrock/internal/mappers"
+	codeinterpretermodels "github.com/craigh33/adk-go-bedrock/internal/models/agentcore/codeinterpreter"
 )
 
 const (
-	AgentCoreCodeInterpreterDefaultSessionName = "adk-go-bedrock-agentcore-code-interpreter"
+	DefaultSessionName = "adk-go-bedrock-agentcore-code-interpreter"
 
 	agentCoreCodeInterpreterDefaultIdentifier    = "aws.codeinterpreter.v1"
 	agentCoreCodeInterpreterMaxClientTokenLength = 256
@@ -36,59 +39,24 @@ const (
 	agentCoreCodeInterpreterStatusSuccess = "success"
 )
 
-// AgentCoreCodeInterpreterStartParams is the tool-neutral input for starting a Code Interpreter session.
-type AgentCoreCodeInterpreterStartParams struct {
-	CodeInterpreterIdentifier string
-	SessionName               string
-	ClientToken               string
-	MaxExecutionTime          time.Duration
-}
-
-// AgentCoreCodeInterpreterInvokeParams is the tool-neutral input for executeCode.
-type AgentCoreCodeInterpreterInvokeParams struct {
-	CodeInterpreterIdentifier string
-	SessionID                 string
-	Code                      string
-	Language                  string
-	Runtime                   string
-}
-
-// AgentCoreCodeInterpreterInputFile is one writeFiles input.
-type AgentCoreCodeInterpreterInputFile struct {
-	Path   string
-	Text   string
-	Blob   []byte
-	IsText bool
-}
-
-// AgentCoreCodeInterpreterOutputArtifact is file-like content returned by Code Interpreter.
-type AgentCoreCodeInterpreterOutputArtifact struct {
-	Path         string
-	ArtifactName string
-	MIMEType     string
-	Data         []byte
-	Text         string
-	IsText       bool
-}
-
-// AgentCoreCodeInterpreterStartInput maps config into StartCodeInterpreterSession input.
-func AgentCoreCodeInterpreterStartInput(
-	p AgentCoreCodeInterpreterStartParams,
+// StartInput maps config into StartCodeInterpreterSession input.
+func StartInput(
+	p codeinterpretermodels.StartSessionParams,
 ) *bedrockagentcore.StartCodeInterpreterSessionInput {
 	name := strings.TrimSpace(p.SessionName)
 	if name == "" {
-		name = AgentCoreCodeInterpreterDefaultSessionName
+		name = DefaultSessionName
 	}
 	return &bedrockagentcore.StartCodeInterpreterSessionInput{
-		CodeInterpreterIdentifier: aws.String(AgentCoreCodeInterpreterIdentifier(p.CodeInterpreterIdentifier)),
-		ClientToken:               aws.String(AgentCoreCodeInterpreterClientToken(p.ClientToken)),
+		CodeInterpreterIdentifier: aws.String(Identifier(p.CodeInterpreterIdentifier)),
+		ClientToken:               aws.String(ClientToken(p.ClientToken)),
 		Name:                      aws.String(name),
-		SessionTimeoutSeconds:     AgentCoreCodeInterpreterSessionTimeoutSeconds(p.MaxExecutionTime),
+		SessionTimeoutSeconds:     SessionTimeoutSeconds(p.MaxExecutionTime),
 	}
 }
 
-// AgentCoreCodeInterpreterSessionTimeoutSeconds maps a duration to AgentCore's session TTL range.
-func AgentCoreCodeInterpreterSessionTimeoutSeconds(d time.Duration) *int32 {
+// SessionTimeoutSeconds maps a duration to AgentCore's session TTL range.
+func SessionTimeoutSeconds(d time.Duration) *int32 {
 	if d <= 0 {
 		return nil
 	}
@@ -104,9 +72,9 @@ func AgentCoreCodeInterpreterSessionTimeoutSeconds(d time.Duration) *int32 {
 	return aws.Int32(seconds)
 }
 
-// AgentCoreCodeInterpreterExecuteInput maps tool args into executeCode input.
-func AgentCoreCodeInterpreterExecuteInput(
-	p AgentCoreCodeInterpreterInvokeParams,
+// ExecuteInput maps tool args into executeCode input.
+func ExecuteInput(
+	p codeinterpretermodels.ExecuteParams,
 ) *bedrockagentcore.InvokeCodeInterpreterInput {
 	args := &agentcoretypes.ToolArguments{
 		Code:     aws.String(p.Code),
@@ -116,17 +84,17 @@ func AgentCoreCodeInterpreterExecuteInput(
 		args.Runtime = agentcoretypes.LanguageRuntime(runtime)
 	}
 	return &bedrockagentcore.InvokeCodeInterpreterInput{
-		CodeInterpreterIdentifier: aws.String(AgentCoreCodeInterpreterIdentifier(p.CodeInterpreterIdentifier)),
+		CodeInterpreterIdentifier: aws.String(Identifier(p.CodeInterpreterIdentifier)),
 		SessionId:                 aws.String(strings.TrimSpace(p.SessionID)),
 		Name:                      agentcoretypes.ToolNameExecuteCode,
 		Arguments:                 args,
 	}
 }
 
-// AgentCoreCodeInterpreterWriteFilesInput maps artifact bytes/text into writeFiles input.
-func AgentCoreCodeInterpreterWriteFilesInput(
+// WriteFilesInput maps artifact bytes/text into writeFiles input.
+func WriteFilesInput(
 	codeInterpreterIdentifier, sessionID string,
-	files []AgentCoreCodeInterpreterInputFile,
+	files []codeinterpretermodels.InputFile,
 ) *bedrockagentcore.InvokeCodeInterpreterInput {
 	content := make([]agentcoretypes.InputContentBlock, 0, len(files))
 	for _, f := range files {
@@ -139,15 +107,15 @@ func AgentCoreCodeInterpreterWriteFilesInput(
 		content = append(content, block)
 	}
 	return &bedrockagentcore.InvokeCodeInterpreterInput{
-		CodeInterpreterIdentifier: aws.String(AgentCoreCodeInterpreterIdentifier(codeInterpreterIdentifier)),
+		CodeInterpreterIdentifier: aws.String(Identifier(codeInterpreterIdentifier)),
 		SessionId:                 aws.String(strings.TrimSpace(sessionID)),
 		Name:                      agentcoretypes.ToolNameWriteFiles,
 		Arguments:                 &agentcoretypes.ToolArguments{Content: content},
 	}
 }
 
-// AgentCoreCodeInterpreterReadFilesInput maps output paths into readFiles input.
-func AgentCoreCodeInterpreterReadFilesInput(
+// ReadFilesInput maps output paths into readFiles input.
+func ReadFilesInput(
 	codeInterpreterIdentifier, sessionID string,
 	paths []string,
 ) *bedrockagentcore.InvokeCodeInterpreterInput {
@@ -156,26 +124,26 @@ func AgentCoreCodeInterpreterReadFilesInput(
 		clean = append(clean, strings.TrimSpace(path))
 	}
 	return &bedrockagentcore.InvokeCodeInterpreterInput{
-		CodeInterpreterIdentifier: aws.String(AgentCoreCodeInterpreterIdentifier(codeInterpreterIdentifier)),
+		CodeInterpreterIdentifier: aws.String(Identifier(codeInterpreterIdentifier)),
 		SessionId:                 aws.String(strings.TrimSpace(sessionID)),
 		Name:                      agentcoretypes.ToolNameReadFiles,
 		Arguments:                 &agentcoretypes.ToolArguments{Paths: clean},
 	}
 }
 
-// AgentCoreCodeInterpreterStopInput maps session identity into StopCodeInterpreterSession input.
-func AgentCoreCodeInterpreterStopInput(
+// StopInput maps session identity into StopCodeInterpreterSession input.
+func StopInput(
 	codeInterpreterIdentifier, sessionID, clientToken string,
 ) *bedrockagentcore.StopCodeInterpreterSessionInput {
 	return &bedrockagentcore.StopCodeInterpreterSessionInput{
-		CodeInterpreterIdentifier: aws.String(AgentCoreCodeInterpreterIdentifier(codeInterpreterIdentifier)),
+		CodeInterpreterIdentifier: aws.String(Identifier(codeInterpreterIdentifier)),
 		SessionId:                 aws.String(strings.TrimSpace(sessionID)),
-		ClientToken:               aws.String(AgentCoreCodeInterpreterClientToken(clientToken)),
+		ClientToken:               aws.String(ClientToken(clientToken)),
 	}
 }
 
-// AgentCoreCodeInterpreterIdentifier maps the AWS-owned Code Interpreter ARN to the data-plane ID.
-func AgentCoreCodeInterpreterIdentifier(identifier string) string {
+// Identifier maps the AWS-owned Code Interpreter ARN to the data-plane ID.
+func Identifier(identifier string) string {
 	id := strings.TrimSpace(identifier)
 	if strings.Contains(id, ":aws:code-interpreter/") &&
 		strings.HasSuffix(id, "/"+agentCoreCodeInterpreterDefaultIdentifier) {
@@ -184,9 +152,9 @@ func AgentCoreCodeInterpreterIdentifier(identifier string) string {
 	return id
 }
 
-// AgentCoreCodeInterpreterNormalizeLanguage validates a requested language against supported and allowed values.
-func AgentCoreCodeInterpreterNormalizeLanguage(language, defaultLanguage string, allowed []string) (string, error) {
-	normalizedAllowed, err := AgentCoreCodeInterpreterNormalizeAllowedLanguages(allowed)
+// NormalizeLanguage validates a requested language against supported and allowed values.
+func NormalizeLanguage(language, defaultLanguage string, allowed []string) (string, error) {
+	normalizedAllowed, err := NormalizeAllowedLanguages(allowed)
 	if err != nil {
 		return "", err
 	}
@@ -206,8 +174,8 @@ func AgentCoreCodeInterpreterNormalizeLanguage(language, defaultLanguage string,
 	return lang, nil
 }
 
-// AgentCoreCodeInterpreterNormalizeAllowedLanguages validates an allowlist.
-func AgentCoreCodeInterpreterNormalizeAllowedLanguages(allowed []string) ([]string, error) {
+// NormalizeAllowedLanguages validates an allowlist.
+func NormalizeAllowedLanguages(allowed []string) ([]string, error) {
 	if len(allowed) == 0 {
 		return agentCoreCodeInterpreterLanguages(), nil
 	}
@@ -230,8 +198,8 @@ func AgentCoreCodeInterpreterNormalizeAllowedLanguages(allowed []string) ([]stri
 	return out, nil
 }
 
-// AgentCoreCodeInterpreterNormalizeRuntime validates an optional runtime.
-func AgentCoreCodeInterpreterNormalizeRuntime(runtime string) (string, error) {
+// NormalizeRuntime validates an optional runtime.
+func NormalizeRuntime(runtime string) (string, error) {
 	rt := strings.ToLower(strings.TrimSpace(runtime))
 	if rt == "" {
 		return "", nil
@@ -242,13 +210,13 @@ func AgentCoreCodeInterpreterNormalizeRuntime(runtime string) (string, error) {
 	return rt, nil
 }
 
-// AgentCoreCodeInterpreterResult maps one Code Interpreter result into ADK-friendly fields.
+// Result maps one Code Interpreter result into ADK-friendly fields.
 //
 //nolint:gocognit,nestif // AgentCore result mapping has several optional structured fields and content blocks.
-func AgentCoreCodeInterpreterResult(
+func Result(
 	result agentcoretypes.CodeInterpreterResult,
 	maxBytes int64,
-) (map[string]any, []AgentCoreCodeInterpreterOutputArtifact, error) {
+) (map[string]any, []codeinterpretermodels.OutputArtifact, error) {
 	isError := aws.ToBool(result.IsError)
 	out := map[string]any{"is_error": isError}
 	if isError {
@@ -289,7 +257,7 @@ func AgentCoreCodeInterpreterResult(
 	}
 
 	content := make([]map[string]any, 0, len(result.Content))
-	artifacts := make([]AgentCoreCodeInterpreterOutputArtifact, 0)
+	artifacts := make([]codeinterpretermodels.OutputArtifact, 0)
 	for i, block := range result.Content {
 		item, artifact, blockTruncated, err := contentBlockToMapAndArtifact(block, i, maxBytes)
 		if err != nil {
@@ -312,8 +280,8 @@ func AgentCoreCodeInterpreterResult(
 	return out, artifacts, nil
 }
 
-// AgentCoreCodeInterpreterClientToken maps an ADK function-call ID to an AgentCore client token.
-func AgentCoreCodeInterpreterClientToken(functionCallID string) string {
+// ClientToken maps an ADK function-call ID to an AgentCore client token.
+func ClientToken(functionCallID string) string {
 	var b strings.Builder
 	lastDash := false
 	for _, r := range strings.TrimSpace(functionCallID) {
@@ -344,8 +312,8 @@ func contentBlockToMapAndArtifact(
 	block agentcoretypes.ContentBlock,
 	index int,
 	maxBytes int64,
-) (map[string]any, AgentCoreCodeInterpreterOutputArtifact, bool, error) {
-	item := map[string]any{citationMapKeyType: string(block.Type)}
+) (map[string]any, codeinterpretermodels.OutputArtifact, bool, error) {
+	item := map[string]any{"type": string(block.Type)}
 	if block.Name != nil {
 		item["name"] = aws.ToString(block.Name)
 	}
@@ -375,7 +343,7 @@ func contentBlockToMapAndArtifact(
 			maxBytes,
 		)
 		if err != nil {
-			return nil, AgentCoreCodeInterpreterOutputArtifact{}, false, err
+			return nil, codeinterpretermodels.OutputArtifact{}, false, err
 		}
 		return item, artifact, truncated, nil
 	}
@@ -388,11 +356,11 @@ func contentBlockToMapAndArtifact(
 			maxBytes,
 		)
 		if err != nil {
-			return nil, AgentCoreCodeInterpreterOutputArtifact{}, false, err
+			return nil, codeinterpretermodels.OutputArtifact{}, false, err
 		}
 		return item, artifact, truncated, nil
 	}
-	return item, AgentCoreCodeInterpreterOutputArtifact{}, truncated, nil
+	return item, codeinterpretermodels.OutputArtifact{}, truncated, nil
 }
 
 func resourceArtifact(
@@ -400,9 +368,9 @@ func resourceArtifact(
 	name, uri string,
 	index int,
 	maxBytes int64,
-) (AgentCoreCodeInterpreterOutputArtifact, error) {
+) (codeinterpretermodels.OutputArtifact, error) {
 	if resource == nil {
-		return AgentCoreCodeInterpreterOutputArtifact{}, nil
+		return codeinterpretermodels.OutputArtifact{}, nil
 	}
 	path := firstNonEmpty(name, uri)
 	if len(resource.Blob) > 0 {
@@ -420,7 +388,7 @@ func resourceArtifact(
 			maxBytes,
 		)
 	}
-	return AgentCoreCodeInterpreterOutputArtifact{}, nil
+	return codeinterpretermodels.OutputArtifact{}, nil
 }
 
 func outputArtifact(
@@ -430,33 +398,33 @@ func outputArtifact(
 	isText bool,
 	index int,
 	maxBytes int64,
-) (AgentCoreCodeInterpreterOutputArtifact, error) {
+) (codeinterpretermodels.OutputArtifact, error) {
 	size := int64(len(data))
 	if isText {
 		size = int64(len(text))
 	}
 	if maxBytes > 0 && size > maxBytes {
-		return AgentCoreCodeInterpreterOutputArtifact{}, fmt.Errorf(
+		return codeinterpretermodels.OutputArtifact{}, fmt.Errorf(
 			"agentcorecodeinterpreter: output artifact size (%d bytes) exceeds maximum output size (%d bytes)",
 			size,
 			maxBytes,
 		)
 	}
 	if mimeType == "" && path != "" {
-		mimeType = MIMETypeFromExtension(path)
+		mimeType = bedrockmappers.MIMETypeFromExtension(path)
 	}
 	if mimeType == "" && isText {
 		mimeType = "text/plain; charset=utf-8"
 	}
 	if mimeType == "" {
-		mimeType = mimeApplicationOctetStream
+		mimeType = bedrockmappers.MIMETypeFromExtension(path)
 	}
 	if path == "" {
 		path = fmt.Sprintf("code_interpreter_output_%d", index+1)
 	}
-	return AgentCoreCodeInterpreterOutputArtifact{
+	return codeinterpretermodels.OutputArtifact{
 		Path:         firstNonEmpty(path, uri),
-		ArtifactName: AgentCoreCodeInterpreterArtifactName(path, index),
+		ArtifactName: ArtifactName(path, index),
 		MIMEType:     mimeType,
 		Data:         data,
 		Text:         text,
@@ -464,8 +432,8 @@ func outputArtifact(
 	}, nil
 }
 
-// AgentCoreCodeInterpreterArtifactName returns a valid ADK artifact filename.
-func AgentCoreCodeInterpreterArtifactName(path string, index int) string {
+// ArtifactName returns a valid ADK artifact filename.
+func ArtifactName(path string, index int) string {
 	name := strings.TrimSpace(strings.ReplaceAll(path, "\\", "/"))
 	if name != "" {
 		name = filepath.Base(name)
