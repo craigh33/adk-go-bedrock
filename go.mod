@@ -4,15 +4,15 @@ go 1.26.5
 
 require (
 	github.com/a2aproject/a2a-go/v2 v2.3.1
-	github.com/aws/aws-sdk-go-v2 v1.43.3
+	github.com/aws/aws-sdk-go-v2 v1.44.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.31
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.33
 	github.com/aws/aws-sdk-go-v2/service/bedrockagentcore v1.32.2
-	github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime v1.55.0
+	github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime v1.59.0
 	github.com/aws/aws-sdk-go-v2/service/bedrockdataautomationruntime v1.13.1
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.57.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.106.1
-	github.com/aws/smithy-go v1.27.6
+	github.com/aws/smithy-go v1.28.1
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	go.opentelemetry.io/otel v1.44.0
@@ -32,10 +32,10 @@ require (
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.31.0 // indirect
 	github.com/a2aproject/a2a-go v0.3.15 // indirect
 	github.com/awalterschulze/gographviz v2.0.3+incompatible // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.16 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.20 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.34 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.34 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.34 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.40 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.40 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.35 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.15 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.25 // indirect
