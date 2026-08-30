@@ -174,13 +174,20 @@ func printSummaryArtifact(ctx context.Context, artifactService artifact.Service)
 		SessionID: sessionID,
 		FileName:  "summary.txt",
 	})
-	if err == nil {
-		if resp.Part != nil && resp.Part.Text != "" {
-			fmt.Printf("\nSaved summary.txt:\n%s\n", resp.Part.Text)
-		}
+	if err != nil {
+		fmt.Println("summary.txt artifact was not saved")
 		return
 	}
-	fmt.Println("summary.txt artifact was not saved")
+	if resp.Part == nil {
+		return
+	}
+	summary := resp.Part.Text
+	if resp.Part.InlineData != nil {
+		summary = string(resp.Part.InlineData.Data)
+	}
+	if summary != "" {
+		fmt.Printf("\nSaved summary.txt:\n%s\n", summary)
+	}
 }
 
 func envOrDefault(name, defaultValue string) string {
