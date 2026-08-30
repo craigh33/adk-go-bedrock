@@ -1,6 +1,7 @@
 package codeinterpreter
 
 import (
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -142,15 +143,18 @@ func TestResultMapsStructuredContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["status"] != "error" ||
-		got["is_error"] != true ||
-		got["stdout"] != "out" ||
-		got["stderr"] != "err" ||
-		got["exit_code"] != exitCode ||
-		got["execution_time_ms"] != executionTime ||
-		got["task_id"] != "task-1" ||
-		got["task_status"] != "failed" {
-		t.Fatalf("result map = %+v", got)
+	want := map[string]any{
+		"status":            "error",
+		"is_error":          true,
+		"stdout":            "out",
+		"stderr":            "err",
+		"exit_code":         exitCode,
+		"execution_time_ms": executionTime,
+		"task_id":           "task-1",
+		"task_status":       "failed",
+	}
+	if !maps.Equal(got, want) {
+		t.Fatalf("result map = %+v, want %+v", got, want)
 	}
 	if len(artifacts) != 0 {
 		t.Fatalf("artifacts = %+v, want none", artifacts)

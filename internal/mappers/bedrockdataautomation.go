@@ -10,10 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
-	bedrockDataAutomationMaxClientTokenLength = 256
-	bedrockDataAutomationDefaultErrorKind     = "error"
-)
+const bedrockDataAutomationMaxClientTokenLength = 256
 
 // BedrockDataAutomationInvokeParams is the tool-neutral input for BDA async invoke mapping.
 type BedrockDataAutomationInvokeParams struct {
@@ -92,7 +89,7 @@ func BedrockDataAutomationFailureError(invocationARN string, errorType, errorMes
 	msg := strings.TrimSpace(aws.ToString(errorMessage))
 	kind := strings.TrimSpace(aws.ToString(errorType))
 	if kind == "" {
-		kind = bedrockDataAutomationDefaultErrorKind
+		kind = "error"
 	}
 	if msg == "" {
 		return fmt.Errorf("data automation failed with %s (invocation %s)", kind, invocationARN)

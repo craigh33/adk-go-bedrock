@@ -254,6 +254,7 @@ func (t *codeInterpreterTool) newFunctionDeclaration() *genai.FunctionDeclaratio
 	}
 }
 
+// ProcessRequest registers the tool and its declaration with an LLM request.
 func (t *codeInterpreterTool) ProcessRequest(_ agent.Context, req *model.LLMRequest) error {
 	if req.Tools == nil {
 		req.Tools = make(map[string]any)
@@ -284,8 +285,8 @@ func (t *codeInterpreterTool) ProcessRequest(_ agent.Context, req *model.LLMRequ
 	return nil
 }
 
-//nolint:gocognit,funlen,nonamedreturns // Named returns let deferred cleanup update result or err.
-func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[string]any, err error) {
+// Run executes code in a temporary AgentCore session and returns its output.
+func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (map[string]any, error) {
 	m, ok := args.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("unexpected args type: %T", args)
@@ -337,26 +338,32 @@ func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[strin
 	if sessionID == "" {
 		return nil, errors.New("start code interpreter session: empty session ID")
 	}
-	defer func() {
-		stopErr := t.stopSession(sessionID, clientToken)
-		if stopErr == nil {
-			return
-		}
-		if result != nil {
-			result["cleanup_error"] = stopErr.Error()
-			return
-		}
-		if err == nil {
-			err = stopErr
-		}
-	}()
+	result, runErr := t.runSession(
+		runCtx,
+		ctx,
+		sessionID,
+		code,
+		language,
+		runtime,
+		inputArtifacts,
+		outputArtifacts,
+	)
+	return t.cleanupSession(sessionID, clientToken, result, runErr)
+}
 
+func (t *codeInterpreterTool) runSession(
+	ctx context.Context,
+	toolCtx agent.Context,
+	sessionID, code, language, runtime string,
+	inputArtifacts []inputArtifactArg,
+	outputArtifacts []outputArtifactArg,
+) (map[string]any, error) {
 	if len(inputArtifacts) > 0 {
-		files, err := t.loadInputArtifacts(runCtx, ctx, inputArtifacts)
+		files, err := t.loadInputArtifacts(ctx, toolCtx, inputArtifacts)
 		if err != nil {
 			return nil, err
 		}
-		results, err := t.invoke(runCtx, codeinterpretermappers.WriteFilesInput(
+		results, err := t.invoke(ctx, codeinterpretermappers.WriteFilesInput(
 			t.codeInterpreterIdentifier,
 			sessionID,
 			files,
@@ -369,7 +376,7 @@ func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[strin
 		}
 	}
 
-	execResults, err := t.invoke(runCtx, codeinterpretermappers.ExecuteInput(
+	execResults, err := t.invoke(ctx, codeinterpretermappers.ExecuteInput(
 		codeinterpretermodels.ExecuteParams{
 			CodeInterpreterIdentifier: t.codeInterpreterIdentifier,
 			SessionID:                 sessionID,
@@ -391,20 +398,39 @@ func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[strin
 	}
 	result["session_id"] = sessionID
 	if len(outputArtifacts) > 0 && !toolResultIsError(result) {
-		readArtifacts, err := t.readOutputArtifacts(runCtx, sessionID, outputArtifacts)
+		readArtifacts, err := t.readOutputArtifacts(ctx, sessionID, outputArtifacts)
 		if err != nil {
 			return nil, err
 		}
 		generatedArtifacts = append(generatedArtifacts, readArtifacts...)
 	}
 	if len(generatedArtifacts) > 0 {
-		saved, err := t.saveArtifacts(runCtx, ctx, generatedArtifacts)
+		saved, err := t.saveArtifacts(ctx, toolCtx, generatedArtifacts)
 		if err != nil {
 			return result, err
 		}
 		result["artifacts"] = saved
 	}
 	return result, nil
+}
+
+func (t *codeInterpreterTool) cleanupSession(
+	sessionID, clientToken string,
+	result map[string]any,
+	runErr error,
+) (map[string]any, error) {
+	stopErr := t.stopSession(sessionID, clientToken)
+	if stopErr == nil {
+		return result, runErr
+	}
+	if result != nil {
+		result["cleanup_error"] = stopErr.Error()
+		return result, runErr
+	}
+	if runErr != nil {
+		return nil, runErr
+	}
+	return nil, stopErr
 }
 
 func (t *codeInterpreterTool) stopSession(sessionID, clientToken string) error {
