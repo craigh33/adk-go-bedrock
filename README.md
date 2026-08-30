@@ -65,6 +65,7 @@ These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat 
 - [`examples/bedrock-function-tool`](examples/bedrock-function-tool): ADK `functiontool` with typed args/results and `llmagent` + runner (contrasts with hand-written `genai.Tool` in bedrock-tool-calling).
 - [`examples/bedrock-image-gen`](examples/bedrock-image-gen): ADK runner with the [`imagegenerator`](tools/imagegenerator) tool—Nova Canvas image generation via Bedrock `InvokeModel` and artifact storage.
 - [`examples/bedrock-video-gen`](examples/bedrock-video-gen): ADK runner with the [`videogenerator`](tools/videogenerator) tool—Nova Reel text-to-video via Bedrock async invoke, S3 output, and optional MP4 download into artifacts.
+- [`examples/bedrock-agentcore-code-interpreter`](examples/bedrock-agentcore-code-interpreter): ADK runner with the [`agentcorecodeinterpreter`](tools/agentcorecodeinterpreter) tool—AgentCore Code Interpreter execution with artifact inputs and outputs.
 - [`examples/bedrock-nova-grounding`](examples/bedrock-nova-grounding): Nova Web Grounding via [`tools/novagrounding`](tools/novagrounding); prints answers and `bedrock_citations` metadata (see [Nova Web Grounding](#nova-web-grounding)).
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
 - [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.

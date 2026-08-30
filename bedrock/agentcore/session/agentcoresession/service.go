@@ -17,7 +17,7 @@ import (
 	"github.com/aws/smithy-go"
 	"google.golang.org/adk/v2/session"
 
-	bedrockmappers "github.com/craigh33/adk-go-bedrock/internal/mappers"
+	sessionmappers "github.com/craigh33/adk-go-bedrock/internal/mappers/agentcore/session"
 )
 
 // Options configures [NewWithAPI].
@@ -120,7 +120,7 @@ func (s *service) Create(ctx context.Context, req *session.CreateRequest) (*sess
 	storedState := map[string]any{}
 	maps.Copy(storedState, req.State)
 
-	md, err := bedrockmappers.AgentCoreSessionMetadata(req.AppName, req.UserID, storedState)
+	md, err := sessionmappers.Metadata(req.AppName, req.UserID, storedState)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ func (s *service) Get(ctx context.Context, req *session.GetRequest) (*session.Ge
 	if err != nil {
 		return nil, err
 	}
-	storedState, err := bedrockmappers.AgentCoreSessionStateFromMetadata(remote.metadata)
+	storedState, err := sessionmappers.StateFromMetadata(remote.metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -204,13 +204,13 @@ func (s *service) List(ctx context.Context, req *session.ListRequest) (*session.
 	}
 	var sessions []session.Session
 	for _, remote := range remotes {
-		if !bedrockmappers.AgentCoreSessionMetadataMatchesApp(remote.metadata, req.AppName) {
+		if !sessionmappers.MetadataMatchesApp(remote.metadata, req.AppName) {
 			continue
 		}
-		if req.UserID != "" && bedrockmappers.AgentCoreSessionMetadataUserID(remote.metadata) != req.UserID {
+		if req.UserID != "" && sessionmappers.MetadataUserID(remote.metadata) != req.UserID {
 			continue
 		}
-		storedState, err := bedrockmappers.AgentCoreSessionStateFromMetadata(remote.metadata)
+		storedState, err := sessionmappers.StateFromMetadata(remote.metadata)
 		if err != nil {
 			return nil, err
 		}
@@ -294,7 +294,7 @@ func (s *service) AppendEvent(ctx context.Context, sess session.Session, event *
 	trimTempDelta(&storedEvent)
 
 	sessionID := local.ID()
-	invocationID := bedrockmappers.AgentCoreSessionInvocationID(sessionID, storedEvent.InvocationID, storedEvent.ID)
+	invocationID := sessionmappers.InvocationID(sessionID, storedEvent.InvocationID, storedEvent.ID)
 	description := "ADK invocation"
 	_, err = s.api.CreateInvocation(ctx, &bedrockagentruntime.CreateInvocationInput{
 		SessionIdentifier: &sessionID,
@@ -305,11 +305,11 @@ func (s *service) AppendEvent(ctx context.Context, sess session.Session, event *
 		return fmt.Errorf("create invocation: %w", err)
 	}
 
-	payload, err := bedrockmappers.AgentCoreSessionEncodeEvent(&storedEvent)
+	payload, err := sessionmappers.EncodeEvent(&storedEvent)
 	if err != nil {
 		return err
 	}
-	stepID := bedrockmappers.AgentCoreSessionStepID(sessionID, &storedEvent)
+	stepID := sessionmappers.StepID(sessionID, &storedEvent)
 	stepTime := storedEvent.Timestamp
 	if stepTime.IsZero() {
 		stepTime = time.Now()
@@ -319,7 +319,7 @@ func (s *service) AppendEvent(ctx context.Context, sess session.Session, event *
 		InvocationIdentifier: &invocationID,
 		InvocationStepId:     &stepID,
 		InvocationStepTime:   &stepTime,
-		Payload:              bedrockmappers.AgentCoreSessionInvocationStepPayload(payload),
+		Payload:              sessionmappers.InvocationStepPayload(payload),
 	})
 	if err != nil {
 		return fmt.Errorf("put invocation step: %w", err)
@@ -331,7 +331,7 @@ func (s *service) AppendEvent(ctx context.Context, sess session.Session, event *
 	}
 	local.mergeSharedState(shared)
 	local.appendEvent(&storedEvent)
-	md, err := bedrockmappers.AgentCoreSessionMetadata(
+	md, err := sessionmappers.Metadata(
 		local.AppName(),
 		local.UserID(),
 		local.snapshotStoredState(),
@@ -365,7 +365,7 @@ func (s *service) getOwnedSession(ctx context.Context, appName, userID, sessionI
 		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
 	remote := remoteFromGet(out)
-	if !bedrockmappers.AgentCoreSessionMetadataMatches(remote.metadata, appName, userID) {
+	if !sessionmappers.MetadataMatches(remote.metadata, appName, userID) {
 		return nil, fmt.Errorf("session %s does not belong to app %q user %q", sessionID, appName, userID)
 	}
 	return remote, nil
@@ -384,7 +384,7 @@ func remoteFromGet(out *bedrockagentruntime.GetSessionOutput) *remoteSession {
 	}
 	userID := ""
 	if out.SessionMetadata != nil {
-		userID = bedrockmappers.AgentCoreSessionMetadataUserID(out.SessionMetadata)
+		userID = sessionmappers.MetadataUserID(out.SessionMetadata)
 	}
 	return &remoteSession{id: id, userID: userID, updatedAt: updatedAt, metadata: maps.Clone(out.SessionMetadata)}
 }
@@ -432,10 +432,10 @@ func (s *service) sharedState(ctx context.Context, appName, userID string) (map[
 func sharedStateFromRemotes(remotes []*remoteSession, appName, userID string) (map[string]any, error) {
 	state := map[string]any{}
 	for _, remote := range remotes {
-		if !bedrockmappers.AgentCoreSessionMetadataMatchesApp(remote.metadata, appName) {
+		if !sessionmappers.MetadataMatchesApp(remote.metadata, appName) {
 			continue
 		}
-		remoteState, err := bedrockmappers.AgentCoreSessionStateFromMetadata(remote.metadata)
+		remoteState, err := sessionmappers.StateFromMetadata(remote.metadata)
 		if err != nil {
 			return nil, err
 		}
@@ -444,7 +444,7 @@ func sharedStateFromRemotes(remotes []*remoteSession, appName, userID string) (m
 			case strings.HasPrefix(k, session.KeyPrefixApp):
 				state[k] = v
 			case strings.HasPrefix(k, session.KeyPrefixUser) &&
-				bedrockmappers.AgentCoreSessionMetadataUserID(remote.metadata) == userID:
+				sessionmappers.MetadataUserID(remote.metadata) == userID:
 				state[k] = v
 			}
 		}
@@ -506,7 +506,7 @@ func (s *service) loadInvocationEvents(ctx context.Context, sessionID, invocatio
 			if err != nil {
 				return nil, fmt.Errorf("get invocation step: %w", err)
 			}
-			if event, ok := bedrockmappers.AgentCoreSessionDecodeInvocationStep(step.InvocationStep); ok {
+			if event, ok := sessionmappers.DecodeInvocationStep(step.InvocationStep); ok {
 				events = append(events, event)
 			}
 		}
