@@ -3,12 +3,10 @@ package agentcorecodeinterpreter
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
@@ -17,6 +15,8 @@ import (
 	"google.golang.org/adk/v2/artifact"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
+
+	codeinterpretermodels "github.com/craigh33/adk-go-bedrock/internal/models/agentcore/codeinterpreter"
 )
 
 type fakeAgentCoreAPI struct {
@@ -57,9 +57,16 @@ func (f *fakeAgentCoreAPI) StartCodeInterpreterSession(
 
 func (f *fakeAgentCoreAPI) InvokeCodeInterpreter(
 	_ context.Context,
-	in *bedrockagentcore.InvokeCodeInterpreterInput,
+	_ *bedrockagentcore.InvokeCodeInterpreterInput,
 	_ ...func(*bedrockagentcore.Options),
 ) (*bedrockagentcore.InvokeCodeInterpreterOutput, error) {
+	return nil, errors.New("unexpected direct InvokeCodeInterpreter call")
+}
+
+func (f *fakeAgentCoreAPI) InvokeCodeInterpreterStream(
+	_ context.Context,
+	in *bedrockagentcore.InvokeCodeInterpreterInput,
+) (bedrockagentcore.CodeInterpreterStreamOutputReader, error) {
 	f.calls = append(f.calls, "InvokeCodeInterpreter:"+string(in.Name))
 	f.invokeInputs = append(f.invokeInputs, in)
 	if f.invokeErr != nil {
@@ -73,7 +80,7 @@ func (f *fakeAgentCoreAPI) InvokeCodeInterpreter(
 	if next.err != nil {
 		return nil, next.err
 	}
-	return invokeOutput(next.results), nil
+	return newFakeStreamReader(next.results), nil
 }
 
 func (f *fakeAgentCoreAPI) StopCodeInterpreterSession(
@@ -115,18 +122,6 @@ func (f *fakeStreamReader) Close() error {
 
 func (f *fakeStreamReader) Err() error {
 	return f.err
-}
-
-func invokeOutput(results []agentcoretypes.CodeInterpreterResult) *bedrockagentcore.InvokeCodeInterpreterOutput {
-	out := &bedrockagentcore.InvokeCodeInterpreterOutput{}
-	stream := bedrockagentcore.NewInvokeCodeInterpreterEventStream(
-		func(es *bedrockagentcore.InvokeCodeInterpreterEventStream) {
-			es.Reader = newFakeStreamReader(results)
-		},
-	)
-	field := reflect.ValueOf(out).Elem().FieldByName("eventStream")
-	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(stream))
-	return out
 }
 
 type fakeArtifacts struct {
@@ -336,7 +331,8 @@ func TestRunSuccessWithArtifacts(t *testing.T) {
 	}
 	if len(arts.savedNames) != 1 ||
 		arts.savedNames[0] != "summary.txt" ||
-		arts.savedParts[0].Text != "total,42\n" {
+		arts.savedParts[0].InlineData == nil ||
+		string(arts.savedParts[0].InlineData.Data) != "total,42\n" {
 		t.Fatalf("saved artifacts = %+v %+v", arts.savedNames, arts.savedParts)
 	}
 }
@@ -491,8 +487,72 @@ func TestRunArtifactSaveErrorReturnsPartialResult(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "save artifact") {
 		t.Fatalf("err = %v", err)
 	}
-	if result == nil || result["status"] != "success" {
+	if result == nil || result["status"] != "success" || result["session_id"] != "session-1" {
 		t.Fatalf("partial result = %+v", result)
+	}
+}
+
+func TestReadOutputArtifactsBatchesPaths(t *testing.T) {
+	t.Parallel()
+	api := &fakeAgentCoreAPI{invokeOuts: []invokeOut{{results: []agentcoretypes.CodeInterpreterResult{{
+		Content: []agentcoretypes.ContentBlock{
+			{
+				Type: agentcoretypes.ContentBlockTypeEmbeddedResource,
+				Name: aws.String("one.txt"),
+				Data: []byte("one"),
+			},
+			{
+				Type: agentcoretypes.ContentBlockTypeEmbeddedResource,
+				Name: aws.String("two.txt"),
+				Data: []byte("two"),
+			},
+		},
+	}}}}}
+	tl, err := New(Config{API: api, CodeInterpreterIdentifier: "interp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := tl.(*codeInterpreterTool).readOutputArtifacts(
+		context.Background(),
+		"session-1",
+		[]outputArtifactArg{
+			{Path: "one.txt", ArtifactName: "first.txt"},
+			{Path: "two.txt", ArtifactName: "second.txt"},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.invokeInputs) != 1 || len(api.invokeInputs[0].Arguments.Paths) != 2 ||
+		len(artifacts) != 2 || artifacts[0].ArtifactName != "first.txt" || artifacts[1].ArtifactName != "second.txt" {
+		t.Fatalf("inputs = %+v, artifacts = %+v", api.invokeInputs, artifacts)
+	}
+}
+
+func TestSaveTextArtifactPreservesMIMEType(t *testing.T) {
+	t.Parallel()
+	arts := &fakeArtifacts{}
+	tl, err := New(Config{API: &fakeAgentCoreAPI{}, CodeInterpreterIdentifier: "interp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tl.(*codeInterpreterTool).saveArtifacts(
+		context.Background(),
+		newFakeToolCtx(arts),
+		[]codeinterpretermodels.OutputArtifact{{
+			ArtifactName: "data.csv",
+			MIMEType:     "text/csv",
+			Text:         "a,b\n1,2\n",
+			IsText:       true,
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := arts.savedParts[0].InlineData; got == nil ||
+		got.MIMEType != "text/csv" ||
+		string(got.Data) != "a,b\n1,2\n" {
+		t.Fatalf("saved part = %+v", arts.savedParts[0])
 	}
 }
 
@@ -555,6 +615,13 @@ func TestRunRejectsBadArgs(t *testing.T) {
 		paramLanguage: "ruby",
 	}); err == nil {
 		t.Fatal("expected language error")
+	}
+	if _, err := tl.(*codeInterpreterTool).Run(newFakeToolCtx(nil), map[string]any{
+		paramCode:     "print(1)",
+		paramLanguage: "python",
+		paramRuntime:  "deno",
+	}); err == nil {
+		t.Fatal("expected incompatible runtime error")
 	}
 }
 

@@ -198,14 +198,20 @@ func NormalizeAllowedLanguages(allowed []string) ([]string, error) {
 	return out, nil
 }
 
-// NormalizeRuntime validates an optional runtime.
-func NormalizeRuntime(runtime string) (string, error) {
+// NormalizeRuntime validates an optional runtime for a programming language.
+func NormalizeRuntime(language, runtime string) (string, error) {
 	rt := strings.ToLower(strings.TrimSpace(runtime))
 	if rt == "" {
 		return "", nil
 	}
 	if !agentCoreCodeInterpreterRuntimeSupported(rt) {
 		return "", fmt.Errorf("agentcorecodeinterpreter: unsupported runtime %q", runtime)
+	}
+	if language == agentCoreCodeInterpreterLanguagePython && rt != agentCoreCodeInterpreterRuntimePython ||
+		(language == agentCoreCodeInterpreterLanguageJavascript ||
+			language == agentCoreCodeInterpreterLanguageTypescript) &&
+			(rt != agentCoreCodeInterpreterRuntimeNodeJS && rt != agentCoreCodeInterpreterRuntimeDeno) {
+		return "", fmt.Errorf("agentcorecodeinterpreter: runtime %q is incompatible with language %q", rt, language)
 	}
 	return rt, nil
 }

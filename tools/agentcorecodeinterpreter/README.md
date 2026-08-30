@@ -30,7 +30,7 @@ The tool call must provide:
 Optional call arguments:
 
 - `language`: `python`, `javascript`, or `typescript`; defaults to `python`
-- `runtime`: `python`, `nodejs`, or `deno`
+- `runtime`: `python` for Python; `nodejs` or `deno` for JavaScript and TypeScript
 - `input_artifacts`: array of `{artifact_name, path}`; `path` defaults to `artifact_name`
 - `output_artifacts`: array of `{path, artifact_name}`; `artifact_name` defaults to the path basename
 

@@ -113,11 +113,14 @@ func TestNormalizeLanguageAndRuntime(t *testing.T) {
 	if _, err := NormalizeLanguage("ruby", "python", nil); err == nil {
 		t.Fatal("expected unsupported language error")
 	}
-	if got, err := NormalizeRuntime(" NodeJS "); err != nil || got != "nodejs" {
+	if got, err := NormalizeRuntime("javascript", " NodeJS "); err != nil || got != "nodejs" {
 		t.Fatalf("runtime = %q, err = %v", got, err)
 	}
-	if _, err := NormalizeRuntime("ruby"); err == nil {
+	if _, err := NormalizeRuntime("python", "ruby"); err == nil {
 		t.Fatal("expected unsupported runtime error")
+	}
+	if _, err := NormalizeRuntime("python", "deno"); err == nil {
+		t.Fatal("expected incompatible runtime error")
 	}
 }
 

@@ -66,6 +66,13 @@ type AgentCoreAPI interface {
 	) (*bedrockagentcore.StopCodeInterpreterSessionOutput, error)
 }
 
+type agentCoreStreamAPI interface {
+	InvokeCodeInterpreterStream(
+		context.Context,
+		*bedrockagentcore.InvokeCodeInterpreterInput,
+	) (bedrockagentcore.CodeInterpreterStreamOutputReader, error)
+}
+
 // Config configures the Code Interpreter tool.
 type Config struct {
 	API                       AgentCoreAPI
@@ -196,10 +203,14 @@ func (t *codeInterpreterTool) newFunctionDeclaration() *genai.FunctionDeclaratio
 					Description: fmt.Sprintf("Programming language for the code. Defaults to %q.", t.defaultLanguage),
 				},
 				paramRuntime: {
-					Type:        schemaTypeString,
-					Format:      "enum",
-					Enum:        []string{"python", "nodejs", "deno"},
-					Description: "Optional runtime override. If omitted, AgentCore Code Interpreter selects a default runtime.",
+					Type:   schemaTypeString,
+					Format: "enum",
+					Enum: []string{
+						string(agentcoretypes.LanguageRuntimePython),
+						string(agentcoretypes.LanguageRuntimeNodejs),
+						string(agentcoretypes.LanguageRuntimeDeno),
+					},
+					Description: "Optional runtime override: python for Python; nodejs or deno for JavaScript and TypeScript.",
 				},
 				paramInputArtifacts: {
 					Type:        schemaTypeArray,
@@ -256,11 +267,6 @@ func (t *codeInterpreterTool) ProcessRequest(_ agent.Context, req *model.LLMRequ
 	if req.Config == nil {
 		req.Config = &genai.GenerateContentConfig{}
 	}
-	decl := t.Declaration()
-	if decl == nil {
-		return nil
-	}
-
 	var funcTool *genai.Tool
 	for _, gt := range req.Config.Tools {
 		if gt != nil && gt.FunctionDeclarations != nil {
@@ -270,10 +276,10 @@ func (t *codeInterpreterTool) ProcessRequest(_ agent.Context, req *model.LLMRequ
 	}
 	if funcTool == nil {
 		req.Config.Tools = append(req.Config.Tools, &genai.Tool{
-			FunctionDeclarations: []*genai.FunctionDeclaration{decl},
+			FunctionDeclarations: []*genai.FunctionDeclaration{t.Declaration()},
 		})
 	} else {
-		funcTool.FunctionDeclarations = append(funcTool.FunctionDeclarations, decl)
+		funcTool.FunctionDeclarations = append(funcTool.FunctionDeclarations, t.Declaration())
 	}
 	return nil
 }
@@ -299,7 +305,7 @@ func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[strin
 		return nil, err
 	}
 	runtimeRaw, _ := m[paramRuntime].(string)
-	runtime, err := codeinterpretermappers.NormalizeRuntime(runtimeRaw)
+	runtime, err := codeinterpretermappers.NormalizeRuntime(language, runtimeRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -383,6 +389,7 @@ func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[strin
 	if err != nil {
 		return nil, err
 	}
+	result["session_id"] = sessionID
 	if len(outputArtifacts) > 0 && !toolResultIsError(result) {
 		readArtifacts, err := t.readOutputArtifacts(runCtx, sessionID, outputArtifacts)
 		if err != nil {
@@ -397,7 +404,6 @@ func (t *codeInterpreterTool) Run(ctx agent.Context, args any) (result map[strin
 		}
 		result["artifacts"] = saved
 	}
-	result["session_id"] = sessionID
 	return result, nil
 }
 
@@ -419,14 +425,10 @@ func (t *codeInterpreterTool) invoke(
 	ctx context.Context,
 	input *bedrockagentcore.InvokeCodeInterpreterInput,
 ) ([]agentcoretypes.CodeInterpreterResult, error) {
-	out, err := t.api.InvokeCodeInterpreter(ctx, input)
+	stream, err := t.invokeStream(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("invoke code interpreter %s: %w", input.Name, err)
 	}
-	if out == nil || out.GetStream() == nil {
-		return nil, fmt.Errorf("invoke code interpreter %s: missing event stream", input.Name)
-	}
-	stream := out.GetStream()
 	streamClosed := false
 	defer func() {
 		if !streamClosed {
@@ -451,6 +453,23 @@ func (t *codeInterpreterTool) invoke(
 		return nil, fmt.Errorf("invoke code interpreter %s: stream error: %w", input.Name, streamErr)
 	}
 	return results, nil
+}
+
+func (t *codeInterpreterTool) invokeStream(
+	ctx context.Context,
+	input *bedrockagentcore.InvokeCodeInterpreterInput,
+) (bedrockagentcore.CodeInterpreterStreamOutputReader, error) {
+	if api, ok := t.api.(agentCoreStreamAPI); ok {
+		return api.InvokeCodeInterpreterStream(ctx, input)
+	}
+	out, err := t.api.InvokeCodeInterpreter(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	if out == nil || out.GetStream() == nil {
+		return nil, errors.New("missing event stream")
+	}
+	return out.GetStream(), nil
 }
 
 func (t *codeInterpreterTool) resultFailure(op string, results []agentcoretypes.CodeInterpreterResult) error {
@@ -579,28 +598,33 @@ func (t *codeInterpreterTool) readOutputArtifacts(
 	sessionID string,
 	args []outputArtifactArg,
 ) ([]codeinterpretermodels.OutputArtifact, error) {
-	var artifacts []codeinterpretermodels.OutputArtifact
+	paths := make([]string, 0, len(args))
 	for _, arg := range args {
-		results, err := t.invoke(ctx, codeinterpretermappers.ReadFilesInput(
-			t.codeInterpreterIdentifier,
-			sessionID,
-			[]string{arg.Path},
-		))
-		if err != nil {
-			return nil, err
+		paths = append(paths, arg.Path)
+	}
+	results, err := t.invoke(ctx, codeinterpretermappers.ReadFilesInput(
+		t.codeInterpreterIdentifier,
+		sessionID,
+		paths,
+	))
+	if err != nil {
+		return nil, err
+	}
+	if err := t.resultFailure("readFiles", results); err != nil {
+		return nil, err
+	}
+	_, artifacts, err := t.mapResults(results)
+	if err != nil {
+		return nil, err
+	}
+	byPath := make(map[string]outputArtifactArg, len(args))
+	for _, arg := range args {
+		byPath[arg.Path] = arg
+	}
+	for i := range artifacts {
+		if arg, ok := byPath[artifacts[i].Path]; ok && arg.ArtifactName != "" {
+			artifacts[i].ArtifactName = arg.ArtifactName
 		}
-		if err := t.resultFailure("readFiles", results); err != nil {
-			return nil, err
-		}
-		_, arts, err := t.mapResults(results)
-		if err != nil {
-			return nil, err
-		}
-		if len(arts) > 0 && arg.ArtifactName != "" {
-			arts[0].ArtifactName = arg.ArtifactName
-			arts[0].Path = arg.Path
-		}
-		artifacts = append(artifacts, arts...)
 	}
 	return artifacts, nil
 }
@@ -616,10 +640,11 @@ func (t *codeInterpreterTool) saveArtifacts(
 	}
 	saved := make([]map[string]any, 0, len(artifacts))
 	for _, artifact := range artifacts {
-		part := genai.NewPartFromBytes(artifact.Data, artifact.MIMEType)
+		data := artifact.Data
 		if artifact.IsText {
-			part = genai.NewPartFromText(artifact.Text)
+			data = []byte(artifact.Text)
 		}
+		part := genai.NewPartFromBytes(data, artifact.MIMEType)
 		resp, err := service.Save(ctx, artifact.ArtifactName, part)
 		if err != nil {
 			return nil, fmt.Errorf("save artifact %q: %w", artifact.ArtifactName, err)
