@@ -1,3 +1,5 @@
+
+
 <p align="center">
   <img
     src="docs/images/readme-header.jpg"
@@ -77,7 +79,7 @@ These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat 
 - [`examples/bedrock-system-instruction`](examples/bedrock-system-instruction): system instructions for role definition, output formatting, and behavioral control.
 - [`examples/bedrock-web-ui`](examples/bedrock-web-ui): ADK local web UI launcher.
 
-All examples load AWS configuration with [`config.LoadDefaultConfig`](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/config#LoadDefaultConfig) and require **`BEDROCK_MODEL_ID`** plus region configuration (`AWS_REGION` or profile region).
+All examples load AWS configuration with [`config.LoadDefaultConfig`](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/config#LoadDefaultConfig) and require **`BEDROCK_MODEL_ID`** plus region configuration (`AWS_REGION` or profile region), except S3-only examples such as [`examples/bedrock-artifact-s3`](examples/bedrock-artifact-s3), which require `ARTIFACT_S3_BUCKET` instead of **`BEDROCK_MODEL_ID`**.
 
 ```bash
 export BEDROCK_MODEL_ID=us.anthropic.claude-3-5-sonnet-20241022-v2:0
