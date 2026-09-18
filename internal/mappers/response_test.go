@@ -456,10 +456,11 @@ func TestCustomMetadataFromConverseOutput_noCacheWriteTokens(t *testing.T) {
 	t.Parallel()
 	out := &bedrockruntime.ConverseOutput{
 		Usage: &types.TokenUsage{
-			InputTokens:          aws.Int32(100),
-			OutputTokens:         aws.Int32(50),
-			TotalTokens:          aws.Int32(190),
-			CacheReadInputTokens: aws.Int32(40),
+			InputTokens:           aws.Int32(100),
+			OutputTokens:          aws.Int32(50),
+			TotalTokens:           aws.Int32(190),
+			CacheReadInputTokens:  aws.Int32(40),
+			CacheWriteInputTokens: aws.Int32(0),
 		},
 	}
 	if md := customMetadataFromConverseOutput(out); md != nil {
@@ -484,5 +485,21 @@ func TestStreamMetadataToCustomMetadata_cacheWriteTokens(t *testing.T) {
 	}
 	if got != 20037 {
 		t.Errorf("cache write tokens: got %d, want 20037", got)
+	}
+}
+
+func TestStreamMetadataToCustomMetadata_noCacheWriteTokens(t *testing.T) {
+	t.Parallel()
+	meta := &types.ConverseStreamMetadataEvent{
+		Usage: &types.TokenUsage{
+			InputTokens:           aws.Int32(86),
+			OutputTokens:          aws.Int32(4),
+			TotalTokens:           aws.Int32(130),
+			CacheReadInputTokens:  aws.Int32(40),
+			CacheWriteInputTokens: aws.Int32(0),
+		},
+	}
+	if md := StreamMetadataToCustomMetadata(meta); md != nil {
+		t.Errorf("expected no custom metadata, got %+v", md)
 	}
 }

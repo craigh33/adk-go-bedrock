@@ -498,7 +498,7 @@ func StreamMetadataToCustomMetadata(meta *types.ConverseStreamMetadataEvent) map
 			md[customMetadataKeySafetyRatings] = ratings
 		}
 	}
-	if meta.Usage != nil && meta.Usage.CacheWriteInputTokens != nil {
+	if meta.Usage != nil && meta.Usage.CacheWriteInputTokens != nil && *meta.Usage.CacheWriteInputTokens > 0 {
 		md[customMetadataKeyCacheWriteInputTokens] = *meta.Usage.CacheWriteInputTokens
 	}
 	if meta.ServiceTier != nil {
@@ -518,7 +518,7 @@ func customMetadataFromConverseOutput(out *bedrockruntime.ConverseOutput) map[st
 		return nil
 	}
 	md := map[string]any{}
-	if out.Usage != nil && out.Usage.CacheWriteInputTokens != nil {
+	if out.Usage != nil && out.Usage.CacheWriteInputTokens != nil && *out.Usage.CacheWriteInputTokens > 0 {
 		md[customMetadataKeyCacheWriteInputTokens] = *out.Usage.CacheWriteInputTokens
 	}
 	if out.AdditionalModelResponseFields != nil {
