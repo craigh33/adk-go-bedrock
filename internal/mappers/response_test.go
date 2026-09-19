@@ -430,3 +430,76 @@ func TestLLMResponseFromConverseOutput_guardrailMetadata(t *testing.T) {
 		t.Fatalf("rating: %+v", ratings[0])
 	}
 }
+
+func TestCustomMetadataFromConverseOutput_cacheWriteTokens(t *testing.T) {
+	t.Parallel()
+	out := &bedrockruntime.ConverseOutput{
+		Usage: &types.TokenUsage{
+			InputTokens:           aws.Int32(86),
+			OutputTokens:          aws.Int32(4),
+			TotalTokens:           aws.Int32(20127),
+			CacheReadInputTokens:  aws.Int32(0),
+			CacheWriteInputTokens: aws.Int32(20037),
+		},
+	}
+	md := customMetadataFromConverseOutput(out)
+	got, ok := md[customMetadataKeyCacheWriteInputTokens].(int32)
+	if !ok {
+		t.Fatalf("cache write tokens missing or wrong type: %+v", md)
+	}
+	if got != 20037 {
+		t.Errorf("cache write tokens: got %d, want 20037", got)
+	}
+}
+
+func TestCustomMetadataFromConverseOutput_noCacheWriteTokens(t *testing.T) {
+	t.Parallel()
+	out := &bedrockruntime.ConverseOutput{
+		Usage: &types.TokenUsage{
+			InputTokens:           aws.Int32(100),
+			OutputTokens:          aws.Int32(50),
+			TotalTokens:           aws.Int32(190),
+			CacheReadInputTokens:  aws.Int32(40),
+			CacheWriteInputTokens: aws.Int32(0),
+		},
+	}
+	if md := customMetadataFromConverseOutput(out); md != nil {
+		t.Errorf("expected no custom metadata, got %+v", md)
+	}
+}
+
+func TestStreamMetadataToCustomMetadata_cacheWriteTokens(t *testing.T) {
+	t.Parallel()
+	meta := &types.ConverseStreamMetadataEvent{
+		Usage: &types.TokenUsage{
+			InputTokens:           aws.Int32(86),
+			OutputTokens:          aws.Int32(4),
+			TotalTokens:           aws.Int32(20127),
+			CacheWriteInputTokens: aws.Int32(20037),
+		},
+	}
+	md := StreamMetadataToCustomMetadata(meta)
+	got, ok := md[customMetadataKeyCacheWriteInputTokens].(int32)
+	if !ok {
+		t.Fatalf("cache write tokens missing or wrong type: %+v", md)
+	}
+	if got != 20037 {
+		t.Errorf("cache write tokens: got %d, want 20037", got)
+	}
+}
+
+func TestStreamMetadataToCustomMetadata_noCacheWriteTokens(t *testing.T) {
+	t.Parallel()
+	meta := &types.ConverseStreamMetadataEvent{
+		Usage: &types.TokenUsage{
+			InputTokens:           aws.Int32(86),
+			OutputTokens:          aws.Int32(4),
+			TotalTokens:           aws.Int32(130),
+			CacheReadInputTokens:  aws.Int32(40),
+			CacheWriteInputTokens: aws.Int32(0),
+		},
+	}
+	if md := StreamMetadataToCustomMetadata(meta); md != nil {
+		t.Errorf("expected no custom metadata, got %+v", md)
+	}
+}

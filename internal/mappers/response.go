@@ -24,6 +24,8 @@ const (
 	customMetadataKeyGuardrailTrace                = "bedrock_guardrail_trace"
 	customMetadataKeyPromptRouter                  = "bedrock_prompt_router"
 	customMetadataKeySafetyRatings                 = "safety_ratings"
+	// AWS Bedrock bills CacheWrite separately so this is needed to pass it through.
+	customMetadataKeyCacheWriteInputTokens = "bedrock_cache_write_input_tokens" //nolint:gosec // G101: This key relates to LLM tokens not secrets
 
 	rankLow    = 1
 	rankMedium = 2
@@ -496,6 +498,9 @@ func StreamMetadataToCustomMetadata(meta *types.ConverseStreamMetadataEvent) map
 			md[customMetadataKeySafetyRatings] = ratings
 		}
 	}
+	if meta.Usage != nil && meta.Usage.CacheWriteInputTokens != nil && *meta.Usage.CacheWriteInputTokens > 0 {
+		md[customMetadataKeyCacheWriteInputTokens] = *meta.Usage.CacheWriteInputTokens
+	}
 	if meta.ServiceTier != nil {
 		md["bedrock_service_tier"] = *meta.ServiceTier
 	}
@@ -513,6 +518,9 @@ func customMetadataFromConverseOutput(out *bedrockruntime.ConverseOutput) map[st
 		return nil
 	}
 	md := map[string]any{}
+	if out.Usage != nil && out.Usage.CacheWriteInputTokens != nil && *out.Usage.CacheWriteInputTokens > 0 {
+		md[customMetadataKeyCacheWriteInputTokens] = *out.Usage.CacheWriteInputTokens
+	}
 	if out.AdditionalModelResponseFields != nil {
 		md[customMetadataKeyAdditionalModelResponseFields] = out.AdditionalModelResponseFields
 	}

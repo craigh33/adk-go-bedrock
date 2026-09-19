@@ -46,7 +46,7 @@ Guidelines:
 - Structure long answers with headings so they are easy to scan
 `, 20)
 
-func ask(ctx context.Context, llm model.LLM, question string) (*genai.GenerateContentResponseUsageMetadata, error) {
+func ask(ctx context.Context, llm model.LLM, question string) (*model.LLMResponse, error) {
 	req := &model.LLMRequest{
 		Contents: []*genai.Content{
 			{
@@ -61,7 +61,7 @@ func ask(ctx context.Context, llm model.LLM, question string) (*genai.GenerateCo
 		},
 	}
 
-	var usage *genai.GenerateContentResponseUsageMetadata
+	var usage *model.LLMResponse
 	for resp, err := range llm.GenerateContent(ctx, req, false) {
 		if err != nil {
 			return nil, fmt.Errorf("generate: %w", err)
@@ -77,18 +77,21 @@ func ask(ctx context.Context, llm model.LLM, question string) (*genai.GenerateCo
 			}
 		}
 		if resp.UsageMetadata != nil {
-			usage = resp.UsageMetadata
+			usage = resp
 		}
 	}
 	return usage, nil
 }
 
-func printUsage(label string, u *genai.GenerateContentResponseUsageMetadata) {
-	if u == nil {
+func printUsage(label string, resp *model.LLMResponse) {
+	if resp == nil || resp.UsageMetadata == nil {
 		return
 	}
-	fmt.Printf("[%s] prompt=%d  candidates=%d  fromCache=%d total=%d tokens\n",
-		label, u.PromptTokenCount, u.CandidatesTokenCount, u.CachedContentTokenCount, u.TotalTokenCount)
+	u := resp.UsageMetadata
+	// genai has no cache-write field, so the provider passes it through CustomMetadata.
+	cacheWrite, _ := resp.CustomMetadata["bedrock_cache_write_input_tokens"].(int32)
+	fmt.Printf("[%s] prompt=%d  candidates=%d  fromCache=%d toCache=%d total=%d tokens\n",
+		label, u.PromptTokenCount, u.CandidatesTokenCount, u.CachedContentTokenCount, cacheWrite, u.TotalTokenCount)
 }
 
 func main() {
