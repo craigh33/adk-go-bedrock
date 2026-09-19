@@ -104,6 +104,7 @@ make -C examples/bedrock-stream run
 - **Function responses**: JSON tool output still maps as before, and image/video/document `FunctionResponse.Parts` are preserved through Bedrock tool-result content blocks.
 - **Streaming**: When ADK uses SSE streaming, the provider calls `ConverseStream`, emits partial text responses, and buffers streamed tool calls, reasoning blocks, image blocks, citation deltas (for grounded responses), usage, and guardrail metadata into the final `TurnComplete` response.
 - **Guardrails / safety results**: Bedrock guardrail stop reasons and trace metadata are mapped back into ADK `FinishReason` and `CustomMetadata`, including synthesized `safety_ratings` derived from Bedrock guardrail assessments when available.
+- **Token usage**: Bedrock input, output, total and cache-read counts map to `genai` `UsageMetadata`. Cache writes have no `genai` equivalent, so the Bedrock count is surfaced as `CustomMetadata["bedrock_cache_write_input_tokens"]` (`int32`). The key is only present when Bedrock reports a non-zero cache write.
 
 ## Nova Web Grounding
 
