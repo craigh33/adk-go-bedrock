@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime"
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/types"
 	"github.com/aws/smithy-go"
+	"github.com/google/uuid"
 	"google.golang.org/adk/v2/session"
 
 	sessionmappers "github.com/craigh33/adk-go-bedrock/internal/mappers/agentcore/session"
@@ -281,6 +282,9 @@ func (s *service) AppendEvent(ctx context.Context, sess session.Session, event *
 
 	if _, err := s.getOwnedSession(ctx, local.AppName(), local.UserID(), local.ID()); err != nil {
 		return err
+	}
+	if event.ID == "" {
+		event.ID = uuid.NewString()
 	}
 
 	eventJSON, err := json.Marshal(event)
