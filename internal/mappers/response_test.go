@@ -503,3 +503,47 @@ func TestStreamMetadataToCustomMetadata_noCacheWriteTokens(t *testing.T) {
 		t.Errorf("expected no custom metadata, got %+v", md)
 	}
 }
+
+// Signature-only reasoning blocks (Claude adaptive thinking surfaces no text)
+// and redacted reasoning must be preserved, not silently dropped.
+func TestMessageToGenaiContent_signatureOnlyAndRedactedReasoning(t *testing.T) {
+	t.Parallel()
+	emptyText := ""
+	sig := "sig-only"
+	msg := &types.Message{
+		Role: types.ConversationRoleAssistant,
+		Content: []types.ContentBlock{
+			&types.ContentBlockMemberReasoningContent{
+				Value: &types.ReasoningContentBlockMemberReasoningText{Value: types.ReasoningTextBlock{
+					Text:      &emptyText,
+					Signature: &sig,
+				}},
+			},
+			&types.ContentBlockMemberReasoningContent{
+				Value: &types.ReasoningContentBlockMemberRedactedContent{Value: []byte{0xDE, 0xAD}},
+			},
+			// No text and no signature: nothing to preserve, still skipped.
+			&types.ContentBlockMemberReasoningContent{
+				Value: &types.ReasoningContentBlockMemberReasoningText{
+					Value: types.ReasoningTextBlock{Text: &emptyText},
+				},
+			},
+		},
+	}
+	c, err := MessageToGenaiContent(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Parts) != 2 {
+		t.Fatalf("parts: %+v", c.Parts)
+	}
+	if !c.Parts[0].Thought || c.Parts[0].Text != "" || string(c.Parts[0].ThoughtSignature) != "sig-only" {
+		t.Fatalf("signature-only part: %+v", c.Parts[0])
+	}
+	if !c.Parts[1].Thought {
+		t.Fatalf("redacted part not a thought: %+v", c.Parts[1])
+	}
+	if got := RedactedReasoningFromPart(c.Parts[1]); string(got) != string([]byte{0xDE, 0xAD}) {
+		t.Fatalf("redacted bytes: %v", got)
+	}
+}

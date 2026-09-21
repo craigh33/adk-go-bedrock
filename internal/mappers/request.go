@@ -301,9 +301,16 @@ func thoughtPartToReasoningContentBlock(p *genai.Part, role types.ConversationRo
 	if role != types.ConversationRoleAssistant {
 		return nil, errors.New("thought parts must be in a model-role content")
 	}
-	if p.Text == "" {
-		return nil, nil //nolint:nilnil // No reasoning text to send back.
+	if raw := RedactedReasoningFromPart(p); len(raw) > 0 {
+		return &types.ContentBlockMemberReasoningContent{
+			Value: &types.ReasoningContentBlockMemberRedactedContent{Value: raw},
+		}, nil
 	}
+	if p.Text == "" && len(p.ThoughtSignature) == 0 {
+		return nil, nil //nolint:nilnil // No reasoning content to send back.
+	}
+	// Signature-only blocks go back with empty text: Bedrock requires reasoning
+	// blocks returned unmodified, and that is how they arrived.
 	val := types.ReasoningTextBlock{Text: aws.String(p.Text)}
 	if len(p.ThoughtSignature) > 0 {
 		sig := string(p.ThoughtSignature)
