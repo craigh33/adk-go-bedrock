@@ -59,7 +59,7 @@ Zero values select the defaults below unless noted otherwise. Negative timeouts 
 | `AllowedHosts`, `DeniedHosts` | public hosts allowed | Lexical HTTP(S) host policy; deny rules win. |
 | `RequestMiddlewares` | none | Mutate, fulfill, or block intercepted browser requests. |
 | `URLMiddlewares` | none | Compose or replace URL host policy for navigate, request, current, and final stages. |
-| `Dialer` | `websocket.DefaultDialer` | Open the signed automation WebSocket through a custom proxy or transport. |
+| `Dialer` | `websocket.Dial` | Open the signed automation WebSocket through a custom proxy or transport. |
 | `AuthHandler` | disabled | Answer HTTP authentication challenges with default handling, cancellation, or credentials. |
 | `NavigationTimeout` | `30s` | Overall deadline for browser actions, selector waits, and artifact saving. |
 | `CleanupTimeout` | `10s` | Separate best-effort stop deadline after a failed auto-started navigation. |
@@ -113,7 +113,7 @@ AuthHandler: func(ctx context.Context, challenge browser.AuthChallenge) (browser
 },
 ```
 
-`Dialer` accepts any `WebSocketDialer` with Gorilla's `DialContext` signature. It receives the AgentCore endpoint and SigV4-signed headers, making proxying, observability, and custom TLS behavior injectable without exposing CDP through the ADK tool.
+`Dialer` accepts any `WebSocketDialer` with Coder WebSocket's `Dial` signature. Its `DialOptions.HTTPHeader` contains the SigV4-signed headers, making proxying, observability, and custom TLS behavior injectable without exposing CDP through the ADK tool.
 
 By default sessions use `aws.browser.v1` and a 900 second timeout. `NavigationTimeout` bounds the AgentCore lookup, WebSocket/CDP work, lifecycle and selector waits, and artifact save performed by `navigate`, `extract_text`, and `screenshot`. Screenshot payloads are bounded before and after base64 decoding and immediately before artifact storage. The automation WebSocket also has an internal read limit derived from the configured text and screenshot bounds.
 

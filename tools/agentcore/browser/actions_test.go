@@ -408,7 +408,7 @@ func TestExtractTextAppliesTimeout(t *testing.T) {
 		paramAction:    actionExtractText,
 		paramSessionID: "session-1",
 	})
-	if err == nil || !strings.Contains(err.Error(), "i/o timeout") {
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected extract_text timeout, got %v", err)
 	}
 	if evaluateCalls.Load() != 1 {
@@ -506,7 +506,7 @@ func TestNavigateAppliesTimeoutToMetadata(t *testing.T) {
 		paramAction: actionNavigate,
 		paramURL:    "https://example.com",
 	})
-	if err == nil || !strings.Contains(err.Error(), "i/o timeout") {
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected metadata timeout, got %v", err)
 	}
 	if metadataCalls.Load() != 1 {
@@ -614,7 +614,7 @@ func TestScreenshotAppliesTimeout(t *testing.T) {
 		paramAction:    actionScreenshot,
 		paramSessionID: "session-1",
 	})
-	if err == nil || !strings.Contains(err.Error(), "i/o timeout") {
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected screenshot timeout, got %v", err)
 	}
 	if evaluateCalls.Load() != 1 {

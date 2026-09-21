@@ -14,7 +14,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 )
 
 func TestSignedWebSocketHeadersRejectsUnsupportedScheme(t *testing.T) {
@@ -37,11 +37,11 @@ func TestOpenCDPUsesConfiguredDialerAndSignedHeaders(t *testing.T) {
 	dialer := dialerFunc(func(
 		ctx context.Context,
 		rawURL string,
-		headers http.Header,
+		opts *websocket.DialOptions,
 	) (*websocket.Conn, *http.Response, error) {
 		gotURL = rawURL
-		gotHeaders = headers.Clone()
-		return websocket.DefaultDialer.DialContext(ctx, rawURL, headers)
+		gotHeaders = opts.HTTPHeader.Clone()
+		return websocket.Dial(ctx, rawURL, opts)
 	})
 	tl, err := New(Config{
 		API:         &fakeAgentCoreAPI{},
@@ -65,6 +65,30 @@ func TestOpenCDPUsesConfiguredDialerAndSignedHeaders(t *testing.T) {
 	}
 }
 
+func TestOpenCDPDoesNotFollowRedirects(t *testing.T) {
+	t.Parallel()
+	var redirected atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirected" {
+			redirected.Store(true)
+			return
+		}
+		http.Redirect(w, r, "/redirected", http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	tool, err := New(Config{API: &fakeAgentCoreAPI{}, Region: "us-east-1", Credentials: testCreds()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := "ws" + strings.TrimPrefix(srv.URL, "http") + "/stream"
+	if _, err := tool.(*browserTool).openCDP(context.Background(), endpoint); err == nil {
+		t.Fatal("expected redirected handshake to fail")
+	}
+	if redirected.Load() {
+		t.Fatal("signed WebSocket handshake followed a redirect")
+	}
+}
+
 func TestOpenCDPClosesDialResponseOnError(t *testing.T) {
 	t.Parallel()
 	body := &trackingBody{Reader: bytes.NewReader(nil)}
@@ -72,7 +96,7 @@ func TestOpenCDPClosesDialResponseOnError(t *testing.T) {
 	dialer := dialerFunc(func(
 		context.Context,
 		string,
-		http.Header,
+		*websocket.DialOptions,
 	) (*websocket.Conn, *http.Response, error) {
 		return nil, &http.Response{Body: body}, dialErr
 	})
@@ -99,7 +123,7 @@ func TestOpenCDPRejectsNilConnection(t *testing.T) {
 	dialer := dialerFunc(func(
 		context.Context,
 		string,
-		http.Header,
+		*websocket.DialOptions,
 	) (*websocket.Conn, *http.Response, error) {
 		return nil, nil, nil
 	})
@@ -120,9 +144,8 @@ func TestOpenCDPRejectsNilConnection(t *testing.T) {
 
 func TestOpenCDPRejectsOversizedMessage(t *testing.T) {
 	t.Parallel()
-	upgrader := websocket.Upgrader{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := acceptTestWS(w, r)
 		if err != nil {
 			t.Errorf("upgrade: %v", err)
 			return
@@ -468,14 +491,15 @@ func TestNavigateWaitsForSelector(t *testing.T) {
 func TestSelectorWaitErrorsAndTimeout(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name       string
-		serverMode string
-		timeout    time.Duration
-		delay      time.Duration
-		want       string
+		name        string
+		serverMode  string
+		timeout     time.Duration
+		delay       time.Duration
+		want        string
+		wantTimeout bool
 	}{
 		{name: "invalid selector", serverMode: "Runtime.evaluate.selectorException", timeout: time.Second, want: "SyntaxError: invalid selector"},
-		{name: "timeout", timeout: 50 * time.Millisecond, delay: 200 * time.Millisecond, want: "i/o timeout"},
+		{name: "timeout", timeout: 50 * time.Millisecond, delay: 200 * time.Millisecond, wantTimeout: true},
 		{name: "delayed resolution", timeout: time.Second, delay: 20 * time.Millisecond},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -507,11 +531,14 @@ func TestSelectorWaitErrorsAndTimeout(t *testing.T) {
 				paramURL:             "https://example.com",
 				paramWaitForSelector: "main",
 			})
-			if tc.want == "" && err != nil {
+			if tc.want == "" && !tc.wantTimeout && err != nil {
 				t.Fatalf("navigate: %v", err)
 			}
 			if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+			if tc.wantTimeout && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("expected selector timeout, got %v", err)
 			}
 		})
 	}

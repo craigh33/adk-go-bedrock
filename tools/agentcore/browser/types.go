@@ -8,7 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 	"google.golang.org/genai"
 )
 
@@ -83,9 +83,10 @@ type URLHandler func(context.Context, URLCheck) error
 // and built-in host policy; omitting next replaces the host policy.
 type URLMiddleware func(URLHandler) URLHandler
 
-// WebSocketDialer opens an AgentCore Browser automation stream.
+// WebSocketDialer opens an AgentCore Browser automation stream. DialOptions
+// contains the SigV4-signed HTTP headers for the handshake.
 type WebSocketDialer interface {
-	DialContext(context.Context, string, http.Header) (*websocket.Conn, *http.Response, error)
+	Dial(context.Context, string, *websocket.DialOptions) (*websocket.Conn, *http.Response, error)
 }
 
 // WaitUntil controls which page lifecycle event navigation waits for.

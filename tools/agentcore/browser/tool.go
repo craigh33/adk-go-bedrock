@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gorilla/websocket"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/tool"
@@ -115,7 +114,7 @@ func New(cfg Config) (tool.Tool, error) {
 		decl:                  newFunctionDeclaration(),
 	}
 	if bt.dialer == nil {
-		bt.dialer = websocket.DefaultDialer
+		bt.dialer = defaultWebSocketDialer{}
 	}
 	handler, err := applyRequestMiddleware(bt.handleBrowserRequest, cfg.RequestMiddlewares)
 	if err != nil {

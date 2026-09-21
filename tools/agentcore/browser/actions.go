@@ -16,6 +16,7 @@ import (
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore/types"
+	"github.com/coder/websocket"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/genai"
 
@@ -403,7 +404,7 @@ func (t *browserTool) openCDP(ctx context.Context, endpoint string) (*cdpConn, e
 	if err != nil {
 		return nil, err
 	}
-	conn, resp, err := t.dialer.DialContext(ctx, endpoint, headers)
+	conn, resp, err := t.dialer.Dial(ctx, endpoint, &websocket.DialOptions{HTTPHeader: headers})
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}

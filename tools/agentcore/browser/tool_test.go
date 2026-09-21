@@ -16,7 +16,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore/types"
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/artifact"
 	"google.golang.org/adk/v2/model"
@@ -88,15 +89,40 @@ type fakeArtifacts struct {
 type dialerFunc func(
 	context.Context,
 	string,
-	http.Header,
+	*websocket.DialOptions,
 ) (*websocket.Conn, *http.Response, error)
 
-func (f dialerFunc) DialContext(
+func (f dialerFunc) Dial(
 	ctx context.Context,
 	rawURL string,
-	header http.Header,
+	opts *websocket.DialOptions,
 ) (*websocket.Conn, *http.Response, error) {
-	return f(ctx, rawURL, header)
+	return f(ctx, rawURL, opts)
+}
+
+type testWSConn struct {
+	conn *websocket.Conn
+	ctx  context.Context
+}
+
+func acceptTestWS(w http.ResponseWriter, r *http.Request) (*testWSConn, error) {
+	conn, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &testWSConn{conn: conn, ctx: r.Context()}, nil
+}
+
+func (c *testWSConn) ReadJSON(out any) error {
+	return wsjson.Read(c.ctx, c.conn, out)
+}
+
+func (c *testWSConn) WriteJSON(value any) error {
+	return wsjson.Write(c.ctx, c.conn, value)
+}
+
+func (c *testWSConn) Close() error {
+	return c.conn.CloseNow()
 }
 
 type trackingBody struct {
@@ -183,9 +209,8 @@ func fakeCDPServer(t *testing.T, failMethod string) string {
 //nolint:cyclop,gocognit,gocyclo // Keeping the fake CDP request table in one place is clearer for these tests.
 func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, map[string]any)) string {
 	t.Helper()
-	upgrader := websocket.Upgrader{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := acceptTestWS(w, r)
 		if err != nil {
 			t.Errorf("upgrade: %v", err)
 			return
@@ -496,7 +521,7 @@ func TestNewValidationAndDefaults(t *testing.T) {
 	if bt.waitUntil != WaitUntilLoad {
 		t.Errorf("wait until = %q", bt.waitUntil)
 	}
-	if bt.dialer != websocket.DefaultDialer {
+	if _, ok := bt.dialer.(defaultWebSocketDialer); !ok {
 		t.Errorf("dialer = %#v", bt.dialer)
 	}
 	if bt.automationReadLimit <= defaultMaxScreenshotBytes {

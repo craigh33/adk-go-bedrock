@@ -13,9 +13,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 type cdpConn struct {
@@ -26,6 +26,22 @@ type cdpConn struct {
 	responses      map[int64]cdpMessage
 	requestHandler RequestHandler
 	authHandler    AuthHandler
+}
+
+type defaultWebSocketDialer struct{}
+
+func (defaultWebSocketDialer) Dial(
+	ctx context.Context,
+	endpoint string,
+	opts *websocket.DialOptions,
+) (*websocket.Conn, *http.Response, error) {
+	client := *http.DefaultClient
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	dialOpts := *opts
+	dialOpts.HTTPClient = &client
+	return websocket.Dial(ctx, endpoint, &dialOpts)
 }
 
 type cdpMessage struct {
@@ -101,7 +117,7 @@ type authRequired struct {
 }
 
 func (c *cdpConn) close() {
-	_ = c.conn.Close()
+	_ = c.conn.CloseNow()
 }
 
 func (c *cdpConn) navigate(
@@ -438,10 +454,7 @@ func (c *cdpConn) call(ctx context.Context, method string, params any, sessionID
 	if sessionID != "" {
 		msg["sessionId"] = sessionID
 	}
-	if err := c.conn.SetWriteDeadline(deadline(ctx)); err != nil {
-		return nil, err
-	}
-	if err := c.conn.WriteJSON(msg); err != nil {
+	if err := wsjson.Write(ctx, c.conn, msg); err != nil {
 		return nil, fmt.Errorf("cdp %s: %w", method, err)
 	}
 	for {
@@ -772,11 +785,8 @@ func (c *cdpConn) callResult(method string, resp cdpMessage) (json.RawMessage, e
 }
 
 func (c *cdpConn) readMessage(ctx context.Context) (cdpMessage, error) {
-	if err := c.conn.SetReadDeadline(deadline(ctx)); err != nil {
-		return cdpMessage{}, err
-	}
 	var msg cdpMessage
-	if err := c.conn.ReadJSON(&msg); err != nil {
+	if err := wsjson.Read(ctx, c.conn, &msg); err != nil {
 		return cdpMessage{}, err
 	}
 	return msg, nil
@@ -812,11 +822,4 @@ func (c *cdpConn) takeEvent(sessionID, method string) bool {
 		}
 	}
 	return false
-}
-
-func deadline(ctx context.Context) time.Time {
-	if d, ok := ctx.Deadline(); ok {
-		return d
-	}
-	return time.Now().Add(defaultNavigationTimeout)
 }
