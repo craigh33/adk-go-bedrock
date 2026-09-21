@@ -99,9 +99,9 @@ type AgentCoreAPI interface {
 	) (*bedrockagentcore.StopBrowserSessionOutput, error)
 }
 
-// BrowserRequest is a request paused before it is sent by the browser.
+// Request is a request paused before it is sent by the browser.
 // Middleware may modify URL, Method, Headers, or PostData before continuing.
-type BrowserRequest struct {
+type Request struct {
 	URL                 string
 	Method              string
 	Headers             http.Header
@@ -112,8 +112,8 @@ type BrowserRequest struct {
 	RedirectedRequestID string
 }
 
-// BrowserResponse is a synthetic response returned by request middleware.
-type BrowserResponse struct {
+// Response is a synthetic response returned by request middleware.
+type Response struct {
 	StatusCode int
 	StatusText string
 	Headers    http.Header
@@ -122,7 +122,7 @@ type BrowserResponse struct {
 
 // RequestHandler handles a paused browser request. A nil response continues the request;
 // a non-nil response fulfills it. Returning an error blocks the request.
-type RequestHandler func(context.Context, *BrowserRequest) (*BrowserResponse, error)
+type RequestHandler func(context.Context, *Request) (*Response, error)
 
 // RequestMiddleware wraps request handling. Calling next applies the remaining middleware
 // and built-in host policy; middleware may deliberately omit next to replace that behavior.
@@ -176,7 +176,7 @@ const (
 
 // AuthChallenge describes an HTTP authentication challenge from the browser.
 type AuthChallenge struct {
-	Request BrowserRequest
+	Request Request
 	Source  string
 	Origin  string
 	Scheme  string

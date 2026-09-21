@@ -20,7 +20,7 @@ browserTool, err := browser.New(browser.Config{
     WaitUntil:         browser.WaitUntilDOMContentLoaded,
     RequestMiddlewares: []browser.RequestMiddleware{
         func(next browser.RequestHandler) browser.RequestHandler {
-            return func(ctx context.Context, req *browser.BrowserRequest) (*browser.BrowserResponse, error) {
+            return func(ctx context.Context, req *browser.Request) (*browser.Response, error) {
                 if req.URL == "https://example.com/api" {
                     req.Headers.Set("Authorization", "Bearer "+token)
                 }
@@ -92,7 +92,7 @@ When URL middleware rewrites a `URLCheck` and calls `next`, the rewritten URL is
 
 ### Request Middleware
 
-`RequestMiddlewares` wraps request-stage browser interception. Middleware receives URL, method, headers, body, resource type, frame, network, and redirect metadata. It may mutate URL, method, headers, or body before calling `next`, return a `BrowserResponse` to fulfill the request without network access, or return an error to block the request. Middleware is applied in list order, with the first entry outermost.
+`RequestMiddlewares` wraps request-stage browser interception. Middleware receives URL, method, headers, body, resource type, frame, network, and redirect metadata. It may mutate URL, method, headers, or body before calling `next`, return a `Response` to fulfill the request without network access, or return an error to block the request. Middleware is applied in list order, with the first entry outermost.
 
 Calling `next` applies the remaining middleware and the built-in host policy. Omitting `next` replaces request-stage host handling for that request, which supports custom routing, mocking, and policy implementations. The explicit `navigate` input and current/final page URLs are still checked against `AllowedHosts` and `DeniedHosts`. Middleware may run concurrently for separate tool calls and must be concurrency-safe. Its context carries the configured action deadline.
 

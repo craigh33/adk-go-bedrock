@@ -526,8 +526,8 @@ func (t *browserTool) handleURLCheck(_ context.Context, check URLCheck) error {
 
 func (t *browserTool) handleBrowserRequest(
 	ctx context.Context,
-	request *BrowserRequest,
-) (*BrowserResponse, error) {
+	request *Request,
+) (*Response, error) {
 	if err := t.checkURL(ctx, request.URL, URLStageRequest); err != nil {
 		return nil, err
 	}

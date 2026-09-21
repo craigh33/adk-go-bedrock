@@ -542,7 +542,7 @@ func (c *cdpConn) handleAuthRequired(ctx context.Context, msg cdpMessage) (bool,
 		sessionID = c.pageSessionID
 	}
 	challenge := AuthChallenge{
-		Request: BrowserRequest{
+		Request: Request{
 			URL:          required.Request.URL,
 			Method:       required.Request.Method,
 			Headers:      stringMapHeader(required.Request.Headers),
@@ -641,7 +641,7 @@ func (c *cdpConn) continueWithAuth(
 	return err
 }
 
-func newBrowserRequest(paused pausedRequest) *BrowserRequest {
+func newBrowserRequest(paused pausedRequest) *Request {
 	headers := make(http.Header, len(paused.Request.Headers))
 	for name, value := range paused.Request.Headers {
 		headers.Set(name, value)
@@ -650,7 +650,7 @@ func newBrowserRequest(paused pausedRequest) *BrowserRequest {
 	if paused.Request.PostData != nil {
 		postData = []byte(*paused.Request.PostData)
 	}
-	return &BrowserRequest{
+	return &Request{
 		URL:                 paused.Request.URL,
 		Method:              paused.Request.Method,
 		Headers:             headers,
@@ -662,7 +662,7 @@ func newBrowserRequest(paused pausedRequest) *BrowserRequest {
 	}
 }
 
-func cloneBrowserRequest(request *BrowserRequest) *BrowserRequest {
+func cloneBrowserRequest(request *Request) *Request {
 	cloned := *request
 	cloned.Headers = request.Headers.Clone()
 	cloned.PostData = slices.Clone(request.PostData)
@@ -673,8 +673,8 @@ func (c *cdpConn) continuePausedRequest(
 	ctx context.Context,
 	sessionID string,
 	requestID string,
-	original *BrowserRequest,
-	request *BrowserRequest,
+	original *Request,
+	request *Request,
 ) error {
 	params := map[string]any{cdpKeyRequestID: requestID}
 	if request.URL != original.URL {
@@ -699,7 +699,7 @@ func (c *cdpConn) fulfillPausedRequest(
 	ctx context.Context,
 	sessionID string,
 	requestID string,
-	response *BrowserResponse,
+	response *Response,
 ) error {
 	statusCode := response.StatusCode
 	if statusCode == 0 {

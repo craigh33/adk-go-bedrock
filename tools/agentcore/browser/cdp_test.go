@@ -256,7 +256,7 @@ func TestRequestMiddlewareRewritesRequest(t *testing.T) {
 		},
 	}
 	middleware := func(next RequestHandler) RequestHandler {
-		return func(ctx context.Context, request *BrowserRequest) (*BrowserResponse, error) {
+		return func(ctx context.Context, request *Request) (*Response, error) {
 			if request.ResourceType != "Document" || request.FrameID != "frame-1" ||
 				request.NetworkID != "network-1" {
 				t.Errorf("request metadata = %#v", request)
@@ -317,8 +317,8 @@ func TestRequestMiddlewareFulfillsRequest(t *testing.T) {
 		},
 	}
 	middleware := func(RequestHandler) RequestHandler {
-		return func(context.Context, *BrowserRequest) (*BrowserResponse, error) {
-			return &BrowserResponse{
+		return func(context.Context, *Request) (*Response, error) {
+			return &Response{
 				StatusCode: http.StatusCreated,
 				StatusText: "Created by middleware",
 				Headers:    http.Header{"Content-Type": []string{"text/plain"}},
@@ -364,7 +364,7 @@ func TestRequestMiddlewareCanReplaceDefaultPolicy(t *testing.T) {
 		},
 	}
 	middleware := func(next RequestHandler) RequestHandler {
-		return func(ctx context.Context, request *BrowserRequest) (*BrowserResponse, error) {
+		return func(ctx context.Context, request *Request) (*Response, error) {
 			if request.ResourceType == "Image" {
 				return nil, nil
 			}
