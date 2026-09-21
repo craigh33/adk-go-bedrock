@@ -18,7 +18,7 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/adk/v2/session"
 
-	sessionmappers "github.com/craigh33/adk-go-bedrock/internal/agentcore/session"
+	sessionmappers "github.com/craigh33/adk-go-bedrock/internal/agentcore/mappers/session"
 )
 
 // Options configures [NewWithAPI].

@@ -19,7 +19,7 @@ import (
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/genai"
 
-	browsermappers "github.com/craigh33/adk-go-bedrock/internal/agentcore/browser"
+	browsermappers "github.com/craigh33/adk-go-bedrock/internal/agentcore/mappers/browser"
 )
 
 func (t *browserTool) runStart(ctx agent.Context) (map[string]any, error) {

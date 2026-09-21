@@ -18,7 +18,7 @@ import (
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/genai"
 
-	codeinterpretermappers "github.com/craigh33/adk-go-bedrock/internal/agentcore/codeinterpreter"
+	codeinterpretermappers "github.com/craigh33/adk-go-bedrock/internal/agentcore/mappers/codeinterpreter"
 	codeinterpretermodels "github.com/craigh33/adk-go-bedrock/internal/models/agentcore/codeinterpreter"
 )
 
