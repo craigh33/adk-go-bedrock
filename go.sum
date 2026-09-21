@@ -30,8 +30,8 @@ github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.3 h1:MUaM4f+kj1ZIBPZfUS8
 github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.3/go.mod h1:6YmVmEVRI5ZZzRjCSsb9SryKH0hAlMRdgA7kG9aDvBU=
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.3 h1:fuSCw4Z2qfRCztMPO3GXJNSiEp6Wee+WOLwrHHUMy9c=
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.3/go.mod h1:6SxcHheD1pPR5+kWm1wGvjlL/YqUsh267sAfEmN4K7A=
-github.com/aws/aws-sdk-go-v2/service/bedrockagentcore v1.32.2 h1:tHrisFD5j+8sAgl6KwrZoCSOuGtTE81t392BHa+QKhM=
-github.com/aws/aws-sdk-go-v2/service/bedrockagentcore v1.32.2/go.mod h1:oMoaLKiXi0SdQZDKWlSIF7m4zHVy/+zv7KP1CxYKXpg=
+github.com/aws/aws-sdk-go-v2/service/bedrockagentcore v1.33.1 h1:uc79RwDTOhBcRvAaN9UUkdD4ADl6Ogox+1x5uld9TGI=
+github.com/aws/aws-sdk-go-v2/service/bedrockagentcore v1.33.1/go.mod h1:oMoaLKiXi0SdQZDKWlSIF7m4zHVy/+zv7KP1CxYKXpg=
 github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime v1.63.1 h1:4tLU+UOg1wMgoSPUXaM9+ca1yG7+yYxhcnIALlkuy1Q=
 github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime v1.63.1/go.mod h1:VjXq0lbp7WzghZ+iKkmzXRuE2f539YRAqefExBg/5RU=
 github.com/aws/aws-sdk-go-v2/service/bedrockdataautomationruntime v1.19.0 h1:jnf1eIj0w21/aItB82Qx8vKu0c0KE0pZUe/0GKx2XBk=
@@ -62,6 +62,8 @@ github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1x
 github.com/cenkalti/backoff/v5 v5.0.3/go.mod h1:rkhZdG3JZukswDf7f0cwqPNk4K0sa+F97BxZthm/crw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
+github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
+github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
