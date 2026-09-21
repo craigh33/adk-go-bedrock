@@ -197,13 +197,13 @@ func AgentCoreBrowserNormalizeHosts(name string, hosts []string) ([]string, erro
 			continue
 		}
 		if strings.ContainsAny(host, "*/?#@ \t\r\n") || strings.Contains(host, "..") {
-			return nil, fmt.Errorf("agentcorebrowser: %s contains invalid host %q", name, raw)
+			return nil, fmt.Errorf("%s contains invalid host %q", name, raw)
 		}
 		if strings.Contains(host, ":") {
 			host = strings.Trim(host, "[]")
 			hostWithoutZone, _, _ := strings.Cut(host, "%")
 			if _, err := netip.ParseAddr(hostWithoutZone); err != nil {
-				return nil, fmt.Errorf("agentcorebrowser: %s contains invalid host %q", name, raw)
+				return nil, fmt.Errorf("%s contains invalid host %q", name, raw)
 			}
 		}
 		result = append(result, host)
@@ -295,23 +295,23 @@ func AgentCoreBrowserAutomationReadLimit(maxScreenshot int64, maxText int) (int6
 	const maxInt64 = int64(^uint64(0) >> 1)
 	groups := maxScreenshot / base64DecodedBlockBytes
 	if groups > maxInt64/base64EncodedBlockBytes {
-		return 0, errors.New("agentcorebrowser: MaxScreenshotBytes is too large")
+		return 0, errors.New("MaxScreenshotBytes is too large")
 	}
 	base64Bytes := groups * base64EncodedBlockBytes
 	if maxScreenshot%base64DecodedBlockBytes != 0 {
 		if base64Bytes > maxInt64-base64EncodedBlockBytes {
-			return 0, errors.New("agentcorebrowser: MaxScreenshotBytes is too large")
+			return 0, errors.New("MaxScreenshotBytes is too large")
 		}
 		base64Bytes += base64EncodedBlockBytes
 	}
 	textBytes := int64(maxText)
 	if textBytes > maxInt64/6 {
-		return 0, errors.New("agentcorebrowser: MaxTextBytes is too large")
+		return 0, errors.New("MaxTextBytes is too large")
 	}
 	textBytes *= 6
 	limit := max(base64Bytes, textBytes)
 	if limit > maxInt64-agentCoreBrowserMessageOverhead {
-		return 0, errors.New("agentcorebrowser: configured response limits are too large")
+		return 0, errors.New("configured response limits are too large")
 	}
 	return limit + agentCoreBrowserMessageOverhead, nil
 }

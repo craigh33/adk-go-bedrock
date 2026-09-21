@@ -284,7 +284,7 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 	}
 	artifacts := ctx.Artifacts()
 	if artifacts == nil {
-		return nil, errors.New("agentcorebrowser: artifact service is unavailable")
+		return nil, errors.New("artifact service is unavailable")
 	}
 	actionCtx, cancel := context.WithTimeout(ctx, t.navigationTimeout)
 	defer cancel()
@@ -397,7 +397,7 @@ func (t *browserTool) sessionStreams(ctx context.Context, sessionID string) (*ty
 
 func (t *browserTool) openCDP(ctx context.Context, endpoint string) (*cdpConn, error) {
 	if endpoint == "" {
-		return nil, errors.New("agentcorebrowser: browser session has no automation stream endpoint")
+		return nil, errors.New("browser session has no automation stream endpoint")
 	}
 	headers, err := t.signedWebSocketHeaders(ctx, endpoint)
 	if err != nil {
@@ -541,7 +541,7 @@ func normalizeWaitUntil(value WaitUntil) (WaitUntil, error) {
 	case WaitUntilDOMContentLoaded, WaitUntilNone:
 		return value, nil
 	default:
-		return "", fmt.Errorf("agentcorebrowser: WaitUntil must be load, dom_content_loaded, or none, got %q", value)
+		return "", fmt.Errorf("WaitUntil must be load, dom_content_loaded, or none, got %q", value)
 	}
 }
 
