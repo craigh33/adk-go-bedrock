@@ -1,4 +1,4 @@
-package mappers
+package browser
 
 import (
 	"math"

@@ -1,4 +1,4 @@
-package agentcorebrowser
+package browser
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/genai"
 
-	bedrockmappers "github.com/craigh33/adk-go-bedrock/internal/mappers"
+	browsermappers "github.com/craigh33/adk-go-bedrock/internal/agentcore/browser"
 )
 
 const (
@@ -304,7 +304,7 @@ func New(cfg Config) (tool.Tool, error) {
 	if maxScreenshot < 0 {
 		return nil, errors.New("agentcorebrowser: MaxScreenshotBytes cannot be negative")
 	}
-	readLimit, err := bedrockmappers.AgentCoreBrowserAutomationReadLimit(maxScreenshot, maxText)
+	readLimit, err := browsermappers.AgentCoreBrowserAutomationReadLimit(maxScreenshot, maxText)
 	if err != nil {
 		return nil, err
 	}
@@ -312,11 +312,11 @@ func New(cfg Config) (tool.Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-	allowedHosts, err := bedrockmappers.AgentCoreBrowserNormalizeHosts("AllowedHosts", cfg.AllowedHosts)
+	allowedHosts, err := browsermappers.AgentCoreBrowserNormalizeHosts("AllowedHosts", cfg.AllowedHosts)
 	if err != nil {
 		return nil, err
 	}
-	deniedHosts, err := bedrockmappers.AgentCoreBrowserNormalizeHosts("DeniedHosts", cfg.DeniedHosts)
+	deniedHosts, err := browsermappers.AgentCoreBrowserNormalizeHosts("DeniedHosts", cfg.DeniedHosts)
 	if err != nil {
 		return nil, err
 	}

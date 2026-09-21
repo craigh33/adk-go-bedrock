@@ -1,6 +1,6 @@
-# agentcorebrowser
+# browser
 
-`agentcorebrowser` provides an ADK tool for constrained Amazon Bedrock AgentCore Browser sessions.
+`browser` provides an ADK tool for constrained Amazon Bedrock AgentCore Browser sessions.
 
 ## Usage
 
@@ -11,16 +11,16 @@ if err != nil {
 }
 token := os.Getenv("EXAMPLE_TOKEN")
 
-browserTool, err := agentcorebrowser.New(agentcorebrowser.Config{
+browserTool, err := browser.New(browser.Config{
     API:               bedrockagentcore.NewFromConfig(awsCfg),
     Region:            awsCfg.Region,
     Credentials:       awsCfg.Credentials,
     BrowserIdentifier: "aws.browser.v1",
     AllowedHosts:      []string{"example.com"},
-    WaitUntil:         agentcorebrowser.WaitUntilDOMContentLoaded,
-    RequestMiddlewares: []agentcorebrowser.RequestMiddleware{
-        func(next agentcorebrowser.RequestHandler) agentcorebrowser.RequestHandler {
-            return func(ctx context.Context, req *agentcorebrowser.BrowserRequest) (*agentcorebrowser.BrowserResponse, error) {
+    WaitUntil:         browser.WaitUntilDOMContentLoaded,
+    RequestMiddlewares: []browser.RequestMiddleware{
+        func(next browser.RequestHandler) browser.RequestHandler {
+            return func(ctx context.Context, req *browser.BrowserRequest) (*browser.BrowserResponse, error) {
                 if req.URL == "https://example.com/api" {
                     req.Headers.Set("Authorization", "Bearer "+token)
                 }
@@ -72,19 +72,19 @@ Zero values select the defaults below unless noted otherwise. Negative timeouts 
 `URLMiddlewares` receives a parsed `URLCheck` with a `URLStage` of `navigate`, `request`, `current`, or `final`. Middleware is applied in list order with the first entry outermost. Calling `next` applies the remaining middleware and built-in host policy; omitting `next` replaces host policy. Parsing, user-info rejection, and HTTP(S) requirements for explicit/current/final page URLs remain fixed structural validation.
 
 ```go
-auditPolicy := func(next agentcorebrowser.URLHandler) agentcorebrowser.URLHandler {
-    return func(ctx context.Context, check agentcorebrowser.URLCheck) error {
+auditPolicy := func(next browser.URLHandler) browser.URLHandler {
+    return func(ctx context.Context, check browser.URLCheck) error {
         log.Printf("browser URL stage=%s url=%s", check.Stage, check.URL.String())
         return next(ctx, check)
     }
 }
 
-browserTool, err := agentcorebrowser.New(agentcorebrowser.Config{
+browserTool, err := browser.New(browser.Config{
     API:            bedrockagentcore.NewFromConfig(awsCfg),
     Region:         awsCfg.Region,
     Credentials:    awsCfg.Credentials,
     AllowedHosts:   []string{"example.com"},
-    URLMiddlewares: []agentcorebrowser.URLMiddleware{auditPolicy},
+    URLMiddlewares: []browser.URLMiddleware{auditPolicy},
 })
 ```
 
@@ -101,12 +101,12 @@ Calling `next` applies the remaining middleware and the built-in host policy. Om
 Set `AuthHandler` to enable Fetch authentication events. An empty action selects default browser handling; use `AuthActionCancel` or `AuthActionProvideCredentials` for explicit responses.
 
 ```go
-AuthHandler: func(ctx context.Context, challenge agentcorebrowser.AuthChallenge) (agentcorebrowser.AuthResponse, error) {
+AuthHandler: func(ctx context.Context, challenge browser.AuthChallenge) (browser.AuthResponse, error) {
     if challenge.Origin != "https://example.com" {
-        return agentcorebrowser.AuthResponse{Action: agentcorebrowser.AuthActionCancel}, nil
+        return browser.AuthResponse{Action: browser.AuthActionCancel}, nil
     }
-    return agentcorebrowser.AuthResponse{
-        Action:   agentcorebrowser.AuthActionProvideCredentials,
+    return browser.AuthResponse{
+        Action:   browser.AuthActionProvideCredentials,
         Username: os.Getenv("BROWSER_USERNAME"),
         Password: os.Getenv("BROWSER_PASSWORD"),
     }, nil
@@ -128,4 +128,4 @@ Browser sessions are billable until explicitly stopped or their session timeout 
 - `bedrock-agentcore:StopBrowserSession`
 - `bedrock-agentcore:ConnectBrowserAutomationStream`
 
-See [`../../examples/bedrock-agentcore-browser`](../../examples/bedrock-agentcore-browser) for a runnable setup.
+See [`../../../examples/bedrock-agentcore-browser`](../../../examples/bedrock-agentcore-browser) for a runnable setup.

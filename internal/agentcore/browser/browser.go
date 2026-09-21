@@ -1,4 +1,4 @@
-package mappers
+package browser
 
 import (
 	"crypto/sha256"
@@ -27,6 +27,8 @@ const (
 	base64EncodedBlockBytes           = int64(4)
 	agentCoreBrowserScreenshotPNG     = "png"
 	agentCoreBrowserScreenshotJPEG    = "jpeg"
+	mimeImagePNG                      = "image/png"
+	mimeImageJPEG                     = "image/jpeg"
 )
 
 // AgentCoreBrowserStartParams is the tool-neutral input for starting a browser session.

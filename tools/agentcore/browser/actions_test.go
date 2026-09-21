@@ -1,4 +1,4 @@
-package agentcorebrowser
+package browser
 
 import (
 	"context"

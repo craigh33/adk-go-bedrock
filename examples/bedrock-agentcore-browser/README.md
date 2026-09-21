@@ -39,4 +39,4 @@ The Bedrock model client needs normal Bedrock inference permissions. The AgentCo
 - `bedrock-agentcore:StopBrowserSession`
 - `bedrock-agentcore:ConnectBrowserAutomationStream`
 
-Browser sessions have runtime cost and remain active until stopped or timed out. The example asks the agent to stop each session when finished; keep the host allowlist set for constrained or private-network workflows. Empty optional environment variables select the library defaults documented in [`../../tools/agentcorebrowser`](../../tools/agentcorebrowser).
+Browser sessions have runtime cost and remain active until stopped or timed out. The example asks the agent to stop each session when finished; keep the host allowlist set for constrained or private-network workflows. Empty optional environment variables select the library defaults documented in [`../../tools/agentcore/browser`](../../tools/agentcore/browser).

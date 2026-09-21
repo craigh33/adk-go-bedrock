@@ -24,7 +24,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
-	"github.com/craigh33/adk-go-bedrock/tools/agentcorebrowser"
+	"github.com/craigh33/adk-go-bedrock/tools/agentcore/browser"
 )
 
 func main() {
@@ -60,7 +60,7 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	browserTool, err := agentcorebrowser.New(browserCfg)
+	browserTool, err := browser.New(browserCfg)
 	if err != nil {
 		return fmt.Errorf("browser tool: %w", err)
 	}
@@ -100,36 +100,36 @@ Navigate first, keep the returned session_id for follow-up extract_text or scree
 	return printRunEvents(ctx, r, a, userMsg)
 }
 
-func browserConfigFromEnv(awsCfg aws.Config) (agentcorebrowser.Config, error) {
+func browserConfigFromEnv(awsCfg aws.Config) (browser.Config, error) {
 	sessionTimeout, err := int32Env("AGENTCORE_BROWSER_SESSION_TIMEOUT_SECONDS")
 	if err != nil {
-		return agentcorebrowser.Config{}, err
+		return browser.Config{}, err
 	}
 	viewportWidth, err := int32Env("AGENTCORE_BROWSER_VIEWPORT_WIDTH")
 	if err != nil {
-		return agentcorebrowser.Config{}, err
+		return browser.Config{}, err
 	}
 	viewportHeight, err := int32Env("AGENTCORE_BROWSER_VIEWPORT_HEIGHT")
 	if err != nil {
-		return agentcorebrowser.Config{}, err
+		return browser.Config{}, err
 	}
 	maxTextBytes, err := intEnv("AGENTCORE_BROWSER_MAX_TEXT_BYTES")
 	if err != nil {
-		return agentcorebrowser.Config{}, err
+		return browser.Config{}, err
 	}
 	maxScreenshotBytes, err := int64Env("AGENTCORE_BROWSER_MAX_SCREENSHOT_BYTES")
 	if err != nil {
-		return agentcorebrowser.Config{}, err
+		return browser.Config{}, err
 	}
 	navigationTimeout, err := durationEnv("AGENTCORE_BROWSER_NAVIGATION_TIMEOUT")
 	if err != nil {
-		return agentcorebrowser.Config{}, err
+		return browser.Config{}, err
 	}
 	cleanupTimeout, err := durationEnv("AGENTCORE_BROWSER_CLEANUP_TIMEOUT")
 	if err != nil {
-		return agentcorebrowser.Config{}, err
+		return browser.Config{}, err
 	}
-	return agentcorebrowser.Config{
+	return browser.Config{
 		API:                   bedrockagentcore.NewFromConfig(awsCfg),
 		Region:                awsCfg.Region,
 		Credentials:           awsCfg.Credentials,
@@ -143,7 +143,7 @@ func browserConfigFromEnv(awsCfg aws.Config) (agentcorebrowser.Config, error) {
 		CleanupTimeout:        cleanupTimeout,
 		MaxTextBytes:          maxTextBytes,
 		MaxScreenshotBytes:    maxScreenshotBytes,
-		WaitUntil: agentcorebrowser.WaitUntil(
+		WaitUntil: browser.WaitUntil(
 			strings.TrimSpace(os.Getenv("AGENTCORE_BROWSER_WAIT_UNTIL")),
 		),
 	}, nil

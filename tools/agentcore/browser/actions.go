@@ -1,4 +1,4 @@
-package agentcorebrowser
+package browser
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/genai"
 
-	bedrockmappers "github.com/craigh33/adk-go-bedrock/internal/mappers"
+	browsermappers "github.com/craigh33/adk-go-bedrock/internal/agentcore/browser"
 )
 
 func (t *browserTool) runStart(ctx agent.Context) (map[string]any, error) {
@@ -35,7 +35,7 @@ func (t *browserTool) runStatus(ctx agent.Context, m map[string]any) (map[string
 	if err != nil {
 		return nil, err
 	}
-	out, err := t.api.GetBrowserSession(ctx, bedrockmappers.AgentCoreBrowserGetInput(t.browserIdentifier, sessionID))
+	out, err := t.api.GetBrowserSession(ctx, browsermappers.AgentCoreBrowserGetInput(t.browserIdentifier, sessionID))
 	if err != nil {
 		return nil, fmt.Errorf("get browser session %q: %w", sessionID, err)
 	}
@@ -56,7 +56,7 @@ func (t *browserTool) runStop(ctx agent.Context, m map[string]any) (map[string]a
 		paramAction:        actionStop,
 		resultKeyBrowserID: aws.ToString(out.BrowserIdentifier),
 		paramSessionID:     aws.ToString(out.SessionId),
-		"last_updated_at":  bedrockmappers.AgentCoreBrowserTimeValue(out.LastUpdatedAt),
+		"last_updated_at":  browsermappers.AgentCoreBrowserTimeValue(out.LastUpdatedAt),
 	}, nil
 }
 
@@ -65,7 +65,7 @@ func (t *browserTool) stopSession(
 	sessionID string,
 	functionCallID string,
 ) (*bedrockagentcore.StopBrowserSessionOutput, error) {
-	return t.api.StopBrowserSession(ctx, bedrockmappers.AgentCoreBrowserStopInput(
+	return t.api.StopBrowserSession(ctx, browsermappers.AgentCoreBrowserStopInput(
 		t.browserIdentifier,
 		sessionID,
 		functionCallID,
@@ -125,7 +125,7 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 	} else {
 		current, err := t.api.GetBrowserSession(
 			navCtx,
-			bedrockmappers.AgentCoreBrowserGetInput(t.browserIdentifier, sessionID),
+			browsermappers.AgentCoreBrowserGetInput(t.browserIdentifier, sessionID),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("get browser session %q: %w", sessionID, err)
@@ -133,7 +133,7 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 		streams = current.Streams
 	}
 
-	cdp, err := t.openCDP(navCtx, bedrockmappers.AgentCoreBrowserAutomationEndpoint(streams))
+	cdp, err := t.openCDP(navCtx, browsermappers.AgentCoreBrowserAutomationEndpoint(streams))
 	if err != nil {
 		if autoStarted {
 			return nil, t.cleanupStartedSession(ctx, sessionID, err)
@@ -203,7 +203,7 @@ func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[s
 	if err != nil {
 		return nil, err
 	}
-	cdp, err := t.openCDP(actionCtx, bedrockmappers.AgentCoreBrowserAutomationEndpoint(streams))
+	cdp, err := t.openCDP(actionCtx, browsermappers.AgentCoreBrowserAutomationEndpoint(streams))
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +224,7 @@ func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[s
 	if err := t.checkURL(actionCtx, result.URL, URLStageCurrent); err != nil {
 		return nil, fmt.Errorf("current url: %w", err)
 	}
-	text, truncated := bedrockmappers.AgentCoreBrowserTruncateUTF8(result.Text, t.maxTextBytes)
+	text, truncated := browsermappers.AgentCoreBrowserTruncateUTF8(result.Text, t.maxTextBytes)
 	result.Text = text
 	result.Truncated = result.Truncated || truncated
 	return map[string]any{
@@ -256,14 +256,14 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 	if err != nil {
 		return nil, err
 	}
-	format, mimeType, err := bedrockmappers.AgentCoreBrowserScreenshotFormat(requestedFormat, fileName)
+	format, mimeType, err := browsermappers.AgentCoreBrowserScreenshotFormat(requestedFormat, fileName)
 	if err != nil {
 		return nil, err
 	}
 	if fileName == "" {
 		fileName = "browser_screenshot." + format
 	}
-	if err := bedrockmappers.AgentCoreBrowserValidateScreenshotFileName(fileName, format); err != nil {
+	if err := browsermappers.AgentCoreBrowserValidateScreenshotFileName(fileName, format); err != nil {
 		return nil, err
 	}
 	fullPage, err := optionalBool(m, paramFullPage, true)
@@ -292,7 +292,7 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 	if err != nil {
 		return nil, err
 	}
-	cdp, err := t.openCDP(actionCtx, bedrockmappers.AgentCoreBrowserAutomationEndpoint(streams))
+	cdp, err := t.openCDP(actionCtx, browsermappers.AgentCoreBrowserAutomationEndpoint(streams))
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +343,7 @@ func (t *browserTool) startSession(
 	ctx context.Context,
 	functionCallID string,
 ) (*bedrockagentcore.StartBrowserSessionOutput, error) {
-	in := bedrockmappers.AgentCoreBrowserStartInput(bedrockmappers.AgentCoreBrowserStartParams{
+	in := browsermappers.AgentCoreBrowserStartInput(browsermappers.AgentCoreBrowserStartParams{
 		BrowserIdentifier:     t.browserIdentifier,
 		FunctionCallID:        functionCallID,
 		SessionTimeoutSeconds: t.sessionTimeoutSeconds,
@@ -363,8 +363,8 @@ func (t *browserTool) startResult(out *bedrockagentcore.StartBrowserSessionOutpu
 		paramAction:        actionStart,
 		resultKeyBrowserID: aws.ToString(out.BrowserIdentifier),
 		paramSessionID:     aws.ToString(out.SessionId),
-		"created_at":       bedrockmappers.AgentCoreBrowserTimeValue(out.CreatedAt),
-		"live_view_url":    bedrockmappers.AgentCoreBrowserLiveViewEndpoint(out.Streams),
+		"created_at":       browsermappers.AgentCoreBrowserTimeValue(out.CreatedAt),
+		"live_view_url":    browsermappers.AgentCoreBrowserLiveViewEndpoint(out.Streams),
 	}
 }
 
@@ -376,18 +376,18 @@ func (t *browserTool) sessionResult(out *bedrockagentcore.GetBrowserSessionOutpu
 		resultKeyBrowserID:        aws.ToString(out.BrowserIdentifier),
 		paramSessionID:            aws.ToString(out.SessionId),
 		"name":                    aws.ToString(out.Name),
-		"created_at":              bedrockmappers.AgentCoreBrowserTimeValue(out.CreatedAt),
-		"last_updated_at":         bedrockmappers.AgentCoreBrowserTimeValue(out.LastUpdatedAt),
-		"session_timeout_seconds": bedrockmappers.AgentCoreBrowserInt32Value(out.SessionTimeoutSeconds),
+		"created_at":              browsermappers.AgentCoreBrowserTimeValue(out.CreatedAt),
+		"last_updated_at":         browsermappers.AgentCoreBrowserTimeValue(out.LastUpdatedAt),
+		"session_timeout_seconds": browsermappers.AgentCoreBrowserInt32Value(out.SessionTimeoutSeconds),
 		"session_replay_artifact": aws.ToString(out.SessionReplayArtifact),
-		"live_view_url":           bedrockmappers.AgentCoreBrowserLiveViewEndpoint(out.Streams),
+		"live_view_url":           browsermappers.AgentCoreBrowserLiveViewEndpoint(out.Streams),
 	}
 }
 
 func (t *browserTool) sessionStreams(ctx context.Context, sessionID string) (*types.BrowserSessionStream, error) {
 	current, err := t.api.GetBrowserSession(
 		ctx,
-		bedrockmappers.AgentCoreBrowserGetInput(t.browserIdentifier, sessionID),
+		browsermappers.AgentCoreBrowserGetInput(t.browserIdentifier, sessionID),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get browser session %q: %w", sessionID, err)
@@ -511,14 +511,14 @@ func (t *browserTool) handleURLCheck(_ context.Context, check URLCheck) error {
 	if check.Stage == URLStageRequest && (u.Scheme == schemeData || u.Scheme == schemeBlob) {
 		return nil
 	}
-	host := bedrockmappers.AgentCoreBrowserNormalizeHost(u.Hostname())
-	if bedrockmappers.AgentCoreBrowserHostMatches(t.deniedHosts, host) {
+	host := browsermappers.AgentCoreBrowserNormalizeHost(u.Hostname())
+	if browsermappers.AgentCoreBrowserHostMatches(t.deniedHosts, host) {
 		return fmt.Errorf("url: host %q is denied", host)
 	}
-	if len(t.allowedHosts) > 0 && !bedrockmappers.AgentCoreBrowserHostMatches(t.allowedHosts, host) {
+	if len(t.allowedHosts) > 0 && !browsermappers.AgentCoreBrowserHostMatches(t.allowedHosts, host) {
 		return fmt.Errorf("url: host %q is not allowed", host)
 	}
-	if len(t.allowedHosts) == 0 && bedrockmappers.AgentCoreBrowserRequiresExplicitAllow(host) {
+	if len(t.allowedHosts) == 0 && browsermappers.AgentCoreBrowserRequiresExplicitAllow(host) {
 		return fmt.Errorf("url: host %q requires an explicit allowlist entry", host)
 	}
 	return nil
