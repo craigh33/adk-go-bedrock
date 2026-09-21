@@ -254,7 +254,7 @@ func New(cfg Config) (tool.Tool, error) {
 		return nil, errors.New("agentcorebrowser: Region is required")
 	}
 	if cfg.Credentials == nil {
-		return nil, errors.New("agentcorebrowser: Credentials is required")
+		return nil, errors.New("agentcorebrowser: Credentials provider is required")
 	}
 	browserID := strings.TrimSpace(cfg.BrowserIdentifier)
 	if browserID == "" {
@@ -465,6 +465,7 @@ func newFunctionDeclaration() *genai.FunctionDeclaration {
 	}
 }
 
+// ProcessRequest registers the browser tool and its declaration with an LLM request.
 func (t *browserTool) ProcessRequest(_ agent.Context, req *model.LLMRequest) error {
 	if req.Tools == nil {
 		req.Tools = make(map[string]any)
