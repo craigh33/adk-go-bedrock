@@ -1,6 +1,7 @@
 package mappers
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -224,20 +225,67 @@ func imageBlockToPart(b *types.ImageBlock) (*genai.Part, error) {
 	}
 }
 
+// PartMetadataKeyBedrockRedactedReasoning is set on genai.Part.PartMetadata for
+// redacted (encrypted) reasoning content, base64-encoded. genai.Part has no
+// field for it, and Bedrock expects it back verbatim on later turns.
+const PartMetadataKeyBedrockRedactedReasoning = "bedrock_redacted_reasoning"
+
 func reasoningContentBlockToPart(b types.ReasoningContentBlock) (*genai.Part, error) {
 	switch v := b.(type) {
 	case *types.ReasoningContentBlockMemberReasoningText:
-		if v == nil || v.Value.Text == nil || *v.Value.Text == "" {
+		if v == nil {
 			return nil, errSkipPart
 		}
-		part := &genai.Part{Text: *v.Value.Text, Thought: true}
+		part := &genai.Part{Thought: true}
+		if v.Value.Text != nil {
+			part.Text = *v.Value.Text
+		}
 		if v.Value.Signature != nil {
 			part.ThoughtSignature = []byte(*v.Value.Signature)
 		}
+		if part.Text == "" && len(part.ThoughtSignature) == 0 {
+			return nil, errSkipPart
+		}
+		// Signature-only blocks (models whose reasoning is not surfaced, e.g.
+		// Claude adaptive thinking) are kept: the signature must round-trip.
 		return part, nil
+	case *types.ReasoningContentBlockMemberRedactedContent:
+		if v == nil || len(v.Value) == 0 {
+			return nil, errSkipPart
+		}
+		return RedactedReasoningPart(v.Value), nil
 	default:
 		return nil, errSkipPart
 	}
+}
+
+// RedactedReasoningPart wraps redacted reasoning bytes in a thought part,
+// base64-encoded under PartMetadataKeyBedrockRedactedReasoning so the part
+// survives JSON round-trips (e.g. session persistence).
+func RedactedReasoningPart(raw []byte) *genai.Part {
+	return &genai.Part{
+		Thought: true,
+		PartMetadata: map[string]any{
+			PartMetadataKeyBedrockRedactedReasoning: base64.StdEncoding.EncodeToString(raw),
+		},
+	}
+}
+
+// RedactedReasoningFromPart returns the redacted reasoning bytes stored on a
+// part by RedactedReasoningPart, or nil when the part carries none.
+func RedactedReasoningFromPart(p *genai.Part) []byte {
+	if p == nil || p.PartMetadata == nil {
+		return nil
+	}
+	enc, ok := p.PartMetadata[PartMetadataKeyBedrockRedactedReasoning].(string)
+	if !ok || enc == "" {
+		return nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(enc)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 func videoBlockToPart(b *types.VideoBlock) (*genai.Part, error) {

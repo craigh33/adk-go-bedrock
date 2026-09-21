@@ -569,3 +569,42 @@ func ptrFloat32(f float32) *float32 {
 	p := f
 	return &p
 }
+
+// Signature-only and redacted thought parts round-trip back to Bedrock; a
+// thought part with nothing to send is still dropped.
+func TestPartsToContentBlocks_signatureOnlyAndRedactedThought(t *testing.T) {
+	t.Parallel()
+	blocks, err := PartsToContentBlocks([]*genai.Part{
+		{Thought: true, ThoughtSignature: []byte("sig-only")},
+		RedactedReasoningPart([]byte{0xDE, 0xAD}),
+		{Thought: true},
+	}, types.ConversationRoleAssistant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("blocks: %+v", blocks)
+	}
+	rb, ok := blocks[0].(*types.ContentBlockMemberReasoningContent)
+	if !ok {
+		t.Fatalf("block type: %T", blocks[0])
+	}
+	rt, ok := rb.Value.(*types.ReasoningContentBlockMemberReasoningText)
+	if !ok {
+		t.Fatalf("reasoning type: %T", rb.Value)
+	}
+	if aws.ToString(rt.Value.Text) != "" || aws.ToString(rt.Value.Signature) != "sig-only" {
+		t.Fatalf("reasoning value: %+v", rt.Value)
+	}
+	rb2, ok := blocks[1].(*types.ContentBlockMemberReasoningContent)
+	if !ok {
+		t.Fatalf("block type: %T", blocks[1])
+	}
+	red, ok := rb2.Value.(*types.ReasoningContentBlockMemberRedactedContent)
+	if !ok {
+		t.Fatalf("reasoning type: %T", rb2.Value)
+	}
+	if string(red.Value) != string([]byte{0xDE, 0xAD}) {
+		t.Fatalf("redacted bytes: %v", red.Value)
+	}
+}

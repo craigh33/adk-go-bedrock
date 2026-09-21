@@ -798,3 +798,77 @@ func TestTracedStreamReader_Close_recordsStreamErr(t *testing.T) {
 		t.Fatal("expected recorded error event on span")
 	}
 }
+
+// Claude adaptive thinking streams a reasoning block whose text delta is empty —
+// only a signature arrives. Redacted reasoning streams as opaque bytes. Neither
+// may be dropped: both must round-trip to Bedrock on later turns.
+func TestConverse_GenerateContent_streamSignatureOnlyAndRedactedReasoning(t *testing.T) {
+	t.Parallel()
+
+	sigIdx := int32(0)
+	redIdx := int32(1)
+	textIdx := int32(2)
+	ch := make(chan types.ConverseStreamOutput, 8)
+	ch <- &types.ConverseStreamOutputMemberContentBlockDelta{Value: types.ContentBlockDeltaEvent{
+		ContentBlockIndex: &sigIdx,
+		Delta:             &types.ContentBlockDeltaMemberReasoningContent{Value: &types.ReasoningContentBlockDeltaMemberText{Value: ""}},
+	}}
+	ch <- &types.ConverseStreamOutputMemberContentBlockDelta{Value: types.ContentBlockDeltaEvent{
+		ContentBlockIndex: &sigIdx,
+		Delta:             &types.ContentBlockDeltaMemberReasoningContent{Value: &types.ReasoningContentBlockDeltaMemberSignature{Value: "sig-only"}},
+	}}
+	ch <- &types.ConverseStreamOutputMemberContentBlockDelta{Value: types.ContentBlockDeltaEvent{
+		ContentBlockIndex: &redIdx,
+		Delta:             &types.ContentBlockDeltaMemberReasoningContent{Value: &types.ReasoningContentBlockDeltaMemberRedactedContent{Value: []byte{0xDE, 0xAD}}},
+	}}
+	ch <- &types.ConverseStreamOutputMemberContentBlockDelta{Value: types.ContentBlockDeltaEvent{
+		ContentBlockIndex: &redIdx,
+		Delta:             &types.ContentBlockDeltaMemberReasoningContent{Value: &types.ReasoningContentBlockDeltaMemberRedactedContent{Value: []byte{0xBE, 0xEF}}},
+	}}
+	ch <- &types.ConverseStreamOutputMemberContentBlockDelta{Value: types.ContentBlockDeltaEvent{
+		ContentBlockIndex: &textIdx,
+		Delta:             &types.ContentBlockDeltaMemberText{Value: "answer"},
+	}}
+	ch <- &types.ConverseStreamOutputMemberMessageStop{Value: types.MessageStopEvent{StopReason: types.StopReasonEndTurn}}
+	close(ch)
+
+	api := &fakeAPI{stream: &fakeStream{ch: ch}}
+	m, err := NewWithAPI("mid", api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("hi", "user")},
+		Config:   &genai.GenerateContentConfig{},
+	}
+
+	var final *model.LLMResponse
+	for r, err := range m.GenerateContent(context.Background(), req, true) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !r.Partial {
+			final = r
+		}
+	}
+	if final == nil {
+		t.Fatal("missing final response")
+	}
+	if final.Content == nil || len(final.Content.Parts) != 3 {
+		t.Fatalf("parts: %+v", final.Content)
+	}
+	sig := final.Content.Parts[0]
+	if !sig.Thought || sig.Text != "" || string(sig.ThoughtSignature) != "sig-only" {
+		t.Fatalf("signature-only reasoning part: %+v", sig)
+	}
+	red := final.Content.Parts[1]
+	if !red.Thought {
+		t.Fatalf("redacted reasoning part not a thought: %+v", red)
+	}
+	if got := mappers.RedactedReasoningFromPart(red); string(got) != string([]byte{0xDE, 0xAD, 0xBE, 0xEF}) {
+		t.Fatalf("redacted reasoning bytes: %v", got)
+	}
+	if final.Content.Parts[2].Text != "answer" {
+		t.Fatalf("text part: %+v", final.Content.Parts[2])
+	}
+}

@@ -371,6 +371,21 @@ type streamImageBlock struct {
 type streamReasoningBlock struct {
 	Text      strings.Builder
 	Signature string
+	Redacted  []byte
+}
+
+func (r *streamReasoningBlock) consumeDelta(d types.ReasoningContentBlockDelta) error {
+	switch delta := d.(type) {
+	case *types.ReasoningContentBlockDeltaMemberText:
+		if _, err := r.Text.WriteString(delta.Value); err != nil {
+			return err
+		}
+	case *types.ReasoningContentBlockDeltaMemberSignature:
+		r.Signature = delta.Value
+	case *types.ReasoningContentBlockDeltaMemberRedactedContent:
+		r.Redacted = append(r.Redacted, delta.Value...)
+	}
+	return nil
 }
 
 func newStreamState() *streamState {
@@ -468,13 +483,8 @@ func (s *streamState) onContentBlockDelta(ev *types.ContentBlockDeltaEvent) (*mo
 		return nil, nil //nolint:nilnil // Image deltas are buffered until final response.
 	case *types.ContentBlockDeltaMemberReasoningContent:
 		reason := s.ensureReasoningBlock(*ev.ContentBlockIndex)
-		switch delta := d.Value.(type) {
-		case *types.ReasoningContentBlockDeltaMemberText:
-			if _, err := reason.Text.WriteString(delta.Value); err != nil {
-				return nil, err
-			}
-		case *types.ReasoningContentBlockDeltaMemberSignature:
-			reason.Signature = delta.Value
+		if err := reason.consumeDelta(d.Value); err != nil {
+			return nil, err
 		}
 		return nil, nil //nolint:nilnil // Reasoning deltas are buffered until final response.
 	case *types.ContentBlockDeltaMemberToolUse:
@@ -623,13 +633,20 @@ func (s *streamState) finalParts() ([]*genai.Part, []string) { //nolint:gocognit
 			})
 		}
 
-		// Emit reasoning for this slot
-		if reason := s.reasonBySlot[idx]; reason != nil && reason.Text.Len() > 0 {
-			part := &genai.Part{Text: reason.Text.String(), Thought: true}
-			if reason.Signature != "" {
-				part.ThoughtSignature = []byte(reason.Signature)
+		// Emit reasoning for this slot. Signature-only blocks (models whose
+		// reasoning is not surfaced, e.g. Claude adaptive thinking) and
+		// redacted reasoning are kept: both must round-trip to Bedrock.
+		if reason := s.reasonBySlot[idx]; reason != nil {
+			if reason.Text.Len() > 0 || reason.Signature != "" {
+				part := &genai.Part{Text: reason.Text.String(), Thought: true}
+				if reason.Signature != "" {
+					part.ThoughtSignature = []byte(reason.Signature)
+				}
+				parts = append(parts, part)
 			}
-			parts = append(parts, part)
+			if len(reason.Redacted) > 0 {
+				parts = append(parts, mappers.RedactedReasoningPart(reason.Redacted))
+			}
 		}
 
 		// Emit image for this slot
