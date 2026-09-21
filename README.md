@@ -66,6 +66,7 @@ These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat 
 - [`examples/bedrock-image-gen`](examples/bedrock-image-gen): ADK runner with the [`imagegenerator`](tools/imagegenerator) tool—Nova Canvas image generation via Bedrock `InvokeModel` and artifact storage.
 - [`examples/bedrock-video-gen`](examples/bedrock-video-gen): ADK runner with the [`videogenerator`](tools/videogenerator) tool—Nova Reel text-to-video via Bedrock async invoke, S3 output, and optional MP4 download into artifacts.
 - [`examples/bedrock-agentcore-browser`](examples/bedrock-agentcore-browser): AgentCore Browser via [`tools/agentcorebrowser`](tools/agentcorebrowser); starts managed browser sessions, navigates, extracts text, and saves screenshots as artifacts.
+- [`examples/bedrock-agentcore-code-interpreter`](examples/bedrock-agentcore-code-interpreter): ADK runner with the [`agentcorecodeinterpreter`](tools/agentcorecodeinterpreter) tool—AgentCore Code Interpreter execution with artifact inputs and outputs.
 - [`examples/bedrock-nova-grounding`](examples/bedrock-nova-grounding): Nova Web Grounding via [`tools/novagrounding`](tools/novagrounding); prints answers and `bedrock_citations` metadata.
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
 - [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
@@ -103,6 +104,7 @@ make -C examples/bedrock-stream run
 - **Function responses**: JSON tool output still maps as before, and image/video/document `FunctionResponse.Parts` are preserved through Bedrock tool-result content blocks.
 - **Streaming**: When ADK uses SSE streaming, the provider calls `ConverseStream`, emits partial text responses, and buffers streamed tool calls, reasoning blocks, image blocks, citation deltas (for grounded responses), usage, and guardrail metadata into the final `TurnComplete` response.
 - **Guardrails / safety results**: Bedrock guardrail stop reasons and trace metadata are mapped back into ADK `FinishReason` and `CustomMetadata`, including synthesized `safety_ratings` derived from Bedrock guardrail assessments when available.
+- **Token usage**: Bedrock input, output, total and cache-read counts map to `genai` `UsageMetadata`. Cache writes have no `genai` equivalent, so the Bedrock count is surfaced as `CustomMetadata["bedrock_cache_write_input_tokens"]` (`int32`). The key is only present when Bedrock reports a non-zero cache write.
 
 ## Limitations
 
