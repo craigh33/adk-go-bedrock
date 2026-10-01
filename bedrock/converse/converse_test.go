@@ -802,7 +802,7 @@ func TestTracedStreamReader_Close_recordsStreamErr(t *testing.T) {
 func TestConverse_GenerateContent_cacheTTLAndDynamicSystemPart(t *testing.T) {
 	t.Parallel()
 	api := &fakeAPI{converseOut: fakeTextOutput("ok")}
-	m, err := NewWithAPI("mid", api, WithCacheTTL(types.CacheTTLOneHour))
+	m, err := NewWithAPI("mid", api, WithCacheSystemPrompt(types.CacheTTLOneHour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -833,5 +833,13 @@ func TestConverse_GenerateContent_cacheTTLAndDynamicSystemPart(t *testing.T) {
 	}
 	if v, ok := sys[2].(*types.SystemContentBlockMemberText); !ok || v.Value != "now is 10:00" {
 		t.Fatalf("system[2] want dynamic text, got %#v", sys[2])
+	}
+}
+
+func TestNewWithAPI_WithCacheSystemPromptRejectsTwoTTLs(t *testing.T) {
+	t.Parallel()
+	_, err := NewWithAPI("mid", &fakeAPI{}, WithCacheSystemPrompt(types.CacheTTLOneHour, types.CacheTTLFiveMinutes))
+	if err == nil {
+		t.Fatal("want error for two TTLs")
 	}
 }

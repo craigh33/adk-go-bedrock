@@ -161,6 +161,7 @@ type Model struct {
 	modelID             string
 	api                 RuntimeAPI
 	cachePoint          *types.CachePointBlock
+	cacheTTLCount       int
 	guardrailConfigured bool
 	guardrailIdentifier string
 	guardrailVersion    string
@@ -198,6 +199,9 @@ func NewWithAPI(modelID string, api RuntimeAPI, opts ...ModelOption) (*Model, er
 	}
 	if err := m.validateGuardrail(); err != nil {
 		return nil, err
+	}
+	if m.cacheTTLCount > 1 {
+		return nil, errors.New("WithCacheSystemPrompt takes at most one TTL")
 	}
 	return m, nil
 }
