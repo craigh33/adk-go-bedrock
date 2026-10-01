@@ -30,6 +30,13 @@ Each answer is followed by a token line:
 because `genai` has no field for it. The first request pays to populate the cache;
 later requests read the system prompt back from it.
 
+If part of your system prompt changes each request, wrap it in `converse.DynamicSystemPart`.
+It is sent after the cache point, so the rest still hits the cache. This is optional.
+
+To keep the cache for an hour instead of five minutes, use
+`converse.WithCacheTTL(types.CacheTTLOneHour)` in place of `WithCacheSystemPrompt()`.
+Check the model supports a 1 hour TTL first.
+
 The cache outlives the process. Re-running within the cache TTL shows `toCache=0`
 and a non-zero `fromCache` on Q1 as well, because the entry is still warm from the
 previous run.

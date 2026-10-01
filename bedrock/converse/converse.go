@@ -160,7 +160,7 @@ type Options struct {
 type Model struct {
 	modelID             string
 	api                 RuntimeAPI
-	cacheSystemPrompt   bool
+	cachePoint          *types.CachePointBlock
 	guardrailConfigured bool
 	guardrailIdentifier string
 	guardrailVersion    string
@@ -277,7 +277,7 @@ func (m *Model) generateUnary(
 	req *model.LLMRequest,
 ) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		in, err := mappers.ConverseInputFromLLMRequest(modelID, req, m.cacheSystemPrompt)
+		in, err := mappers.ConverseInputFromLLMRequest(modelID, req, m.cachePoint)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -300,7 +300,7 @@ func (m *Model) generateStream(
 	req *model.LLMRequest,
 ) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		in, err := mappers.ConverseStreamInputFromLLMRequest(modelID, req, m.cacheSystemPrompt)
+		in, err := mappers.ConverseStreamInputFromLLMRequest(modelID, req, m.cachePoint)
 		if err != nil {
 			yield(nil, err)
 			return
