@@ -70,7 +70,7 @@ These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat 
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
 - [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
 - [`examples/bedrock-multimodal`](examples/bedrock-multimodal): comprehensive image analysis, document processing, tool calling with rich media, and vision-based reasoning.
-- [`examples/bedrock-prompt-cache`](examples/bedrock-prompt-cache): `ModelOption` / Bedrock prompt caching for fewer repeated tokens (see AWS prompt caching docs).
+- [`examples/bedrock-prompt-cache`](examples/bedrock-prompt-cache): `ModelOption` / Bedrock prompt caching for fewer repeated tokens (see AWS prompt caching docs). Use `converse.DynamicSystemPart` for system text that changes each request, and pass a TTL to `converse.WithCacheSystemPrompt` to set the cache lifetime.
 - [`examples/bedrock-document`](examples/bedrock-document): CLI to debug document uploads (`-dry-run` mapper check, optional `-combined` / `-stream`).
 - [`examples/bedrock-guardrails`](examples/bedrock-guardrails): safety assessments, content filtering, and guardrail metadata handling.
 - [`examples/bedrock-request-guardrail`](examples/bedrock-request-guardrail): request-side Bedrock guardrail configuration via `ModelOption`.

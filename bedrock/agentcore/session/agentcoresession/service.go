@@ -363,6 +363,9 @@ type remoteSession struct {
 func (s *service) getOwnedSession(ctx context.Context, appName, userID, sessionID string) (*remoteSession, error) {
 	out, err := s.api.GetSession(ctx, &bedrockagentruntime.GetSessionInput{SessionIdentifier: &sessionID})
 	if err != nil {
+		if isNotFound(err) {
+			return nil, fmt.Errorf("%w: %q: %w", session.ErrNotFound, sessionID, err)
+		}
 		return nil, fmt.Errorf("get session: %w", err)
 	}
 	if out == nil || out.SessionId == nil || *out.SessionId == "" {
