@@ -24,7 +24,7 @@ func TestConverseInputFromLLMRequest_basicUserMessage(t *testing.T) {
 			MaxOutputTokens:   100,
 		},
 	}
-	in, err := ConverseInputFromLLMRequest("model-id", req, false)
+	in, err := ConverseInputFromLLMRequest("model-id", req, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +384,7 @@ func TestConverseInputFromLLMRequest_emptyUserParts(t *testing.T) {
 	_, err := ConverseInputFromLLMRequest("mid", &model.LLMRequest{
 		Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{}}},
 		Config:   &genai.GenerateContentConfig{},
-	}, false)
+	}, nil)
 	if err == nil {
 		t.Fatal("expected error for empty user message with no mappable parts")
 	}
@@ -400,7 +400,7 @@ func TestConverseInputFromLLMRequest_safetySettingsFailFast(t *testing.T) {
 				Threshold: genai.HarmBlockThresholdBlockMediumAndAbove,
 			}},
 		},
-	}, false)
+	}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -484,7 +484,7 @@ func TestConverseInputFromLLMRequest_cachePointAfterAllSystemBlocks(t *testing.T
 			SystemInstruction: genai.NewContentFromText("base instruction", "system"),
 		},
 	}
-	in, err := ConverseInputFromLLMRequest("mid", req, true)
+	in, err := ConverseInputFromLLMRequest("mid", req, &types.CachePointBlock{Type: types.CachePointTypeDefault})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -511,7 +511,7 @@ func TestConverseInputFromLLMRequest_cachePointNotAddedWithoutSystemBlocks(t *te
 		},
 		Config: &genai.GenerateContentConfig{},
 	}
-	in, err := ConverseInputFromLLMRequest("mid", req, true)
+	in, err := ConverseInputFromLLMRequest("mid", req, &types.CachePointBlock{Type: types.CachePointTypeDefault})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +530,7 @@ func TestConverseInputFromLLMRequest_cachePointNotAddedWhenDisabled(t *testing.T
 			SystemInstruction: genai.NewContentFromText("be helpful", "system"),
 		},
 	}
-	in, err := ConverseInputFromLLMRequest("mid", req, false)
+	in, err := ConverseInputFromLLMRequest("mid", req, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,7 +553,7 @@ func TestConverseInputFromLLMRequest_cachePointOnlyFromContentsSystem(t *testing
 		},
 		Config: &genai.GenerateContentConfig{},
 	}
-	in, err := ConverseInputFromLLMRequest("mid", req, true)
+	in, err := ConverseInputFromLLMRequest("mid", req, &types.CachePointBlock{Type: types.CachePointTypeDefault})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -568,4 +568,86 @@ func TestConverseInputFromLLMRequest_cachePointOnlyFromContentsSystem(t *testing
 func ptrFloat32(f float32) *float32 {
 	p := f
 	return &p
+}
+
+func dynamicPart(text string) *genai.Part {
+	return &genai.Part{Text: text, PartMetadata: map[string]any{PartMetadataKeyAfterCachePoint: true}}
+}
+
+func systemTexts(t *testing.T, blocks []types.SystemContentBlock) []string {
+	t.Helper()
+	var out []string
+	for _, b := range blocks {
+		switch v := b.(type) {
+		case *types.SystemContentBlockMemberText:
+			out = append(out, v.Value)
+		case *types.SystemContentBlockMemberCachePoint:
+			out = append(out, "<cache:"+string(v.Value.Ttl)+">")
+		default:
+			t.Fatalf("unexpected system block %T", b)
+		}
+	}
+	return out
+}
+
+func TestConverseInputFromLLMRequest_dynamicSystemParts(t *testing.T) {
+	t.Parallel()
+	defaultCache := &types.CachePointBlock{Type: types.CachePointTypeDefault}
+	hourCache := &types.CachePointBlock{Type: types.CachePointTypeDefault, Ttl: types.CacheTTLOneHour}
+
+	tests := []struct {
+		name  string
+		parts []*genai.Part
+		extra []*genai.Part
+		cache *types.CachePointBlock
+		want  []string
+	}{
+		{
+			name:  "dynamic parts go after the cache point",
+			parts: []*genai.Part{{Text: "static1"}, dynamicPart("time"), {Text: "static2"}},
+			extra: []*genai.Part{dynamicPart("artifacts"), {Text: "static3"}},
+			cache: defaultCache,
+			want:  []string{"static1", "static2", "static3", "<cache:>", "time", "artifacts"},
+		},
+		{
+			name:  "ttl is passed through",
+			parts: []*genai.Part{{Text: "static"}, dynamicPart("time")},
+			cache: hourCache,
+			want:  []string{"static", "<cache:1h>", "time"},
+		},
+		{
+			name:  "no cache point when only dynamic parts",
+			parts: []*genai.Part{dynamicPart("time")},
+			cache: defaultCache,
+			want:  []string{"time"},
+		},
+		{
+			name:  "order kept when caching is off",
+			parts: []*genai.Part{{Text: "static1"}, dynamicPart("time"), {Text: "static2"}},
+			want:  []string{"static1", "time", "static2"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			contents := []*genai.Content{genai.NewContentFromText("hello", "user")}
+			if tc.extra != nil {
+				contents = append([]*genai.Content{{Role: "system", Parts: tc.extra}}, contents...)
+			}
+			req := &model.LLMRequest{
+				Contents: contents,
+				Config: &genai.GenerateContentConfig{
+					SystemInstruction: &genai.Content{Role: "system", Parts: tc.parts},
+				},
+			}
+			in, err := ConverseInputFromLLMRequest("mid", req, tc.cache)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := systemTexts(t, in.System)
+			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("system blocks\n got: %v\nwant: %v", got, tc.want)
+			}
+		})
+	}
 }
