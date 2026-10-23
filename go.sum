@@ -32,8 +32,8 @@ github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.4 h1:7Wo47d/xn/7KttCSBd8EGYeZ7ULR
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.4/go.mod h1:tDB2IVC1xC3vX8o+6uRlzhTxP3g1b77CZXFX/oD2FnQ=
 github.com/aws/aws-sdk-go-v2/service/bedrockagentcore v1.50.0 h1:pXKhzQBRUSayUSTaVk6nKcMV9z+d/eTYD/dzlc5iRiU=
 github.com/aws/aws-sdk-go-v2/service/bedrockagentcore v1.50.0/go.mod h1:KMIBjYP3w7Ce2VthuIyX/uC/5dzUyni6WymXdhn+srg=
-github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime v1.63.2 h1:nTdJbafdXKJDXJQ48Q6PFRXl8w2sof11fm+k+KdyNDM=
-github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime v1.63.2/go.mod h1:39Dh33Fz7EH4XSjEmDm/ZzcScx6qBkgusLEFm/rIlVg=
+github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime v1.65.0 h1:oZ370Cz5Av2olpxgY3Vd/1qpvsdmPp5/2P5agrRQysE=
+github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime v1.65.0/go.mod h1:4U+xe3tONDQhvJcc/HfmDbnCdElGTCCqlU9//2P5KJk=
 github.com/aws/aws-sdk-go-v2/service/bedrockdataautomationruntime v1.19.0 h1:jnf1eIj0w21/aItB82Qx8vKu0c0KE0pZUe/0GKx2XBk=
 github.com/aws/aws-sdk-go-v2/service/bedrockdataautomationruntime v1.19.0/go.mod h1:iwhLfPyatFnc4beXimkgXlW1At3OUxkDT/gWb0cjopc=
 github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.63.5 h1:IIq+JEFRgAx2AF7rpt34MYffp/2yVm+mSkNipLycCjI=
