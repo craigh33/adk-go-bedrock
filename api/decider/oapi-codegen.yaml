@@ -1,0 +1,11 @@
+package: decider
+output: internal/models/agentcore/decider/types.gen.go
+generate:
+  models: true
+output-options:
+  overlay:
+    path: api/decider/overlay.yaml
+  type-mapping:
+    number:
+      default:
+        type: float64
