@@ -55,8 +55,6 @@ The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conver
 
 ## Examples
 
-Strands Decider support is available through the [AgentCore Decider client](bedrock/agentcore/decider) and [ADK tool](tools/agentcore/decider). Payload models are [generated from the pinned upstream contract](internal/models/agentcore/decider).
-
 These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat runners, tools, streaming, multimodal and document flows, guardrails, and provider-specific options. Each example has its own `README.md` and `Makefile`:
 
 - [`examples/bedrock-a2a`](examples/bedrock-a2a): A2A remote-agent example backed by Bedrock.

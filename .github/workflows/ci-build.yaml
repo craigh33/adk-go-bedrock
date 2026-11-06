@@ -14,7 +14,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Check generated Decider contract
-        run: make check-generated-decider
+        run: make -C internal/models/agentcore/decider check-generated
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9

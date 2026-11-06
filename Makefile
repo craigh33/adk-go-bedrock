@@ -1,4 +1,4 @@
-.PHONY: pre-commit-install pre-commit test build lint generate-decider check-generated-decider
+.PHONY: pre-commit-install pre-commit test build lint
 
 # Install pre-commit hooks (requires pre-commit to be installed).
 pre-commit-install:
@@ -21,10 +21,3 @@ build:
 # Run golangci-lint (see .golangci.yaml).
 lint:
 	golangci-lint run ./...
-
-generate-decider:
-	cd internal/models/agentcore/decider && \
-		go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.1 --config oapi-codegen.yaml openapi.json
-
-check-generated-decider: generate-decider
-	git diff --exit-code -- internal/models/agentcore/decider/types.gen.go
