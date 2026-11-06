@@ -1,24 +1,19 @@
+// Package main demonstrates an ADK agent that routes support requests with AgentCore Decider.
 package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"flag"
-	"fmt"
 	"log"
 	"os"
-	"strings"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
-	"google.golang.org/adk/v2/runner"
-	"google.golang.org/adk/v2/session"
+	"google.golang.org/adk/v2/cmd/launcher"
+	"google.golang.org/adk/v2/cmd/launcher/full"
 	"google.golang.org/adk/v2/tool"
-	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock/agentcore/decider"
 	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
@@ -26,91 +21,81 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
-	}
-}
+	ctx := context.Background()
 
-func run() error {
-	useTool := flag.Bool("tool", false, "Run the evaluator as an ADK tool with a Bedrock LLM")
-	flag.Parse()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
+	modelID := os.Getenv("BEDROCK_MODEL_ID")
+	runtimeARN := os.Getenv("AGENTCORE_RUNTIME_ARN")
+	if modelID == "" || runtimeARN == "" {
+		log.Fatal("set BEDROCK_MODEL_ID and AGENTCORE_RUNTIME_ARN")
+	}
+
 	awsCfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		return fmt.Errorf("load AWS config: %w", err)
+		log.Fatalf("load AWS config: %v", err)
 	}
+	if awsCfg.Region == "" {
+		log.Fatal("set AWS_REGION or configure a region in your AWS profile")
+	}
+
+	runtime := bedrockruntime.NewFromConfig(awsCfg)
+	llm, err := converse.NewWithAPI(modelID, converse.NewRuntimeAPI(runtime))
+	if err != nil {
+		log.Fatalf("create Bedrock model: %v", err)
+	}
+
 	client, err := decider.New(decider.Config{
 		API:              bedrockagentcore.NewFromConfig(awsCfg),
-		AgentRuntimeARN:  os.Getenv("AGENTCORE_RUNTIME_ARN"),
+		AgentRuntimeARN:  runtimeARN,
 		Qualifier:        os.Getenv("AGENTCORE_RUNTIME_QUALIFIER"),
 		RuntimeSessionID: os.Getenv("AGENTCORE_RUNTIME_SESSION_ID"),
 	})
 	if err != nil {
-		return err
+		log.Fatalf("create Decider client: %v", err)
 	}
-	var question decider.Question
-	if err = question.FromChoiceQuestion(decider.ChoiceQuestion{
-		Type: "choice", Instructions: "Which team should handle the request?",
-		Criteria: map[string]any{"billing": "Invoices and payments", "technical": "Bugs and integrations"},
+
+	var department decider.Question
+	if err := department.FromChoiceQuestion(decider.ChoiceQuestion{
+		Type:         "choice",
+		Instructions: "Which team should handle this support request?",
+		Criteria: map[string]any{
+			"billing":   "Invoices, charges, and payments",
+			"technical": "Bugs and integration failures",
+		},
 	}); err != nil {
-		return fmt.Errorf("define question: %w", err)
+		log.Fatalf("define the routing question: %v", err)
 	}
-	questions := map[string]decider.Question{"department": question}
-	text := "I was charged twice. Please help."
-	if flag.NArg() > 0 {
-		text = strings.Join(flag.Args(), " ")
-	}
-	if !*useTool {
-		response, evaluateErr := client.Evaluate(ctx, &decider.Request{State: text, Questions: questions})
-		if evaluateErr != nil {
-			return evaluateErr
-		}
-		if err = json.NewEncoder(os.Stdout).Encode(response); err != nil {
-			return fmt.Errorf("print assessment: %w", err)
-		}
-		return nil
-	}
-	modelID := os.Getenv("BEDROCK_MODEL_ID")
-	if modelID == "" {
-		return errors.New("set BEDROCK_MODEL_ID for -tool")
-	}
-	evaluate, err := decidertool.New(decidertool.Config{
-		API: client, Questions: questions, Name: "classify_request",
-		Description: "Choose the team responsible for a support request",
+
+	classifyRequest, err := decidertool.New(decidertool.Config{
+		API:         client,
+		Name:        "classify_request",
+		Description: "Choose the team responsible for a support request.",
+		Questions: map[string]decider.Question{
+			"department": department,
+		},
 	})
 	if err != nil {
-		return err
+		log.Fatalf("create Decider tool: %v", err)
 	}
-	llm, err := converse.New(ctx, modelID, &converse.Options{Region: awsCfg.Region})
-	if err != nil {
-		return err
-	}
-	a, err := llmagent.New(llmagent.Config{
-		Name: "support_assistant", Model: llm, Tools: []tool.Tool{evaluate},
-		Instruction: "Use classify_request to assess the user's request, then explain the selected team.",
+
+	supportAgent, err := llmagent.New(llmagent.Config{
+		Name:        "support_agent",
+		Model:       llm,
+		Description: "Routes support requests to billing or technical support.",
+		Instruction: "Pass each support request to classify_request. " +
+			"Report the department and confidence from the tool result.",
+		Tools: []tool.Tool{
+			classifyRequest,
+		},
 	})
 	if err != nil {
-		return fmt.Errorf("create agent: %w", err)
+		log.Fatalf("create support agent: %v", err)
 	}
-	r, err := runner.New(runner.Config{AppName: "decider-example", Agent: a,
-		SessionService: session.InMemoryService(), AutoCreateSession: true})
-	if err != nil {
-		return fmt.Errorf("create runner: %w", err)
+
+	launcherConfig := &launcher.Config{
+		AgentLoader: agent.NewSingleLoader(supportAgent),
 	}
-	for event, runErr := range r.Run(ctx, "example-user", "example-session",
-		genai.NewContentFromText(text, genai.RoleUser), agent.RunConfig{}) {
-		if runErr != nil {
-			return fmt.Errorf("run agent: %w", runErr)
-		}
-		if event.Content == nil || event.Partial {
-			continue
-		}
-		for _, part := range event.Content.Parts {
-			if part.Text != "" {
-				fmt.Println(part.Text)
-			}
-		}
+	l := full.NewLauncher()
+	if err := l.Execute(ctx, launcherConfig, os.Args[1:]); err != nil {
+		log.Fatalf("run agent: %v\n\n%s", err, l.CommandLineSyntax())
 	}
-	return nil
 }

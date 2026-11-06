@@ -1,10 +1,10 @@
 package: decider
-output: internal/models/agentcore/decider/types.gen.go
+output: types.gen.go
 generate:
   models: true
 output-options:
   overlay:
-    path: api/decider/overlay.yaml
+    path: overlay.yaml
   type-mapping:
     number:
       default:

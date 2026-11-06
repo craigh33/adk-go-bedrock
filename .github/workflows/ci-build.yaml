@@ -13,9 +13,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install schema generation runner
-        run: python3 -m pip install uv==0.13.5
-
       - name: Check generated Decider contract
         run: make check-generated-decider
 

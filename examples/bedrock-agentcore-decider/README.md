@@ -1,18 +1,31 @@
-# AgentCore Decider
+# Route support requests with AgentCore Decider
 
-Requires an existing IAM-authenticated Runtime serving Strands Decider's `/invocations` contract, standard AWS credentials, and permission `bedrock-agentcore:InvokeAgentRuntime`.
+This ADK agent sends support requests to the Decider tool and reports the chosen
+department and its confidence. The application defines the routing question and
+allowed departments; the agent supplies the request text.
+
+Configure AWS credentials for Bedrock inference and
+`bedrock-agentcore:InvokeAgentRuntime`. Use an existing IAM-authenticated
+Strands Decider Runtime serving `/invocations`.
+
+From the repository root:
 
 ```sh
 export AWS_REGION=eu-west-1
+export BEDROCK_MODEL_ID=eu.amazon.nova-2-lite-v1:0
 export AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:eu-west-1:123456789012:runtime/your-runtime
-make run ARGS='"I was charged twice"'
+
+go run ./examples/bedrock-agentcore-decider console
 ```
 
-The default mode calls Decider directly and prints its typed assessment. For the ADK tool demonstration, also configure an accessible Bedrock model and its inference permissions:
+Try `I was charged twice for my last invoice` or
+`My integration returns a 500 error`. To use the ADK web interface instead:
 
 ```sh
-export BEDROCK_MODEL_ID=eu.amazon.nova-2-lite-v1:0
-make run ARGS='-tool "I was charged twice"'
+go run ./examples/bedrock-agentcore-decider web api webui
 ```
 
-Optional: `AGENTCORE_RUNTIME_QUALIFIER` selects an endpoint; `AGENTCORE_RUNTIME_SESSION_ID` reuses a caller-owned session across processes. Otherwise each client generates one session ID and reuses it for its calls. Cold GPU sessions can take minutes; this example has a five-minute deadline. The example provisions no resources.
+Set `AGENTCORE_RUNTIME_QUALIFIER` to select a Runtime endpoint, or
+`AGENTCORE_RUNTIME_SESSION_ID` to reuse a caller-owned session.
+See the [Decider client README](../../bedrock/agentcore/decider) for direct
+SDK evaluation without a Bedrock model.

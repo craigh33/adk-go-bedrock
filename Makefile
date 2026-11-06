@@ -23,8 +23,8 @@ lint:
 	golangci-lint run ./...
 
 generate-decider:
-	uv run --locked api/decider/export.py
-	go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.1 --config api/decider/oapi-codegen.yaml api/decider/openapi.json
+	cd internal/models/agentcore/decider && \
+		go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.1 --config oapi-codegen.yaml openapi.json
 
 check-generated-decider: generate-decider
-	git diff --exit-code -- api/decider/openapi.json internal/models/agentcore/decider/types.gen.go
+	git diff --exit-code -- internal/models/agentcore/decider/types.gen.go

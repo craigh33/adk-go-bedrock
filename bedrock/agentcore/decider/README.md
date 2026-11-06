@@ -29,4 +29,5 @@ The Runtime deployment selects the checkpoint; the request's optional `Model` fi
 
 Each client reuses one Runtime session. Set `RuntimeSessionID` for caller-owned reuse and create distinct clients/sessions for required isolation boundaries. Callers configure AWS SDK retries and use context deadlines. Runtime errors preserve their causes; responses are capped at 8 MiB.
 
-See the [runnable example](../../../examples/bedrock-agentcore-decider) and [contract generation](../../../api/decider). The [ADK tool](../../../tools/agentcore/decider) accepts this client's `Evaluate` interface and fixes questions at construction.
+The [ADK example](../../../examples/bedrock-agentcore-decider) shows how to use
+this client with the [Decider tool](../../../tools/agentcore/decider).
