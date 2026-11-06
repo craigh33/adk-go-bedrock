@@ -1,0 +1,11 @@
+package: decider
+output: types.gen.go
+generate:
+  models: true
+output-options:
+  overlay:
+    path: overlay.yaml
+  type-mapping:
+    number:
+      default:
+        type: float64
