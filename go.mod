@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.33.11
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.13
 	github.com/aws/aws-sdk-go-v2/service/bedrockagentcore v1.52.0
-	github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime v1.65.2
+	github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime v1.66.0
 	github.com/aws/aws-sdk-go-v2/service/bedrockdataautomationruntime v1.19.6
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.63.5
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.6
