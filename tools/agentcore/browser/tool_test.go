@@ -431,6 +431,14 @@ func TestNewValidationAndDefaults(t *testing.T) {
 		t.Fatal("expected invalid allowed host error")
 	}
 	if _, err := New(Config{
+		API:          &fakeAgentCoreAPI{},
+		Region:       "us-east-1",
+		Credentials:  testCreds(),
+		AllowedHosts: []string{" "},
+	}); err == nil {
+		t.Fatal("expected empty allowed host error")
+	}
+	if _, err := New(Config{
 		API:         &fakeAgentCoreAPI{},
 		Region:      "us-east-1",
 		Credentials: testCreds(),
@@ -641,6 +649,7 @@ func TestURLMiddlewareOrderingAndStages(t *testing.T) {
 		API:            &fakeAgentCoreAPI{},
 		Region:         "us-east-1",
 		Credentials:    testCreds(),
+		AllowedHosts:   []string{"example.com"},
 		URLMiddlewares: []URLMiddleware{middleware("first"), middleware("second")},
 	})
 	if err != nil {
@@ -749,8 +758,27 @@ func TestHostPolicyRejectsLocalTargetsByDefault(t *testing.T) {
 			t.Fatalf("expected local target rejection for %s", rawURL)
 		}
 	}
+	if err := bt.checkURL(context.Background(), "https://metadata.corp.example", URLStageNavigate); err == nil {
+		t.Fatal("DNS host without an allowlist or unrestricted-DNS opt-in was allowed")
+	}
 	if err := bt.checkURL(context.Background(), "https://93.184.216.34", URLStageNavigate); err != nil {
 		t.Fatalf("public IP rejected: %v", err)
+	}
+
+	tl, err := New(Config{
+		API:                  &fakeAgentCoreAPI{},
+		Region:               "us-east-1",
+		Credentials:          testCreds(),
+		AllowUnrestrictedDNS: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tl.(*browserTool).checkURL(context.Background(), "https://metadata.corp.example", URLStageNavigate); err != nil {
+		t.Fatalf("unrestricted DNS opt-in rejected hostname: %v", err)
+	}
+	if err := tl.(*browserTool).checkURL(context.Background(), "https://10.0.0.1", URLStageNavigate); err == nil {
+		t.Fatal("unrestricted DNS opt-in allowed a private IP literal")
 	}
 
 	tl, _ = New(Config{

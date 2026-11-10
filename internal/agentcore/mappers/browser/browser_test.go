@@ -85,7 +85,7 @@ func TestAgentCoreBrowserScreenshotMapping(t *testing.T) {
 
 func TestAgentCoreBrowserHostMapping(t *testing.T) {
 	t.Parallel()
-	for _, host := range []string{"*", "example.*", "*.*.example.com"} {
+	for _, host := range []string{"*", "example.*", "*.*.example.com", "", "  ", "*."} {
 		if _, err := AgentCoreBrowserNormalizeHosts("AllowedHosts", []string{host}); err == nil {
 			t.Errorf("expected invalid wildcard error for %q", host)
 		}

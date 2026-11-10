@@ -56,7 +56,8 @@ Zero values select the defaults below unless noted otherwise. Negative timeouts 
 | `BrowserIdentifier` | `aws.browser.v1` | AgentCore browser resource identifier. |
 | `SessionTimeoutSeconds` | `900` | AgentCore session lifetime, up to 28,800 seconds. |
 | `ViewportWidth`, `ViewportHeight` | AgentCore default | Optional viewport dimensions; set both together. |
-| `AllowedHosts`, `DeniedHosts` | public hosts allowed | Lexical HTTP(S) host policy; deny rules win. |
+| `AllowedHosts`, `DeniedHosts` | empty | Lexical HTTP(S) host policy; deny rules win. |
+| `AllowUnrestrictedDNS` | `false` | Allow DNS hostnames when `AllowedHosts` is empty. |
 | `RequestMiddlewares` | none | Mutate, fulfill, or block intercepted browser requests. |
 | `URLMiddlewares` | none | Compose or replace URL host policy for navigate, request, current, and final stages. |
 | `Dialer` | `websocket.Dial` | Open the signed automation WebSocket through a custom proxy or transport. |
@@ -117,7 +118,7 @@ AuthHandler: func(ctx context.Context, challenge browser.AuthChallenge) (browser
 
 By default sessions use `aws.browser.v1` and a 900 second timeout. `NavigationTimeout` bounds the AgentCore lookup, WebSocket/CDP work, lifecycle and selector waits, and artifact save performed by `navigate`, `extract_text`, and `screenshot`. Screenshot payloads are bounded before and after base64 decoding and immediately before artifact storage. The automation WebSocket also has an internal read limit derived from the configured text and screenshot bounds.
 
-`AllowedHosts` and `DeniedHosts` apply to all HTTP(S) page and subresource requests while `navigate`, `extract_text`, and `screenshot` run, as well as the current URL before text is returned or an artifact is saved; deny rules win. Browser-local schemes such as `data:` and `blob:` are allowed. An empty `AllowedHosts` list permits syntactically public hostnames and public IP literals except entries matched by `DeniedHosts`, while localhost, non-public IP literals, and legacy IPv4 spellings require an explicit allowlist entry. DNS names are matched lexically rather than resolved locally because AgentCore, including VPC-connected browsers, may resolve them differently. Use an explicit `AllowedHosts` list when the browser can reach private networks or the workflow needs a strong domain boundary, and include any HTTP(S) hosts needed for scripts, styles, images, or API calls.
+`AllowedHosts` and `DeniedHosts` apply to all HTTP(S) page and subresource requests while `navigate`, `extract_text`, and `screenshot` run, as well as the current URL before text is returned or an artifact is saved; deny rules win. Browser-local schemes such as `data:` and `blob:` are allowed. With an empty `AllowedHosts` list, DNS hostnames are rejected unless `AllowUnrestrictedDNS` is explicitly enabled; public IP literals remain allowed, while localhost, non-public IP literals, and legacy IPv4 spellings require an explicit allowlist entry. DNS names are matched lexically rather than resolved locally because AgentCore, including VPC-connected browsers, may resolve them differently. Enabling unrestricted DNS may allow access to private resources reachable by the browser. Prefer an explicit `AllowedHosts` list and include any HTTP(S) hosts needed for scripts, styles, images, or API calls.
 
 Browser sessions are billable until explicitly stopped or their session timeout expires. Keep `SessionTimeoutSeconds` no longer than the workflow needs (AgentCore allows up to 28,800 seconds) and call `stop` when work is complete.
 

@@ -145,7 +145,7 @@ func TestNavigateStartsSessionAndUsesCDP(t *testing.T) {
 func TestNavigateRejectsInvalidWaitOverrideBeforeStartingSession(t *testing.T) {
 	t.Parallel()
 	api := &fakeAgentCoreAPI{}
-	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestNavigateOptionalStringArgumentsRejectInvalidTypes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			api := &fakeAgentCoreAPI{}
-			tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+			tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -208,7 +208,7 @@ func TestRequiredStringArgumentsRejectInvalidTypes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			api := &fakeAgentCoreAPI{}
-			tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+			tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -298,7 +298,7 @@ func TestExtractTextUsesWaitSelectorAsExtractionSelector(t *testing.T) {
 		SessionId:         aws.String("session-1"),
 		Streams:           browserStreams(wsURL),
 	}}
-	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +330,7 @@ func TestExtractTextGetsSessionAndTruncates(t *testing.T) {
 			Streams:           browserStreams(wsURL),
 		},
 	}
-	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), MaxTextBytes: 5})
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), MaxTextBytes: 5, AllowedHosts: []string{"example.com"}})
 	bt := tl.(*browserTool)
 
 	out, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
@@ -400,6 +400,7 @@ func TestExtractTextAppliesTimeout(t *testing.T) {
 		API:               api,
 		Region:            "us-east-1",
 		Credentials:       testCreds(),
+		AllowedHosts:      []string{"example.com"},
 		NavigationTimeout: 100 * time.Millisecond,
 	})
 	bt := tl.(*browserTool)
@@ -426,7 +427,7 @@ func TestNavigateStopsAutoStartedSessionOnMetadataError(t *testing.T) {
 			Streams:           browserStreams(wsURL),
 		},
 	}
-	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 	bt := tl.(*browserTool)
 
 	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
@@ -498,6 +499,7 @@ func TestNavigateAppliesTimeoutToMetadata(t *testing.T) {
 		API:               api,
 		Region:            "us-east-1",
 		Credentials:       testCreds(),
+		AllowedHosts:      []string{"example.com"},
 		NavigationTimeout: 100 * time.Millisecond,
 	})
 	bt := tl.(*browserTool)
@@ -633,7 +635,7 @@ func TestScreenshotSavesArtifact(t *testing.T) {
 		},
 	}
 	arts := &fakeArtifacts{version: 2}
-	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 	bt := tl.(*browserTool)
 
 	out, err := bt.Run(newFakeToolCtx(arts), map[string]any{
@@ -702,7 +704,7 @@ func TestScreenshotOptions(t *testing.T) {
 				SessionId:         aws.String("session-1"),
 				Streams:           browserStreams(wsURL),
 			}}
-			tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+			tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -785,6 +787,7 @@ func TestScreenshotSizeLimit(t *testing.T) {
 				API:                api,
 				Region:             "us-east-1",
 				Credentials:        testCreds(),
+				AllowedHosts:       []string{"example.com"},
 				MaxScreenshotBytes: tc.limit,
 			})
 			if err != nil {

@@ -139,6 +139,8 @@ type Config struct {
 
 	AllowedHosts []string
 	DeniedHosts  []string
+	// AllowUnrestrictedDNS permits DNS hostnames when AllowedHosts is empty.
+	AllowUnrestrictedDNS bool
 
 	RequestMiddlewares []RequestMiddleware
 	URLMiddlewares     []URLMiddleware
@@ -162,6 +164,7 @@ type browserTool struct {
 	viewportHeight        int32
 	allowedHosts          []string
 	deniedHosts           []string
+	allowUnrestrictedDNS  bool
 	requestHandler        RequestHandler
 	urlHandler            URLHandler
 	dialer                WebSocketDialer

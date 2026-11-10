@@ -519,6 +519,11 @@ func (t *browserTool) handleURLCheck(_ context.Context, check URLCheck) error {
 	if len(t.allowedHosts) > 0 && !browsermappers.AgentCoreBrowserHostMatches(t.allowedHosts, host) {
 		return fmt.Errorf("url: host %q is not allowed", host)
 	}
+	if len(t.allowedHosts) == 0 && !t.allowUnrestrictedDNS {
+		if _, err := netip.ParseAddr(host); err != nil {
+			return fmt.Errorf("url: DNS host %q requires an AllowedHosts entry or AllowUnrestrictedDNS", host)
+		}
+	}
 	if len(t.allowedHosts) == 0 && browsermappers.AgentCoreBrowserRequiresExplicitAllow(host) {
 		return fmt.Errorf("url: host %q requires an explicit allowlist entry", host)
 	}

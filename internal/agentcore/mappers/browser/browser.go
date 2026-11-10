@@ -194,7 +194,7 @@ func AgentCoreBrowserNormalizeHosts(name string, hosts []string) ([]string, erro
 		host = strings.TrimPrefix(host, ".")
 		host = AgentCoreBrowserNormalizeHost(host)
 		if host == "" {
-			continue
+			return nil, fmt.Errorf("%s contains an empty host", name)
 		}
 		if strings.ContainsAny(host, "*/?#@ \t\r\n") || strings.Contains(host, "..") {
 			return nil, fmt.Errorf("%s contains invalid host %q", name, raw)

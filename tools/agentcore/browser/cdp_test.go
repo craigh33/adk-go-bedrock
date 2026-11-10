@@ -353,6 +353,7 @@ func TestRequestMiddlewareFulfillsRequest(t *testing.T) {
 		API:                api,
 		Region:             "us-east-1",
 		Credentials:        testCreds(),
+		AllowedHosts:       []string{"example.com"},
 		RequestMiddlewares: []RequestMiddleware{middleware},
 	})
 
@@ -433,10 +434,11 @@ func TestNavigateWaitModesAndOverride(t *testing.T) {
 				Streams:           browserStreams(wsURL),
 			}}
 			tl, err := New(Config{
-				API:         api,
-				Region:      "us-east-1",
-				Credentials: testCreds(),
-				WaitUntil:   tc.configured,
+				API:          api,
+				Region:       "us-east-1",
+				Credentials:  testCreds(),
+				AllowedHosts: []string{"example.com"},
+				WaitUntil:    tc.configured,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -465,7 +467,7 @@ func TestNavigateWaitsForSelector(t *testing.T) {
 		SessionId:         aws.String("session-1"),
 		Streams:           browserStreams(wsURL),
 	}}
-	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,6 +523,7 @@ func TestSelectorWaitErrorsAndTimeout(t *testing.T) {
 				API:               api,
 				Region:            "us-east-1",
 				Credentials:       testCreds(),
+				AllowedHosts:      []string{"example.com"},
 				NavigationTimeout: tc.timeout,
 			})
 			if err != nil {
@@ -587,10 +590,11 @@ func TestAuthenticationFlows(t *testing.T) {
 				return tc.response, tc.handlerError
 			}
 			tl, err := New(Config{
-				API:         api,
-				Region:      "us-east-1",
-				Credentials: testCreds(),
-				AuthHandler: handler,
+				API:          api,
+				Region:       "us-east-1",
+				Credentials:  testCreds(),
+				AllowedHosts: []string{"example.com"},
+				AuthHandler:  handler,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -633,7 +637,7 @@ func TestNilAuthHandlerDoesNotEnableAuthInterception(t *testing.T) {
 		SessionId:         aws.String("session-1"),
 		Streams:           browserStreams(wsURL),
 	}}
-	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -658,7 +662,7 @@ func TestExtractTextReturnsRuntimeEvaluateException(t *testing.T) {
 			Streams:           browserStreams(wsURL),
 		},
 	}
-	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 	bt := tl.(*browserTool)
 
 	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
@@ -715,7 +719,7 @@ func TestCDPErrorIsReturned(t *testing.T) {
 			Streams:           browserStreams(wsURL),
 		},
 	}
-	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 	bt := tl.(*browserTool)
 
 	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
@@ -740,7 +744,7 @@ func TestNavigateReturnsPageErrorText(t *testing.T) {
 			Streams:           browserStreams(wsURL),
 		},
 	}
-	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 	bt := tl.(*browserTool)
 
 	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{

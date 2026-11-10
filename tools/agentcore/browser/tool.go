@@ -103,6 +103,7 @@ func New(cfg Config) (tool.Tool, error) {
 		viewportHeight:        cfg.ViewportHeight,
 		allowedHosts:          allowedHosts,
 		deniedHosts:           deniedHosts,
+		allowUnrestrictedDNS:  cfg.AllowUnrestrictedDNS,
 		dialer:                cfg.Dialer,
 		authHandler:           cfg.AuthHandler,
 		navigationTimeout:     navTimeout,
