@@ -36,8 +36,8 @@ func New(cfg Config) (tool.Tool, error) {
 	if sessionTimeout == 0 {
 		sessionTimeout = defaultSessionTimeout
 	}
-	if sessionTimeout < 0 {
-		return nil, errors.New("SessionTimeoutSeconds cannot be negative")
+	if sessionTimeout < minSessionTimeout {
+		return nil, fmt.Errorf("SessionTimeoutSeconds cannot be less than %d", minSessionTimeout)
 	}
 	if sessionTimeout > maxSessionTimeout {
 		return nil, fmt.Errorf("SessionTimeoutSeconds cannot exceed %d", maxSessionTimeout)

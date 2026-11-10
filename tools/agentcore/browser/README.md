@@ -54,7 +54,7 @@ Zero values select the defaults below unless noted otherwise. Negative timeouts 
 | Field | Default | Purpose |
 | --- | --- | --- |
 | `BrowserIdentifier` | `aws.browser.v1` | AgentCore browser resource identifier. |
-| `SessionTimeoutSeconds` | `900` | AgentCore session lifetime, up to 28,800 seconds. |
+| `SessionTimeoutSeconds` | `900` | AgentCore session lifetime, from 60 through 28,800 seconds. |
 | `ViewportWidth`, `ViewportHeight` | AgentCore default | Optional viewport dimensions; set both together. |
 | `AllowedHosts`, `DeniedHosts` | empty | Lexical HTTP(S) host policy; deny rules win. |
 | `AllowUnrestrictedDNS` | `false` | Allow DNS hostnames when `AllowedHosts` is empty. |
@@ -70,7 +70,7 @@ Zero values select the defaults below unless noted otherwise. Negative timeouts 
 
 ### URL Middleware
 
-`URLMiddlewares` receives a parsed `URLCheck` with a `URLStage` of `navigate`, `request`, `current`, or `final`. Middleware is applied in list order with the first entry outermost. Calling `next` applies the remaining middleware and built-in host policy; omitting `next` replaces host policy. Parsing, user-info rejection, and HTTP(S) requirements for explicit/current/final page URLs remain fixed structural validation.
+`URLMiddlewares` receives a parsed `URLCheck` with a `URLStage` of `navigate`, `request`, `current`, or `final`. Middleware is applied in list order with the first entry outermost. URL middleware is validation-only: rewriting a URL and calling `next` is rejected because the checked URL must match the one used by the browser. Use request middleware to rewrite browser requests. Calling `next` applies the remaining URL middleware and built-in host policy; omitting `next` replaces host policy. Parsing, user-info rejection, and HTTP(S) requirements for explicit/current/final page URLs remain fixed structural validation.
 
 ```go
 auditPolicy := func(next browser.URLHandler) browser.URLHandler {
@@ -89,7 +89,7 @@ browserTool, err := browser.New(browser.Config{
 })
 ```
 
-When URL middleware rewrites a `URLCheck` and calls `next`, the rewritten URL is structurally validated and passed through host policy. Request middleware that deliberately omits its own `next` may bypass request-stage URL policy for custom routing or synthetic responses; explicit navigation and observed current/final page URLs are still checked independently.
+URL middleware may inspect and reject URLs, but does not change the browser destination. Request middleware that deliberately omits its own `next` may bypass request-stage URL policy for custom routing or synthetic responses; explicit navigation and observed current/final page URLs are still checked independently.
 
 ### Request Middleware
 
@@ -116,7 +116,7 @@ AuthHandler: func(ctx context.Context, challenge browser.AuthChallenge) (browser
 
 `Dialer` accepts any `WebSocketDialer` with Coder WebSocket's `Dial` signature. Its `DialOptions.HTTPHeader` contains the SigV4-signed headers, making proxying, observability, and custom TLS behavior injectable without exposing CDP through the ADK tool.
 
-By default sessions use `aws.browser.v1` and a 900 second timeout. `NavigationTimeout` bounds the AgentCore lookup, WebSocket/CDP work, lifecycle and selector waits, and artifact save performed by `navigate`, `extract_text`, and `screenshot`. Screenshot payloads are bounded before and after base64 decoding and immediately before artifact storage. The automation WebSocket also has an internal read limit derived from the configured text and screenshot bounds.
+By default sessions use `aws.browser.v1` and a 900 second timeout. `wait_until: "none"` waits only for the main frame's navigation commit, not a document lifecycle event, before returning page metadata. `NavigationTimeout` bounds the AgentCore lookup, WebSocket/CDP work, lifecycle and selector waits, and artifact save performed by `navigate`, `extract_text`, and `screenshot`. Screenshot payloads are bounded before and after base64 decoding and immediately before artifact storage. The automation WebSocket also has an internal read limit derived from the configured text and screenshot bounds.
 
 `AllowedHosts` and `DeniedHosts` apply to all HTTP(S) page and subresource requests while `navigate`, `extract_text`, and `screenshot` run, as well as the current URL before text is returned or an artifact is saved; deny rules win. Browser-local schemes such as `data:` and `blob:` are allowed. With an empty `AllowedHosts` list, DNS hostnames are rejected unless `AllowUnrestrictedDNS` is explicitly enabled; public IP literals remain allowed, while localhost, non-public IP literals, and legacy IPv4 spellings require an explicit allowlist entry. DNS names are matched lexically rather than resolved locally because AgentCore, including VPC-connected browsers, may resolve them differently. Enabling unrestricted DNS may allow access to private resources reachable by the browser. Prefer an explicit `AllowedHosts` list and include any HTTP(S) hosts needed for scripts, styles, images, or API calls.
 

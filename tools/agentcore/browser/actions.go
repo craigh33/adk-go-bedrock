@@ -447,11 +447,14 @@ func (t *browserTool) signedWebSocketHeaders(ctx context.Context, endpoint strin
 	return req.Header, nil
 }
 
+type originalURLContextKey struct{}
+
 func (t *browserTool) checkURL(ctx context.Context, raw string, stage URLStage) error {
 	check, err := parseURLCheck(raw, stage)
 	if err != nil {
 		return err
 	}
+	ctx = context.WithValue(ctx, originalURLContextKey{}, check.URL.String())
 	return t.urlHandler(ctx, check)
 }
 
@@ -504,9 +507,12 @@ func validateURLStructure(check URLCheck) error {
 	return nil
 }
 
-func (t *browserTool) handleURLCheck(_ context.Context, check URLCheck) error {
+func (t *browserTool) handleURLCheck(ctx context.Context, check URLCheck) error {
 	if err := validateURLStructure(check); err != nil {
 		return err
+	}
+	if originalURL, ok := ctx.Value(originalURLContextKey{}).(string); ok && check.URL.String() != originalURL {
+		return errors.New("URL middleware cannot rewrite URLs; use request middleware to rewrite browser requests")
 	}
 	u := &check.URL
 	if check.Stage == URLStageRequest && (u.Scheme == schemeData || u.Scheme == schemeBlob) {

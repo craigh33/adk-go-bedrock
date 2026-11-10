@@ -142,6 +142,7 @@ func (c *cdpConn) navigate(
 		return err
 	}
 	var result struct {
+		FrameID    string `json:"frameId"`
 		ErrorText  string `json:"errorText"`
 		IsDownload bool   `json:"isDownload"`
 	}
@@ -154,17 +155,17 @@ func (c *cdpConn) navigate(
 	if result.IsDownload {
 		return errors.New("navigate: URL started a download")
 	}
-	event := navigationEvent(waitUntil)
-	if event == "" {
-		return nil
+	if waitUntil == WaitUntilNone {
+		if result.FrameID == "" {
+			return errors.New("navigate: response has no frame ID")
+		}
+		return c.waitForNavigationCommit(ctx, sessionID, result.FrameID)
 	}
-	return c.waitEvent(ctx, sessionID, event)
+	return c.waitEvent(ctx, sessionID, navigationEvent(waitUntil))
 }
 
 func navigationEvent(waitUntil WaitUntil) string {
 	switch waitUntil {
-	case WaitUntilNone:
-		return ""
 	case WaitUntilDOMContentLoaded:
 		return "Page.domContentEventFired"
 	case WaitUntilLoad:
@@ -172,6 +173,32 @@ func navigationEvent(waitUntil WaitUntil) string {
 	default:
 		return ""
 	}
+}
+
+func (c *cdpConn) waitForNavigationCommit(ctx context.Context, sessionID, frameID string) error {
+	return c.waitForEvent(ctx, "main-frame navigation commit", func(msg cdpMessage) bool {
+		if msg.SessionID != sessionID {
+			return false
+		}
+		switch msg.Method {
+		case "Page.frameNavigated":
+			var params struct {
+				Frame struct {
+					ID       string `json:"id"`
+					ParentID string `json:"parentId"`
+				} `json:"frame"`
+			}
+			return json.Unmarshal(msg.Params, &params) == nil &&
+				params.Frame.ID == frameID && params.Frame.ParentID == ""
+		case "Page.navigatedWithinDocument":
+			var params struct {
+				FrameID string `json:"frameId"`
+			}
+			return json.Unmarshal(msg.Params, &params) == nil && params.FrameID == frameID
+		default:
+			return false
+		}
+	})
 }
 
 func (c *cdpConn) enableRequestInterception(
@@ -480,13 +507,22 @@ func (c *cdpConn) call(ctx context.Context, method string, params any, sessionID
 }
 
 func (c *cdpConn) waitEvent(ctx context.Context, sessionID, method string) error {
-	if c.takeEvent(sessionID, method) {
-		return nil
+	return c.waitForEvent(ctx, method, func(msg cdpMessage) bool {
+		return msg.Method == method && (sessionID == "" || msg.SessionID == sessionID)
+	})
+}
+
+func (c *cdpConn) waitForEvent(ctx context.Context, name string, matches func(cdpMessage) bool) error {
+	for i, msg := range c.events {
+		if matches(msg) {
+			c.events = append(c.events[:i], c.events[i+1:]...)
+			return nil
+		}
 	}
 	for {
 		msg, err := c.readMessage(ctx)
 		if err != nil {
-			return fmt.Errorf("wait for %s: %w", method, err)
+			return fmt.Errorf("wait for %s: %w", name, err)
 		}
 		if handled, err := c.handleInterceptedEvent(ctx, msg); handled {
 			if err != nil {
@@ -494,7 +530,7 @@ func (c *cdpConn) waitEvent(ctx context.Context, sessionID, method string) error
 			}
 			continue
 		}
-		if msg.Method == method && (sessionID == "" || msg.SessionID == sessionID) {
+		if matches(msg) {
 			return nil
 		}
 		c.bufferMessage(msg)
@@ -812,14 +848,4 @@ func (c *cdpConn) takeResponse(id int64) (cdpMessage, bool) {
 		delete(c.responses, id)
 	}
 	return msg, ok
-}
-
-func (c *cdpConn) takeEvent(sessionID, method string) bool {
-	for i, msg := range c.events {
-		if msg.Method == method && (sessionID == "" || msg.SessionID == sessionID) {
-			c.events = append(c.events[:i], c.events[i+1:]...)
-			return true
-		}
-	}
-	return false
 }

@@ -8,6 +8,7 @@ const (
 
 	defaultBrowserIdentifier  = "aws.browser.v1"
 	defaultSessionTimeout     = int32(900)
+	minSessionTimeout         = int32(60)
 	maxSessionTimeout         = int32(28_800)
 	defaultNavigationTimeout  = 30 * time.Second
 	defaultCleanupTimeout     = 10 * time.Second

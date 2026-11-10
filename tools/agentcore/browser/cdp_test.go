@@ -422,7 +422,7 @@ func TestNavigateWaitModesAndOverride(t *testing.T) {
 	}{
 		{name: "load default", serverMode: "Page.navigate.loadOnly"},
 		{name: "DOMContentLoaded", serverMode: "Page.navigate.domOnly", configured: WaitUntilDOMContentLoaded},
-		{name: "none", serverMode: "Page.navigate.noEvents", configured: WaitUntilNone},
+		{name: "none", serverMode: "Page.navigate.delayedCommit", configured: WaitUntilNone},
 		{name: "per action override", serverMode: "Page.navigate.noEvents", override: string(WaitUntilNone)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -447,8 +447,12 @@ func TestNavigateWaitModesAndOverride(t *testing.T) {
 			if tc.override != "" {
 				args[paramWaitUntil] = tc.override
 			}
-			if _, err := tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), args); err != nil {
+			out, err := tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), args)
+			if err != nil {
 				t.Fatalf("navigate: %v", err)
+			}
+			if tc.serverMode == "Page.navigate.delayedCommit" && out[paramURL] != "https://example.com/after" {
+				t.Fatalf("navigation returned stale metadata: %#v", out)
 			}
 		})
 	}

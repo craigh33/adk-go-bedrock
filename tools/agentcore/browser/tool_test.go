@@ -217,6 +217,7 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 		}
 		defer conn.Close()
 		captured := false
+		committed := false
 		for {
 			var req struct {
 				ID        int64          `json:"id"`
@@ -262,6 +263,21 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 				if failMethod == "Page.navigate.redirect" {
 					requestURL = "https://blocked.example.net/redirect"
 				}
+				if failMethod == "Page.navigate.delayedCommit" {
+					_ = conn.WriteJSON(map[string]any{
+						"id":     req.ID,
+						"result": map[string]any{"frameId": "frame-1"},
+					})
+					time.Sleep(50 * time.Millisecond)
+				}
+				_ = conn.WriteJSON(map[string]any{
+					"method":    "Page.frameNavigated",
+					"sessionId": "session-1",
+					"params": map[string]any{
+						"frame": map[string]any{"id": "frame-1", "url": requestURL},
+					},
+				})
+				committed = true
 				_ = conn.WriteJSON(map[string]any{
 					"method":    "Fetch.requestPaused",
 					"sessionId": "session-1",
@@ -342,7 +358,9 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 						_ = conn.WriteJSON(map[string]any{"method": "Page.loadEventFired", "sessionId": "session-1"})
 					}
 				}
-				_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{"frameId": "frame-1"}})
+				if failMethod != "Page.navigate.delayedCommit" {
+					_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{"frameId": "frame-1"}})
+				}
 			case "Runtime.evaluate":
 				expr, _ := req.Params["expression"].(string)
 				if failMethod == "Runtime.evaluate.exception" ||
@@ -361,6 +379,9 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 					continue
 				}
 				var value any = map[string]any{"url": "https://example.com/after", "title": "Example"}
+				if failMethod == "Page.navigate.delayedCommit" && !committed {
+					value.(map[string]any)["url"] = "https://old.example"
+				}
 				if failMethod == "Runtime.evaluate.redirect" ||
 					(failMethod == "Runtime.evaluate.redirectAfterCapture" && captured) {
 					value.(map[string]any)["url"] = "https://blocked.example.net/after"
@@ -487,7 +508,7 @@ func TestNewValidationAndDefaults(t *testing.T) {
 		name   string
 		change func(*Config)
 	}{
-		{name: "negative session timeout", change: func(c *Config) { c.SessionTimeoutSeconds = -1 }},
+		{name: "session timeout below service minimum", change: func(c *Config) { c.SessionTimeoutSeconds = minSessionTimeout - 1 }},
 		{name: "negative viewport", change: func(c *Config) { c.ViewportWidth, c.ViewportHeight = -1, -1 }},
 		{name: "negative navigation timeout", change: func(c *Config) { c.NavigationTimeout = -1 }},
 		{name: "negative cleanup timeout", change: func(c *Config) { c.CleanupTimeout = -1 }},
@@ -700,7 +721,7 @@ func TestURLMiddlewareRewriteIsValidatedByNext(t *testing.T) {
 	t.Parallel()
 	rewrite := func(next URLHandler) URLHandler {
 		return func(ctx context.Context, check URLCheck) error {
-			check.URL.Host = "127.0.0.1"
+			check.URL.Host = "example.com"
 			return next(ctx, check)
 		}
 	}
@@ -708,14 +729,15 @@ func TestURLMiddlewareRewriteIsValidatedByNext(t *testing.T) {
 		API:            &fakeAgentCoreAPI{},
 		Region:         "us-east-1",
 		Credentials:    testCreds(),
+		AllowedHosts:   []string{"example.com"},
 		URLMiddlewares: []URLMiddleware{rewrite},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = tl.(*browserTool).checkURL(context.Background(), "https://example.com", URLStageRequest)
-	if err == nil || !strings.Contains(err.Error(), "explicit allowlist") {
-		t.Fatalf("expected rewritten URL policy error, got %v", err)
+	err = tl.(*browserTool).checkURL(context.Background(), "https://blocked.test", URLStageNavigate)
+	if err == nil || !strings.Contains(err.Error(), "cannot rewrite URLs") {
+		t.Fatalf("expected rewritten URL rejection, got %v", err)
 	}
 }
 
