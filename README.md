@@ -8,13 +8,13 @@
 
 # adk-go-bedrock
 
-[Amazon Bedrock](https://aws.amazon.com/bedrock/) **Converse** / **ConverseStream** implementation of the [`model.LLM`](https://pkg.go.dev/google.golang.org/adk/model#LLM) interface for [adk-go](https://github.com/google/adk-go), so you can run agents on Claude, Nova, and other Bedrock chat models with the same ADK APIs you use for Gemini.
+[Amazon Bedrock](https://aws.amazon.com/bedrock/) **Converse** / **ConverseStream** implementation of the [`model.LLM`](https://pkg.go.dev/google.golang.org/adk/v2/model#LLM) interface for [adk-go](https://github.com/google/adk-go), so you can run agents on Claude, Nova, and other Bedrock chat models with the same ADK APIs you use for Gemini.
 
 **Other providers:** [adk-go-ollama](https://github.com/craigh33/adk-go-ollama) · [adk-go-kronk](https://github.com/craigh33/adk-go-kronk)
 
 ## Requirements
 
-- **Go** 1.25+ (aligned with `google.golang.org/adk`)
+- **Go** 1.25+ (aligned with `google.golang.org/adk/v2`)
 - **AWS account** with Bedrock model access in your chosen region
 - **Credentials** via the default AWS chain ([environment variables](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-envvars.html), shared config, IAM role, etc.)
 - A **region** where Bedrock is available: `AWS_REGION`, or `region` in `~/.aws/config` for your profile
@@ -34,7 +34,7 @@ Replace the module path with your fork or published path if you rename the modul
 
 ```go
 ctx := context.Background()
-llm, err := bedrock.New(ctx, "us.anthropic.claude-3-5-sonnet-20241022-v2:0", &bedrock.Options{
+llm, err := converse.New(ctx, "us.anthropic.claude-3-5-sonnet-20241022-v2:0", &converse.Options{
     Region: os.Getenv("AWS_REGION"),
 })
 if err != nil {
@@ -49,26 +49,28 @@ agent, err := llmagent.New(llmagent.Config{
 // Wire agent into runner.New(...) as usual.
 ```
 
-`bedrock.New` accepts a **model ID** or **inference profile ARN** as documented by AWS. [`LLMRequest.Model`](https://pkg.go.dev/google.golang.org/adk/model#LLMRequest) can override the model ID at runtime (e.g. from ADK callbacks).
+`converse.New` accepts a **model ID** or **inference profile ARN** as documented by AWS. [`LLMRequest.Model`](https://pkg.go.dev/google.golang.org/adk/v2/model#LLMRequest) can override the model ID at runtime (e.g. from ADK callbacks).
 
-The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conversions (requests, responses, tools, usage). Import it if you need the same mappings outside the default [`bedrock`](bedrock/) package. It also exports [`MIMETypeFromExtension`](bedrock/mappers/mime_extension.go) for inferring MIME types from a filename when building `genai` parts. The Bedrock Runtime API abstraction used by [`converse.go`](bedrock/converse.go) is exported from [`bedrock`](bedrock/) (`RuntimeAPI`, `StreamReader`, and `NewRuntimeAPI`).
+The [`bedrock/mappers`](bedrock/mappers/) package holds genai ↔ Bedrock conversions (requests, responses, tools, usage). Import it if you need the same mappings outside the default [`converse`](bedrock/converse/) package. It also exports [`MIMETypeFromExtension`](bedrock/mappers/mime_extension.go) for inferring MIME types from a filename when building `genai` parts. The Bedrock Runtime API abstraction used by [`converse.go`](bedrock/converse/converse.go) is exported from [`converse`](bedrock/converse/) (`RuntimeAPI`, `StreamReader`, and `NewRuntimeAPI`).
 
 ## Examples
 
 These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat runners, tools, streaming, multimodal and document flows, guardrails, and provider-specific options. Each example has its own `README.md` and `Makefile`:
 
 - [`examples/bedrock-a2a`](examples/bedrock-a2a): A2A remote-agent example backed by Bedrock.
+- [`examples/bedrock-artifact-s3`](examples/bedrock-artifact-s3): durable artifact storage in Amazon S3 via [`artifact/s3`](artifact/s3), an S3 implementation of ADK's `artifact.Service`.
 - [`examples/bedrock-chat`](examples/bedrock-chat): runner-based chat example.
 - [`examples/bedrock-mcp`](examples/bedrock-mcp): MCP support via ADK's `mcptoolset` with an in-memory MCP server ([MCP support](#mcp-support)).
 - [`examples/bedrock-tool-calling`](examples/bedrock-tool-calling): tool-calling agent example with function declarations.
 - [`examples/bedrock-function-tool`](examples/bedrock-function-tool): ADK `functiontool` with typed args/results and `llmagent` + runner (contrasts with hand-written `genai.Tool` in bedrock-tool-calling).
 - [`examples/bedrock-image-gen`](examples/bedrock-image-gen): ADK runner with the [`imagegenerator`](tools/imagegenerator) tool—Nova Canvas image generation via Bedrock `InvokeModel` and artifact storage.
 - [`examples/bedrock-video-gen`](examples/bedrock-video-gen): ADK runner with the [`videogenerator`](tools/videogenerator) tool—Nova Reel text-to-video via Bedrock async invoke, S3 output, and optional MP4 download into artifacts.
+- [`examples/bedrock-agentcore-code-interpreter`](examples/bedrock-agentcore-code-interpreter): ADK runner with the [`agentcorecodeinterpreter`](tools/agentcorecodeinterpreter) tool—AgentCore Code Interpreter execution with artifact inputs and outputs.
 - [`examples/bedrock-nova-grounding`](examples/bedrock-nova-grounding): Nova Web Grounding via [`tools/novagrounding`](tools/novagrounding); prints answers and `bedrock_citations` metadata (see [Nova Web Grounding](#nova-web-grounding)).
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
 - [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
 - [`examples/bedrock-multimodal`](examples/bedrock-multimodal): comprehensive image analysis, document processing, tool calling with rich media, and vision-based reasoning.
-- [`examples/bedrock-prompt-cache`](examples/bedrock-prompt-cache): `ModelOption` / Bedrock prompt caching for fewer repeated tokens (see AWS prompt caching docs).
+- [`examples/bedrock-prompt-cache`](examples/bedrock-prompt-cache): `ModelOption` / Bedrock prompt caching for fewer repeated tokens (see AWS prompt caching docs). Use `converse.DynamicSystemPart` for system text that changes each request, and pass a TTL to `converse.WithCacheSystemPrompt` to set the cache lifetime.
 - [`examples/bedrock-document`](examples/bedrock-document): CLI to debug document uploads (`-dry-run` mapper check, optional `-combined` / `-stream`).
 - [`examples/bedrock-guardrails`](examples/bedrock-guardrails): safety assessments, content filtering, and guardrail metadata handling.
 - [`examples/bedrock-request-guardrail`](examples/bedrock-request-guardrail): request-side Bedrock guardrail configuration via `ModelOption`.
@@ -131,6 +133,7 @@ The AgentCore Memory resource and its strategies must be provisioned out of band
 - **Function responses**: JSON tool output still maps as before, and image/video/document `FunctionResponse.Parts` are preserved through Bedrock tool-result content blocks.
 - **Streaming**: When ADK uses SSE streaming, the provider calls `ConverseStream`, emits partial text responses, and buffers streamed tool calls, reasoning blocks, image blocks, citation deltas (for grounded responses), usage, and guardrail metadata into the final `TurnComplete` response.
 - **Guardrails / safety results**: Bedrock guardrail stop reasons and trace metadata are mapped back into ADK `FinishReason` and `CustomMetadata`, including synthesized `safety_ratings` derived from Bedrock guardrail assessments when available.
+- **Token usage**: Bedrock input, output, total and cache-read counts map to `genai` `UsageMetadata`. Cache writes have no `genai` equivalent, so the Bedrock count is surfaced as `CustomMetadata["bedrock_cache_write_input_tokens"]` (`int32`). The key is only present when Bedrock reports a non-zero cache write.
 
 ## Nova Web Grounding
 
@@ -141,7 +144,7 @@ Converse request payloads use SystemTool name `nova_grounding`, while IAM polici
 import (
     "context"
 
-    "google.golang.org/adk/model"
+    "google.golang.org/adk/v2/model"
     "google.golang.org/genai"
 
     "github.com/craigh33/adk-go-bedrock/tools/novagrounding"

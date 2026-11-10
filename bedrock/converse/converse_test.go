@@ -1,4 +1,4 @@
-package bedrock
+package converse
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/adk/model"
+	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/internal/mappers"
@@ -796,5 +796,50 @@ func TestTracedStreamReader_Close_recordsStreamErr(t *testing.T) {
 	}
 	if len(s.Events()) == 0 {
 		t.Fatal("expected recorded error event on span")
+	}
+}
+
+func TestConverse_GenerateContent_cacheTTLAndDynamicSystemPart(t *testing.T) {
+	t.Parallel()
+	api := &fakeAPI{converseOut: fakeTextOutput("ok")}
+	m, err := NewWithAPI("mid", api, WithCacheSystemPrompt(types.CacheTTLOneHour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("hi", "user")},
+		Config: &genai.GenerateContentConfig{
+			SystemInstruction: &genai.Content{Parts: []*genai.Part{
+				DynamicSystemPart("now is 10:00"),
+				{Text: "be helpful"},
+			}},
+		},
+	}
+	for _, err := range m.GenerateContent(context.Background(), req, false) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	sys := api.converseIn.System
+	if len(sys) != 3 {
+		t.Fatalf("want 3 system blocks, got %d: %#v", len(sys), sys)
+	}
+	if v, ok := sys[0].(*types.SystemContentBlockMemberText); !ok || v.Value != "be helpful" {
+		t.Fatalf("system[0] want static text, got %#v", sys[0])
+	}
+	cp, ok := sys[1].(*types.SystemContentBlockMemberCachePoint)
+	if !ok || cp.Value.Ttl != types.CacheTTLOneHour || cp.Value.Type != types.CachePointTypeDefault {
+		t.Fatalf("system[1] want 1h cache point, got %#v", sys[1])
+	}
+	if v, ok := sys[2].(*types.SystemContentBlockMemberText); !ok || v.Value != "now is 10:00" {
+		t.Fatalf("system[2] want dynamic text, got %#v", sys[2])
+	}
+}
+
+func TestNewWithAPI_WithCacheSystemPromptRejectsTwoTTLs(t *testing.T) {
+	t.Parallel()
+	_, err := NewWithAPI("mid", &fakeAPI{}, WithCacheSystemPrompt(types.CacheTTLOneHour, types.CacheTTLFiveMinutes))
+	if err == nil {
+		t.Fatal("want error for two TTLs")
 	}
 }

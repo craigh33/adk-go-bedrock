@@ -11,6 +11,15 @@ import (
 // PartMetadataKeyBedrockCitations is set on genai.Part.PartMetadata for citation segments.
 const PartMetadataKeyBedrockCitations = "bedrock_citations"
 
+// PartMetadataKeyAfterCachePoint marks a system part whose text changes between
+// requests. These parts are sent after the system prompt cache point.
+const PartMetadataKeyAfterCachePoint = "bedrock_after_cache_point"
+
+const (
+	citationMapKeyType  = "type"
+	citationMapKeyValue = "value"
+)
+
 func citationsContentBlockToPart(b *types.CitationsContentBlock) (*genai.Part, error) {
 	if b == nil {
 		return nil, errSkipPart
@@ -85,7 +94,7 @@ func citationLocationToMap(loc types.CitationLocation) map[string]any {
 	}
 	switch v := loc.(type) {
 	case *types.CitationLocationMemberWeb:
-		out := map[string]any{"type": "web"}
+		out := map[string]any{citationMapKeyType: "web"}
 		if v.Value.Url != nil {
 			out["url"] = *v.Value.Url
 		}
@@ -94,15 +103,18 @@ func citationLocationToMap(loc types.CitationLocation) map[string]any {
 		}
 		return out
 	case *types.CitationLocationMemberDocumentChar:
-		return map[string]any{"type": "documentChar", "value": fmt.Sprintf("%+v", v.Value)}
+		return map[string]any{citationMapKeyType: "documentChar", citationMapKeyValue: fmt.Sprintf("%+v", v.Value)}
 	case *types.CitationLocationMemberDocumentChunk:
-		return map[string]any{"type": "documentChunk", "value": fmt.Sprintf("%+v", v.Value)}
+		return map[string]any{citationMapKeyType: "documentChunk", citationMapKeyValue: fmt.Sprintf("%+v", v.Value)}
 	case *types.CitationLocationMemberDocumentPage:
-		return map[string]any{"type": "documentPage", "value": fmt.Sprintf("%+v", v.Value)}
+		return map[string]any{citationMapKeyType: "documentPage", citationMapKeyValue: fmt.Sprintf("%+v", v.Value)}
 	case *types.CitationLocationMemberSearchResultLocation:
-		return map[string]any{"type": "searchResultLocation", "value": fmt.Sprintf("%+v", v.Value)}
+		return map[string]any{
+			citationMapKeyType:  "searchResultLocation",
+			citationMapKeyValue: fmt.Sprintf("%+v", v.Value),
+		}
 	default:
-		return map[string]any{"type": fmt.Sprintf("%T", loc)}
+		return map[string]any{citationMapKeyType: fmt.Sprintf("%T", loc)}
 	}
 }
 

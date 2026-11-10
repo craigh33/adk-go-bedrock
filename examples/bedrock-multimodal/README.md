@@ -167,4 +167,4 @@ Image analysis consumes more tokens than text:
 
 - [Bedrock Converse API Documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html)
 - [Claude Vision Capabilities](https://docs.anthropic.com/vision/vision-intro)
-- [ADK Model Documentation](https://pkg.go.dev/google.golang.org/adk/model)
+- [ADK Model Documentation](https://pkg.go.dev/google.golang.org/adk/v2/model)

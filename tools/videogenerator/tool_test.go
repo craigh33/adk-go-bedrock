@@ -17,12 +17,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/artifact"
-	"google.golang.org/adk/memory"
-	"google.golang.org/adk/model"
-	"google.golang.org/adk/session"
-	"google.golang.org/adk/tool/toolconfirmation"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/artifact"
+	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 )
 
@@ -120,34 +117,25 @@ func (f *fakeArtifacts) LoadVersion(context.Context, string, int) (*artifact.Loa
 	return nil, errors.New("not implemented")
 }
 
+// fakeToolContext embeds agent.StrictContextMock (the v2 unified context test
+// double) and overrides only the methods the tool actually calls. Any other
+// method panics, so an unexpected access fails the test loudly.
 type fakeToolContext struct {
-	context.Context
+	agent.StrictContextMock
 
 	artifacts *fakeArtifacts
 }
 
-func (f *fakeToolContext) FunctionCallID() string         { return "test-call-id" }
-func (f *fakeToolContext) Actions() *session.EventActions { return &session.EventActions{} }
-func (f *fakeToolContext) SearchMemory(context.Context, string) (*memory.SearchResponse, error) {
-	return nil, errors.New("not implemented")
-}
-func (f *fakeToolContext) ToolConfirmation() *toolconfirmation.ToolConfirmation { return nil }
-func (f *fakeToolContext) RequestConfirmation(string, any) error                { return nil }
-func (f *fakeToolContext) Artifacts() agent.Artifacts                           { return f.artifacts }
-func (f *fakeToolContext) State() session.State                                 { return nil }
-func (f *fakeToolContext) UserContent() *genai.Content                          { return nil }
-func (f *fakeToolContext) InvocationID() string                                 { return "inv-1" }
-func (f *fakeToolContext) AgentName() string                                    { return "test-agent" }
-func (f *fakeToolContext) ReadonlyState() session.ReadonlyState                 { return nil }
-func (f *fakeToolContext) UserID() string                                       { return "user-1" }
-func (f *fakeToolContext) AppName() string                                      { return "test-app" }
-func (f *fakeToolContext) SessionID() string                                    { return "session-1" }
-func (f *fakeToolContext) Branch() string                                       { return "" }
+func (f *fakeToolContext) FunctionCallID() string     { return "test-call-id" }
+func (f *fakeToolContext) Artifacts() agent.Artifacts { return f.artifacts }
 
-var _ agent.ToolContext = (*fakeToolContext)(nil)
+var _ agent.Context = (*fakeToolContext)(nil)
 
 func newFakeToolCtx(arts *fakeArtifacts) *fakeToolContext {
-	return &fakeToolContext{Context: context.Background(), artifacts: arts}
+	return &fakeToolContext{
+		StrictContextMock: agent.StrictContextMock{Ctx: context.Background()},
+		artifacts:         arts,
+	}
 }
 
 func completedInvokeOutput(s3URI string) *bedrockruntime.GetAsyncInvokeOutput {

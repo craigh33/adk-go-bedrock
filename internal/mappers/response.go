@@ -12,7 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	brdoc "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
-	"google.golang.org/adk/model"
+	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 )
 
@@ -24,6 +24,8 @@ const (
 	customMetadataKeyGuardrailTrace                = "bedrock_guardrail_trace"
 	customMetadataKeyPromptRouter                  = "bedrock_prompt_router"
 	customMetadataKeySafetyRatings                 = "safety_ratings"
+	// AWS Bedrock bills CacheWrite separately so this is needed to pass it through.
+	customMetadataKeyCacheWriteInputTokens = "bedrock_cache_write_input_tokens" //nolint:gosec // G101: This key relates to LLM tokens not secrets
 
 	rankLow    = 1
 	rankMedium = 2
@@ -58,7 +60,7 @@ func MessageToGenaiContent(m *types.Message) (*genai.Content, error) {
 	}
 	role := "model"
 	if m.Role == types.ConversationRoleUser {
-		role = "user"
+		role = genaiRoleUser
 	}
 	var parts []*genai.Part
 	for _, b := range m.Content {
@@ -496,6 +498,9 @@ func StreamMetadataToCustomMetadata(meta *types.ConverseStreamMetadataEvent) map
 			md[customMetadataKeySafetyRatings] = ratings
 		}
 	}
+	if meta.Usage != nil && meta.Usage.CacheWriteInputTokens != nil && *meta.Usage.CacheWriteInputTokens > 0 {
+		md[customMetadataKeyCacheWriteInputTokens] = *meta.Usage.CacheWriteInputTokens
+	}
 	if meta.ServiceTier != nil {
 		md["bedrock_service_tier"] = *meta.ServiceTier
 	}
@@ -513,6 +518,9 @@ func customMetadataFromConverseOutput(out *bedrockruntime.ConverseOutput) map[st
 		return nil
 	}
 	md := map[string]any{}
+	if out.Usage != nil && out.Usage.CacheWriteInputTokens != nil && *out.Usage.CacheWriteInputTokens > 0 {
+		md[customMetadataKeyCacheWriteInputTokens] = *out.Usage.CacheWriteInputTokens
+	}
 	if out.AdditionalModelResponseFields != nil {
 		md[customMetadataKeyAdditionalModelResponseFields] = out.AdditionalModelResponseFields
 	}
@@ -884,7 +892,7 @@ func videoMIMEFromFormat(f types.VideoFormat) (string, error) {
 	case types.VideoFormatMov:
 		return "video/quicktime", nil
 	case types.VideoFormatMp4:
-		return "video/mp4", nil
+		return mimeVideoMP4, nil
 	case types.VideoFormatWebm:
 		return "video/webm", nil
 	case types.VideoFormatFlv:

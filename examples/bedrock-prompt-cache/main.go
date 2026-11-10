@@ -14,13 +14,14 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
-	"google.golang.org/adk/model"
+	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
+	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
 	"github.com/craigh33/adk-go-bedrock/examples/internal/exampletrace"
 )
 
@@ -46,7 +47,7 @@ Guidelines:
 - Structure long answers with headings so they are easy to scan
 `, 20)
 
-func ask(ctx context.Context, llm model.LLM, question string) (*genai.GenerateContentResponseUsageMetadata, error) {
+func ask(ctx context.Context, llm model.LLM, question string) (*model.LLMResponse, error) {
 	req := &model.LLMRequest{
 		Contents: []*genai.Content{
 			{
@@ -56,12 +57,16 @@ func ask(ctx context.Context, llm model.LLM, question string) (*genai.GenerateCo
 		},
 		Config: &genai.GenerateContentConfig{
 			SystemInstruction: &genai.Content{
-				Parts: []*genai.Part{{Text: largeSystemPrompt}},
+				Parts: []*genai.Part{
+					{Text: largeSystemPrompt},
+					// Changes every request, so it is sent after the cache point.
+					converse.DynamicSystemPart("Current time: " + time.Now().Format(time.RFC3339)),
+				},
 			},
 		},
 	}
 
-	var usage *genai.GenerateContentResponseUsageMetadata
+	var usage *model.LLMResponse
 	for resp, err := range llm.GenerateContent(ctx, req, false) {
 		if err != nil {
 			return nil, fmt.Errorf("generate: %w", err)
@@ -77,18 +82,21 @@ func ask(ctx context.Context, llm model.LLM, question string) (*genai.GenerateCo
 			}
 		}
 		if resp.UsageMetadata != nil {
-			usage = resp.UsageMetadata
+			usage = resp
 		}
 	}
 	return usage, nil
 }
 
-func printUsage(label string, u *genai.GenerateContentResponseUsageMetadata) {
-	if u == nil {
+func printUsage(label string, resp *model.LLMResponse) {
+	if resp == nil || resp.UsageMetadata == nil {
 		return
 	}
-	fmt.Printf("[%s] prompt=%d  candidates=%d  fromCache=%d total=%d tokens\n",
-		label, u.PromptTokenCount, u.CandidatesTokenCount, u.CachedContentTokenCount, u.TotalTokenCount)
+	u := resp.UsageMetadata
+	// genai has no cache-write field, so the provider passes it through CustomMetadata.
+	cacheWrite, _ := resp.CustomMetadata["bedrock_cache_write_input_tokens"].(int32)
+	fmt.Printf("[%s] prompt=%d  candidates=%d  fromCache=%d toCache=%d total=%d tokens\n",
+		label, u.PromptTokenCount, u.CandidatesTokenCount, u.CachedContentTokenCount, cacheWrite, u.TotalTokenCount)
 }
 
 func main() {
@@ -119,12 +127,12 @@ func main() {
 	defer func() { _ = shutdownTP(context.Background()) }()
 
 	br := bedrockruntime.NewFromConfig(awsCfg)
-	runtimeAPI := bedrock.NewRuntimeAPI(br, bedrock.WithTracerProvider(tp))
+	runtimeAPI := converse.NewRuntimeAPI(br, converse.WithTracerProvider(tp))
 
 	// WithCacheSystemPrompt appends a CachePoint block after the system prompt
 	// on every request. Bedrock caches everything up to that marker, so
 	// subsequent requests pay (90%) less for those tokens.
-	llm, err := bedrock.NewWithAPI(modelID, runtimeAPI, bedrock.WithCacheSystemPrompt())
+	llm, err := converse.NewWithAPI(modelID, runtimeAPI, converse.WithCacheSystemPrompt())
 	if err != nil {
 		log.Fatalf("create bedrock model: %v", err) //nolint:gocritic // This is just an example
 	}
