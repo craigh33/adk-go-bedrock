@@ -34,7 +34,7 @@ var _ memory.Service = (*Service)(nil)
 
 // Service implements [memory.Service] against an AgentCore Memory resource.
 type Service struct {
-	api AgentCoreMemoryAPI
+	api API
 	cfg Config
 }
 
@@ -115,7 +115,9 @@ func (s *Service) SearchMemory(ctx context.Context, req *memory.SearchRequest) (
 
 	switch {
 	case s.cfg.NamespacePath != "":
-		in.NamespacePath = aws.String(memorymappers.ResolveNamespace(s.cfg.NamespacePath, req.AppName, req.UserID, actorID))
+		in.NamespacePath = aws.String(
+			memorymappers.ResolveNamespace(s.cfg.NamespacePath, req.AppName, req.UserID, actorID),
+		)
 	case s.cfg.Namespace != "":
 		in.Namespace = aws.String(memorymappers.ResolveNamespace(s.cfg.Namespace, req.AppName, req.UserID, actorID))
 	default:

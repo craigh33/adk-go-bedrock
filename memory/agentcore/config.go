@@ -13,9 +13,9 @@ import (
 
 const defaultActorIDTemplate = "{userId}"
 
-// AgentCoreMemoryAPI is the subset of Bedrock AgentCore operations used by this package.
+// API is the subset of Bedrock AgentCore operations used by this package.
 // The concrete [bedrockagentcore.Client] satisfies it directly.
-type AgentCoreMemoryAPI interface {
+type API interface {
 	CreateEvent(
 		ctx context.Context,
 		params *bedrockagentcore.CreateEventInput,
@@ -93,9 +93,9 @@ func NewWithAWSConfig(awsCfg aws.Config, cfg *Config) (*Service, error) {
 }
 
 // NewWithAPI wires a [Service] to an existing AgentCore client.
-func NewWithAPI(api AgentCoreMemoryAPI, cfg *Config) (*Service, error) {
+func NewWithAPI(api API, cfg *Config) (*Service, error) {
 	if api == nil {
-		return nil, errors.New("agentcorememory: AgentCoreMemoryAPI is required")
+		return nil, errors.New("agentcorememory: API is required")
 	}
 	if cfg == nil {
 		return nil, errors.New("agentcorememory: config is required")
