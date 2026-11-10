@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -56,7 +57,11 @@ func ask(ctx context.Context, llm model.LLM, question string) (*model.LLMRespons
 		},
 		Config: &genai.GenerateContentConfig{
 			SystemInstruction: &genai.Content{
-				Parts: []*genai.Part{{Text: largeSystemPrompt}},
+				Parts: []*genai.Part{
+					{Text: largeSystemPrompt},
+					// Changes every request, so it is sent after the cache point.
+					converse.DynamicSystemPart("Current time: " + time.Now().Format(time.RFC3339)),
+				},
 			},
 		},
 	}

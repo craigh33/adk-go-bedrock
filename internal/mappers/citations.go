@@ -11,6 +11,10 @@ import (
 // PartMetadataKeyBedrockCitations is set on genai.Part.PartMetadata for citation segments.
 const PartMetadataKeyBedrockCitations = "bedrock_citations"
 
+// PartMetadataKeyAfterCachePoint marks a system part whose text changes between
+// requests. These parts are sent after the system prompt cache point.
+const PartMetadataKeyAfterCachePoint = "bedrock_after_cache_point"
+
 const (
 	citationMapKeyType  = "type"
 	citationMapKeyValue = "value"

@@ -12,6 +12,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime"
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/types"
+	"github.com/aws/smithy-go"
 	"github.com/google/uuid"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/session"
@@ -122,6 +123,53 @@ func TestDeleteEndsBeforeDeleteAndMissingIsOK(t *testing.T) {
 	}
 }
 
+func TestGetSessionErrors(t *testing.T) {
+	tests := []struct {
+		name         string
+		err          error
+		wantNotFound bool
+	}{
+		{name: "missing", err: notFound("session"), wantNotFound: true},
+		{name: "wrapped missing", err: fmt.Errorf("request: %w", notFound("session")), wantNotFound: true},
+		{
+			name:         "generic missing",
+			err:          &smithy.GenericAPIError{Code: "ResourceNotFoundException", Message: "session"},
+			wantNotFound: true,
+		},
+		{name: "access denied", err: &brtypes.AccessDeniedException{Message: new("denied")}},
+		{name: "backend failure", err: errors.New("backend unavailable")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, err := NewWithAPI(&getSessionErrorAPI{fakeAPI: newFakeAPI(), err: tt.err}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = svc.Get(t.Context(), &session.GetRequest{AppName: "app", UserID: "user", SessionID: "missing"})
+			if errors.Is(err, session.ErrNotFound) != tt.wantNotFound {
+				t.Errorf("Get error = %v, want ErrNotFound = %v", err, tt.wantNotFound)
+			}
+			if !errors.Is(err, tt.err) {
+				t.Errorf("Get error = %v, want original error %v preserved", err, tt.err)
+			}
+		})
+	}
+}
+
+type getSessionErrorAPI struct {
+	*fakeAPI
+
+	err error
+}
+
+func (f *getSessionErrorAPI) GetSession(
+	context.Context,
+	*bedrockagentruntime.GetSessionInput,
+	...func(*bedrockagentruntime.Options),
+) (*bedrockagentruntime.GetSessionOutput, error) {
+	return nil, f.err
+}
+
 func TestWrongUserCannotAppend(t *testing.T) {
 	ctx := context.Background()
 	api := newFakeAPI()
@@ -137,6 +185,9 @@ func TestWrongUserCannotAppend(t *testing.T) {
 	err = svc.AppendEvent(ctx, wrong, &session.Event{ID: "event-1", InvocationID: "inv-1", Author: "user"})
 	if err == nil {
 		t.Fatal("expected wrong-user append error")
+	}
+	if errors.Is(err, session.ErrNotFound) {
+		t.Fatalf("wrong-user append error = %v, want an ownership error", err)
 	}
 }
 

@@ -42,7 +42,7 @@ func MaybeAppendUserContent(contents []*genai.Content) []*genai.Content {
 func ConverseInputFromLLMRequest(
 	modelID string,
 	req *model.LLMRequest,
-	cacheSystemPrompt bool,
+	cachePoint *types.CachePointBlock,
 ) (*bedrockruntime.ConverseInput, error) {
 	if req == nil {
 		return nil, errors.New("nil LLMRequest")
@@ -55,7 +55,7 @@ func ConverseInputFromLLMRequest(
 	contents := MaybeAppendUserContent(append([]*genai.Content(nil), req.Contents...))
 
 	sysFromContents, msgsFromContents := splitContents(contents)
-	system := buildSystemBlocks(cfg, sysFromContents, cacheSystemPrompt)
+	system := buildSystemBlocks(cfg, sysFromContents, cachePoint)
 
 	messages, err := contentsToMessages(msgsFromContents)
 	if err != nil {
@@ -100,9 +100,9 @@ func ConverseInputFromLLMRequest(
 func ConverseStreamInputFromLLMRequest(
 	modelID string,
 	req *model.LLMRequest,
-	cacheSystemPrompt bool,
+	cachePoint *types.CachePointBlock,
 ) (*bedrockruntime.ConverseStreamInput, error) {
-	conv, err := ConverseInputFromLLMRequest(modelID, req, cacheSystemPrompt)
+	conv, err := ConverseInputFromLLMRequest(modelID, req, cachePoint)
 	if err != nil {
 		return nil, err
 	}
@@ -123,56 +123,76 @@ func ConverseStreamInputFromLLMRequest(
 	}, nil
 }
 
+// buildSystemBlocks puts tagged parts after the cache point,
+// so text that changes each request doesn't break the cache.
 func buildSystemBlocks(
 	cfg *genai.GenerateContentConfig,
-	extra []types.SystemContentBlock,
-	cacheSystemPrompt bool,
+	extra []*genai.Part,
+	cachePoint *types.CachePointBlock,
 ) []types.SystemContentBlock {
-	var blocks []types.SystemContentBlock
+	var parts []*genai.Part
 	if cfg != nil && cfg.SystemInstruction != nil {
-		for _, part := range cfg.SystemInstruction.Parts {
-			if part == nil || part.Text == "" {
-				continue
-			}
-			blocks = append(blocks, &types.SystemContentBlockMemberText{Value: part.Text})
+		parts = append(parts, cfg.SystemInstruction.Parts...)
+	}
+	parts = append(parts, extra...)
+
+	// No caching, so keep the order as given.
+	if cachePoint == nil {
+		return textBlocks(parts)
+	}
+	before, after := splitAtCachePoint(parts)
+	blocks := textBlocks(before)
+	if len(blocks) > 0 {
+		blocks = append(blocks, &types.SystemContentBlockMemberCachePoint{Value: *cachePoint})
+	}
+	return append(blocks, textBlocks(after)...)
+}
+
+// splitAtCachePoint pulls out the tagged parts. Order is kept in both lists.
+func splitAtCachePoint(parts []*genai.Part) ([]*genai.Part, []*genai.Part) {
+	var before, after []*genai.Part
+	for _, p := range parts {
+		if isAfterCachePoint(p) {
+			after = append(after, p)
+		} else {
+			before = append(before, p)
 		}
 	}
-	blocks = append(blocks, extra...)
-	if cacheSystemPrompt && len(blocks) > 0 {
-		blocks = append(blocks, &types.SystemContentBlockMemberCachePoint{
-			Value: types.CachePointBlock{Type: types.CachePointTypeDefault},
-		})
+	return before, after
+}
+
+func isAfterCachePoint(p *genai.Part) bool {
+	if p == nil {
+		return false
+	}
+	tagged, _ := p.PartMetadata[PartMetadataKeyAfterCachePoint].(bool)
+	return tagged
+}
+
+func textBlocks(parts []*genai.Part) []types.SystemContentBlock {
+	var blocks []types.SystemContentBlock
+	for _, p := range parts {
+		if p != nil && p.Text != "" {
+			blocks = append(blocks, &types.SystemContentBlockMemberText{Value: p.Text})
+		}
 	}
 	return blocks
 }
 
-func splitContents(contents []*genai.Content) ([]types.SystemContentBlock, []*genai.Content) {
-	var system []types.SystemContentBlock
+func splitContents(contents []*genai.Content) ([]*genai.Part, []*genai.Content) {
+	var system []*genai.Part
 	var rest []*genai.Content
 	for _, c := range contents {
 		if c == nil {
 			continue
 		}
 		if c.Role == genaiRoleSystem {
-			system = append(system, contentToSystemBlocks(c)...)
+			system = append(system, c.Parts...)
 			continue
 		}
 		rest = append(rest, c)
 	}
 	return system, rest
-}
-
-func contentToSystemBlocks(c *genai.Content) []types.SystemContentBlock {
-	var blocks []types.SystemContentBlock
-	for _, p := range c.Parts {
-		if p == nil {
-			continue
-		}
-		if p.Text != "" {
-			blocks = append(blocks, &types.SystemContentBlockMemberText{Value: p.Text})
-		}
-	}
-	return blocks
 }
 
 func mapConversationRole(genaiRole string) (types.ConversationRole, error) {
