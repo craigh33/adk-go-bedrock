@@ -12,6 +12,8 @@ import (
 	"google.golang.org/adk/v2/memory"
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
+
+	memorymappers "github.com/craigh33/adk-go-bedrock/internal/mappers/agentcore/memory"
 )
 
 // fakeAPI is a test double for the AgentCore Memory API.
@@ -129,7 +131,7 @@ func TestAddSessionToMemory(t *testing.T) {
 		if content == nil {
 			content = ev.LLMResponse.Content
 		}
-		if textFromContent(content) != "" {
+		if memorymappers.TextFromContent(content) != "" {
 			srcIDs = append(srcIDs, ev.ID)
 		}
 	}

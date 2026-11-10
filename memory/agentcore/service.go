@@ -26,6 +26,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore/types"
 	"google.golang.org/adk/v2/memory"
 	"google.golang.org/adk/v2/session"
+
+	memorymappers "github.com/craigh33/adk-go-bedrock/internal/mappers/agentcore/memory"
 )
 
 var _ memory.Service = (*Service)(nil)
@@ -46,14 +48,14 @@ func (s *Service) AddSessionToMemory(ctx context.Context, sess session.Session) 
 	if sess == nil {
 		return errors.New("agentcorememory: session is nil")
 	}
-	actorID := resolveActor(s.cfg.ActorIDTemplate, sess.AppName(), sess.UserID())
+	actorID := memorymappers.ResolveActor(s.cfg.ActorIDTemplate, sess.AppName(), sess.UserID())
 
 	for event := range sess.Events().All() {
 		content := event.Content
 		if content == nil {
 			content = event.LLMResponse.Content
 		}
-		text := textFromContent(content)
+		text := memorymappers.TextFromContent(content)
 		if text == "" {
 			continue
 		}
@@ -61,16 +63,16 @@ func (s *Service) AddSessionToMemory(ctx context.Context, sess session.Session) 
 			MemoryId:       aws.String(s.cfg.MemoryID),
 			ActorId:        aws.String(actorID),
 			SessionId:      aws.String(sess.ID()),
-			EventTimestamp: aws.Time(eventTimestamp(event, sess)),
+			EventTimestamp: aws.Time(memorymappers.EventTimestamp(event, sess)),
 			Payload: []types.PayloadType{
 				&types.PayloadTypeMemberConversational{
 					Value: types.Conversational{
 						Content: &types.ContentMemberText{Value: text},
-						Role:    toAgentCoreRole(content),
+						Role:    memorymappers.ToAgentCoreRole(content),
 					},
 				},
 			},
-			Metadata: eventMetadata(sess, event),
+			Metadata: memorymappers.EventMetadata(sess, event),
 		}
 		if event.ID != "" {
 			in.ClientToken = aws.String(event.ID)
@@ -92,7 +94,7 @@ func (s *Service) SearchMemory(ctx context.Context, req *memory.SearchRequest) (
 	if req == nil {
 		return nil, errors.New("agentcorememory: search request is nil")
 	}
-	actorID := resolveActor(s.cfg.ActorIDTemplate, req.AppName, req.UserID)
+	actorID := memorymappers.ResolveActor(s.cfg.ActorIDTemplate, req.AppName, req.UserID)
 
 	in := &bedrockagentcore.RetrieveMemoryRecordsInput{
 		MemoryId: aws.String(s.cfg.MemoryID),
@@ -113,9 +115,9 @@ func (s *Service) SearchMemory(ctx context.Context, req *memory.SearchRequest) (
 
 	switch {
 	case s.cfg.NamespacePath != "":
-		in.NamespacePath = aws.String(resolveNamespace(s.cfg.NamespacePath, req.AppName, req.UserID, actorID))
+		in.NamespacePath = aws.String(memorymappers.ResolveNamespace(s.cfg.NamespacePath, req.AppName, req.UserID, actorID))
 	case s.cfg.Namespace != "":
-		in.Namespace = aws.String(resolveNamespace(s.cfg.Namespace, req.AppName, req.UserID, actorID))
+		in.Namespace = aws.String(memorymappers.ResolveNamespace(s.cfg.Namespace, req.AppName, req.UserID, actorID))
 	default:
 		return nil, errors.New("agentcorememory: Namespace or NamespacePath is required to search")
 	}
@@ -127,7 +129,7 @@ func (s *Service) SearchMemory(ctx context.Context, req *memory.SearchRequest) (
 
 	res := &memory.SearchResponse{Memories: make([]memory.Entry, 0, len(out.MemoryRecordSummaries))}
 	for _, rec := range out.MemoryRecordSummaries {
-		res.Memories = append(res.Memories, recordToEntry(rec))
+		res.Memories = append(res.Memories, memorymappers.RecordToEntry(rec))
 	}
 	return res, nil
 }

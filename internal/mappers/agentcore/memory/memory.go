@@ -1,4 +1,4 @@
-package agentcorememory
+package memory
 
 import (
 	"strings"
@@ -6,23 +6,23 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore/types"
-	"google.golang.org/adk/v2/memory"
+	adkmemory "google.golang.org/adk/v2/memory"
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 )
 
-// resolveActor maps ADK identity to an AgentCore actor id using template. It
+// ResolveActor maps ADK identity to an AgentCore actor id using template. It
 // supports the {userId} and {appName} placeholders.
-func resolveActor(template, appName, userID string) string {
+func ResolveActor(template, appName, userID string) string {
 	return strings.NewReplacer(
 		"{userId}", userID,
 		"{appName}", appName,
 	).Replace(template)
 }
 
-// resolveNamespace substitutes the {actorId}, {userId} and {appName} placeholders
+// ResolveNamespace substitutes the {actorId}, {userId} and {appName} placeholders
 // in an AgentCore namespace (or namespace path).
-func resolveNamespace(template, appName, userID, actorID string) string {
+func ResolveNamespace(template, appName, userID, actorID string) string {
 	return strings.NewReplacer(
 		"{actorId}", actorID,
 		"{userId}", userID,
@@ -30,11 +30,11 @@ func resolveNamespace(template, appName, userID, actorID string) string {
 	).Replace(template)
 }
 
-// textFromContent concatenates the text of all textual parts of c, separating
+// TextFromContent concatenates the text of all textual parts of c, separating
 // non-empty parts with a newline. It returns "" when c is nil or carries no text
 // (for example a bare function call/response), signalling the event should be
 // skipped.
-func textFromContent(c *genai.Content) string {
+func TextFromContent(c *genai.Content) string {
 	if c == nil {
 		return ""
 	}
@@ -51,8 +51,8 @@ func textFromContent(c *genai.Content) string {
 	return b.String()
 }
 
-// toAgentCoreRole maps a genai content role to an AgentCore conversational role.
-func toAgentCoreRole(c *genai.Content) types.Role {
+// ToAgentCoreRole maps a genai content role to an AgentCore conversational role.
+func ToAgentCoreRole(c *genai.Content) types.Role {
 	if c == nil {
 		return types.RoleOther
 	}
@@ -66,10 +66,10 @@ func toAgentCoreRole(c *genai.Content) types.Role {
 	}
 }
 
-// eventTimestamp returns the timestamp to record for event, falling back to the
+// EventTimestamp returns the timestamp to record for event, falling back to the
 // session's last-update time and finally the current time. AgentCore requires a
 // non-nil EventTimestamp.
-func eventTimestamp(event *session.Event, sess session.Session) time.Time {
+func EventTimestamp(event *session.Event, sess session.Session) time.Time {
 	if !event.Timestamp.IsZero() {
 		return event.Timestamp
 	}
@@ -79,8 +79,8 @@ func eventTimestamp(event *session.Event, sess session.Session) time.Time {
 	return time.Now()
 }
 
-// eventMetadata attaches ADK identifiers to an AgentCore event for traceability.
-func eventMetadata(sess session.Session, event *session.Event) map[string]types.MetadataValue {
+// EventMetadata attaches ADK identifiers to an AgentCore event for traceability.
+func EventMetadata(sess session.Session, event *session.Event) map[string]types.MetadataValue {
 	md := map[string]types.MetadataValue{
 		"app_name":   &types.MetadataValueMemberStringValue{Value: sess.AppName()},
 		"user_id":    &types.MetadataValueMemberStringValue{Value: sess.UserID()},
@@ -95,11 +95,11 @@ func eventMetadata(sess session.Session, event *session.Event) map[string]types.
 	return md
 }
 
-// recordToEntry converts an AgentCore memory record summary to an ADK memory
+// RecordToEntry converts an AgentCore memory record summary to an ADK memory
 // entry. The record's relevance score, strategy and namespaces are preserved as
 // custom metadata.
-func recordToEntry(rec types.MemoryRecordSummary) memory.Entry {
-	entry := memory.Entry{
+func RecordToEntry(rec types.MemoryRecordSummary) adkmemory.Entry {
+	entry := adkmemory.Entry{
 		ID:        aws.ToString(rec.MemoryRecordId),
 		Content:   genai.NewContentFromText(memoryContentText(rec.Content), genai.RoleUser),
 		Timestamp: aws.ToTime(rec.CreatedAt),
