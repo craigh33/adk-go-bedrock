@@ -13,7 +13,7 @@ resource with `CreateEvent`, then runs an agent (with the `load_memory` /
   of band (AWS console, CLI, or the AgentCore control-plane API) — this example only
   uses the data plane.
 - `BEDROCK_MODEL_ID` — a Bedrock model ID or inference profile ARN for the agent's LLM.
-- `AGENTCORE_MEMORY_ID` — the Memory resource ID.
+- `AGENTCORE_MEMORY_ARN` — the full ARN of the Memory resource.
 - `AGENTCORE_NAMESPACE` — the namespace prefix to search, e.g. `/actors/{actorId}/facts`.
   The placeholders `{actorId}`, `{userId}` and `{appName}` are substituted per request
   (by default `{actorId}` resolves to the ADK user ID).

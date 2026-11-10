@@ -6,7 +6,7 @@
 // shared config, SSO / AWS_PROFILE, EC2/ECS/Lambda role, etc.) and set:
 //
 //	BEDROCK_MODEL_ID        Bedrock model ID or inference profile ARN (LLM)
-//	AGENTCORE_MEMORY_ID     AgentCore Memory resource ID (required)
+//	AGENTCORE_MEMORY_ARN    AgentCore Memory resource ARN (required)
 //	AGENTCORE_NAMESPACE     namespace prefix to search, e.g. /actors/{actorId}/facts (required)
 //	AGENTCORE_STRATEGY_ID   memory strategy ID to filter retrieval (optional)
 //	AWS_REGION              region of the Memory resource (optional if set on profile)
@@ -25,17 +25,17 @@ import (
 	"os"
 	"strings"
 
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/runner"
-	"google.golang.org/adk/session"
-	"google.golang.org/adk/tool"
-	"google.golang.org/adk/tool/loadmemorytool"
-	"google.golang.org/adk/tool/preloadmemorytool"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/runner"
+	"google.golang.org/adk/v2/session"
+	"google.golang.org/adk/v2/tool"
+	"google.golang.org/adk/v2/tool/loadmemorytool"
+	"google.golang.org/adk/v2/tool/preloadmemorytool"
 	"google.golang.org/genai"
 
-	"github.com/craigh33/adk-go-bedrock/bedrock"
-	"github.com/craigh33/adk-go-bedrock/memory/agentcore"
+	bedrock "github.com/craigh33/adk-go-bedrock/bedrock/converse"
+	agentcorememory "github.com/craigh33/adk-go-bedrock/memory/agentcore"
 )
 
 func main() {
@@ -49,9 +49,9 @@ func main() {
 		modelID = "eu.amazon.nova-2-lite-v1:0"
 	}
 
-	memoryID := strings.TrimSpace(os.Getenv("AGENTCORE_MEMORY_ID"))
-	if memoryID == "" {
-		log.Fatal("AGENTCORE_MEMORY_ID is required (the AgentCore Memory resource ID)")
+	memoryARN := strings.TrimSpace(os.Getenv("AGENTCORE_MEMORY_ARN"))
+	if memoryARN == "" {
+		log.Fatal("AGENTCORE_MEMORY_ARN is required (the AgentCore Memory resource ARN)")
 	}
 	namespace := strings.TrimSpace(os.Getenv("AGENTCORE_NAMESPACE"))
 	if namespace == "" {
@@ -63,8 +63,8 @@ func main() {
 		log.Fatalf("bedrock model: %v", err)
 	}
 
-	memSvc, err := agentcore.New(ctx, &agentcore.Config{
-		MemoryID:   memoryID,
+	memSvc, err := agentcorememory.New(ctx, &agentcorememory.Config{
+		MemoryID:   memoryARN,
 		Region:     region,
 		Namespace:  namespace,
 		StrategyID: strings.TrimSpace(os.Getenv("AGENTCORE_STRATEGY_ID")),
@@ -165,7 +165,7 @@ func seedPriorSession(ctx context.Context, svc session.Service, appName, userID 
 		{"user", "I went up Tokyo Skytree and saw Mount Fuji in the distance."},
 	}
 	for _, turn := range turns {
-		ev := session.NewEvent("prior-session")
+		ev := session.NewEvent(ctx, "prior-session")
 		ev.Author = turn.author
 		ev.Content = genai.NewContentFromText(turn.content, genai.Role(turn.author))
 		if err := svc.AppendEvent(ctx, s, ev); err != nil {

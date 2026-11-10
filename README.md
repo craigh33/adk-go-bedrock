@@ -94,14 +94,14 @@ make -C examples/bedrock-stream run
 
 ## Memory
 
-The [`memory/agentcore`](memory/agentcore) package implements ADK's [`memory.Service`](https://pkg.go.dev/google.golang.org/adk/memory#Service) on top of **Amazon Bedrock AgentCore Memory**, the AWS analogue of ADK's Vertex AI MemoryBank adapter. Wire it into [`runner.Config.MemoryService`](https://pkg.go.dev/google.golang.org/adk/runner#Config) so agents can persist conversation events and recall long-term memory across sessions.
+The [`memory/agentcore`](memory/agentcore) package (imported as `agentcorememory`) implements ADK's [`memory.Service`](https://pkg.go.dev/google.golang.org/adk/v2/memory#Service) on top of **Amazon Bedrock AgentCore Memory**, the AWS analogue of ADK's Vertex AI MemoryBank adapter. Wire it into [`runner.Config.MemoryService`](https://pkg.go.dev/google.golang.org/adk/v2/runner#Config) so agents can persist conversation events and recall long-term memory across sessions.
 
 - `AddSessionToMemory` writes each text-bearing session event to the Memory resource with `CreateEvent` (mapping the ADK user to an AgentCore actor and the session to an AgentCore session).
 - `SearchMemory` retrieves relevant records with `RetrieveMemoryRecords` and maps them back to `memory.Entry` values.
 
 ```go
-memSvc, err := agentcore.New(ctx, &agentcore.Config{
-    MemoryID:  os.Getenv("AGENTCORE_MEMORY_ID"), // required
+memSvc, err := agentcorememory.New(ctx, &agentcorememory.Config{
+    MemoryID:  os.Getenv("AGENTCORE_MEMORY_ARN"), // required AgentCore Memory ARN
     Region:    os.Getenv("AWS_REGION"),
     Namespace: "/actors/{actorId}/facts",        // required to search; must match your strategy
     TopK:      5,
@@ -118,7 +118,7 @@ r, err := runner.New(runner.Config{
 })
 ```
 
-The AgentCore Memory resource and its strategies must be provisioned out of band, and callers need IAM permission for `bedrock-agentcore:CreateEvent` and `bedrock-agentcore:RetrieveMemoryRecords`. **Long-term memory extraction is asynchronous**, so events written by `AddSessionToMemory` are not immediately returned by `SearchMemory`. A runnable program lives at [`examples/bedrock-agentcore-memory`](examples/bedrock-agentcore-memory).
+The AgentCore Memory resource and its strategies must be provisioned out of band, and callers need IAM permission for `bedrock-agentcore:CreateEvent` and `bedrock-agentcore:RetrieveMemoryRecords`. **Long-term memory extraction is asynchronous**, so events written by `AddSessionToMemory` are not immediately returned by `SearchMemory`. See [`memory/agentcore/README.md`](memory/agentcore/README.md) for setup details and the runnable program at [`examples/bedrock-agentcore-memory`](examples/bedrock-agentcore-memory).
 
 ## How it maps to Bedrock
 

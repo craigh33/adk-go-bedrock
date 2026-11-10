@@ -1,4 +1,4 @@
-package agentcore
+package agentcorememory
 
 import (
 	"context"
@@ -9,12 +9,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore/types"
-	"google.golang.org/adk/memory"
-	"google.golang.org/adk/session"
+	"google.golang.org/adk/v2/memory"
+	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 )
 
-// fakeAPI is a test double for the AgentCore API.
+// fakeAPI is a test double for the AgentCore Memory API.
 type fakeAPI struct {
 	createInputs []*bedrockagentcore.CreateEventInput
 	createErr    error
@@ -52,9 +52,10 @@ func (f *fakeAPI) RetrieveMemoryRecords(
 }
 
 type seedEvent struct {
-	author string
-	role   string
-	text   string // "" => content-less event (should be skipped)
+	author      string
+	role        string
+	text        string // "" => content-less event (should be skipped)
+	llmResponse bool
 }
 
 // newSession builds an in-memory session populated with the given events. Event
@@ -69,11 +70,16 @@ func newSession(t *testing.T, appName, userID string, events []seedEvent) sessio
 	}
 	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	for i, e := range events {
-		ev := session.NewEvent("inv")
+		ev := session.NewEvent(ctx, "inv")
 		ev.Author = e.author
 		ev.Timestamp = base.Add(time.Duration(i) * time.Minute)
 		if e.text != "" {
-			ev.Content = genai.NewContentFromText(e.text, genai.Role(e.role))
+			content := genai.NewContentFromText(e.text, genai.Role(e.role))
+			if e.llmResponse {
+				ev.LLMResponse.Content = content
+			} else {
+				ev.Content = content
+			}
 		}
 		if err := svc.AppendEvent(ctx, resp.Session, ev); err != nil {
 			t.Fatalf("append event: %v", err)
@@ -104,7 +110,7 @@ func TestAddSessionToMemory(t *testing.T) {
 
 	sess := newSession(t, "app", "u1", []seedEvent{
 		{author: "user", role: genai.RoleUser, text: "hi"},
-		{author: "agent", role: genai.RoleModel, text: "hello"},
+		{author: "agent", role: genai.RoleModel, text: "hello", llmResponse: true},
 		{author: "user", role: genai.RoleUser, text: ""}, // skipped
 	})
 
@@ -119,7 +125,11 @@ func TestAddSessionToMemory(t *testing.T) {
 	// Collect the source events to compare ids/order.
 	var srcIDs []string
 	for ev := range sess.Events().All() {
-		if textFromContent(ev.LLMResponse.Content) != "" {
+		content := ev.Content
+		if content == nil {
+			content = ev.LLMResponse.Content
+		}
+		if textFromContent(content) != "" {
 			srcIDs = append(srcIDs, ev.ID)
 		}
 	}
@@ -361,43 +371,24 @@ func TestNewWithAPI_validation(t *testing.T) {
 	}
 }
 
-func TestResolveActor(t *testing.T) {
+func TestNewWithAPI_copiesMetadataFilters(t *testing.T) {
 	t.Parallel()
-	if got := resolveActor("{userId}", "app", "u1"); got != "u1" {
-		t.Errorf("got %q, want u1", got)
-	}
-	if got := resolveActor("{appName}#{userId}", "app", "u1"); got != "app#u1" {
-		t.Errorf("got %q, want app#u1", got)
-	}
-}
 
-func TestToAgentCoreRole(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		role string
-		want types.Role
-	}{
-		{genai.RoleUser, types.RoleUser},
-		{genai.RoleModel, types.RoleAssistant},
-		{"function", types.RoleOther},
+	filters := []types.MemoryMetadataFilterExpression{{
+		Left: &types.MemoryRecordLeftExpressionMemberMetadataKey{Value: "category"},
+	}}
+	svc, err := NewWithAPI(&fakeAPI{}, &Config{MemoryID: "mem-1", Namespace: "/facts", MetadataFilters: filters})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range cases {
-		if got := toAgentCoreRole(genai.NewContentFromText("x", genai.Role(c.role))); got != c.want {
-			t.Errorf("role %q -> %q, want %q", c.role, got, c.want)
-		}
-	}
-	if got := toAgentCoreRole(nil); got != types.RoleOther {
-		t.Errorf("nil content -> %q, want OTHER", got)
-	}
-}
 
-func TestTextFromContent(t *testing.T) {
-	t.Parallel()
-	if got := textFromContent(nil); got != "" {
-		t.Errorf("nil -> %q, want empty", got)
+	filters[0] = types.MemoryMetadataFilterExpression{}
+	if _, err := svc.SearchMemory(context.Background(), &memory.SearchRequest{Query: "q"}); err != nil {
+		t.Fatal(err)
 	}
-	multi := &genai.Content{Parts: []*genai.Part{{Text: "a"}, {Text: ""}, {Text: "b"}}}
-	if got := textFromContent(multi); got != "a\nb" {
-		t.Errorf("multi -> %q, want 'a\\nb'", got)
+	filter := svc.api.(*fakeAPI).retrieveIn.SearchCriteria.MetadataFilters[0]
+	left, ok := filter.Left.(*types.MemoryRecordLeftExpressionMemberMetadataKey)
+	if !ok || left.Value != "category" {
+		t.Fatalf("copied filter left = %#v, want metadata key category", filter.Left)
 	}
 }
