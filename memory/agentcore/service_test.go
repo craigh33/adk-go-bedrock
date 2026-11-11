@@ -62,11 +62,11 @@ type seedEvent struct {
 
 // newSession builds an in-memory session populated with the given events. Event
 // timestamps are set deterministically so assertions are stable.
-func newSession(t *testing.T, appName, userID string, events []seedEvent) session.Session {
+func newSession(t *testing.T, req session.CreateRequest, events []seedEvent) session.Session {
 	t.Helper()
 	ctx := context.Background()
 	svc := session.InMemoryService()
-	resp, err := svc.Create(ctx, &session.CreateRequest{AppName: appName, UserID: userID})
+	resp, err := svc.Create(ctx, &req)
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -105,12 +105,12 @@ func conversational(t *testing.T, in *bedrockagentcore.CreateEventInput) types.C
 func TestAddSessionToMemory(t *testing.T) {
 	t.Parallel()
 	api := &fakeAPI{}
-	svc, err := NewWithAPI(api, &Config{MemoryID: "mem-1"})
+	svc, err := NewWithAPI(api, "mem-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	sess := newSession(t, "app", "u1", []seedEvent{
+	sess := newSession(t, session.CreateRequest{AppName: "app", UserID: "u1"}, []seedEvent{
 		{author: "user", role: genai.RoleUser, text: "hi"},
 		{author: "agent", role: genai.RoleModel, text: "hello", llmResponse: true},
 		{author: "user", role: genai.RoleUser, text: ""}, // skipped
@@ -209,26 +209,70 @@ func assertMetadata(t *testing.T, md map[string]types.MetadataValue, key, want s
 func TestAddSessionToMemory_propagatesError(t *testing.T) {
 	t.Parallel()
 	api := &fakeAPI{createErr: errors.New("boom")}
-	svc, err := NewWithAPI(api, &Config{MemoryID: "mem-1"})
+	svc, err := NewWithAPI(api, "mem-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess := newSession(t, "app", "u1", []seedEvent{{author: "user", role: genai.RoleUser, text: "hi"}})
+	sess := newSession(t, session.CreateRequest{AppName: "app", UserID: "u1"}, []seedEvent{
+		{author: "user", role: genai.RoleUser, text: "hi"},
+	})
 	if err := svc.AddSessionToMemory(context.Background(), sess); err == nil {
 		t.Fatal("want error from CreateEvent, got nil")
+	}
+}
+
+func TestMemoryMapsADKIdentifiers(t *testing.T) {
+	t.Parallel()
+	const (
+		userID       = "alice@example.com"
+		sessionID    = "session:1"
+		agentActor   = "adk-id-928ce2a127dae5a1380b26a50c7db99da77166ad21342bb05859d98ae3fe25c7"
+		agentSession = "adk-id-74cf818b29b0bc453f4a7263107b1d9d828c39645dc27416d22e1a7227c681db"
+	)
+	api := &fakeAPI{}
+	svc, err := NewWithAPI(api, "mem-1",
+		WithNamespacePath("/actors/{actorId}"),
+		WithActorIDTemplate("{appName}:{userId}"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := newSession(t, session.CreateRequest{AppName: "app", UserID: userID, SessionID: sessionID}, []seedEvent{
+		{author: "user", role: genai.RoleUser, text: "hi"},
+	})
+	if err := svc.AddSessionToMemory(t.Context(), sess); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.createInputs) != 1 {
+		t.Fatalf("CreateEvent calls = %d, want 1", len(api.createInputs))
+	}
+	in := api.createInputs[0]
+	if got := aws.ToString(in.ActorId); got != agentActor {
+		t.Errorf("ActorId = %q, want %q", got, agentActor)
+	}
+	if got := aws.ToString(in.SessionId); got != agentSession {
+		t.Errorf("SessionId = %q, want %q", got, agentSession)
+	}
+	assertMetadata(t, in.Metadata, "user_id", userID)
+	assertMetadata(t, in.Metadata, "session_id", sessionID)
+
+	if _, err := svc.SearchMemory(t.Context(), &memory.SearchRequest{AppName: "app", UserID: userID}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := aws.ToString(api.retrieveIn.NamespacePath), "/actors/"+agentActor; got != want {
+		t.Errorf("NamespacePath = %q, want %q", got, want)
 	}
 }
 
 func TestSearchMemory_buildsRequest(t *testing.T) {
 	t.Parallel()
 	api := &fakeAPI{}
-	svc, err := NewWithAPI(api, &Config{
-		MemoryID:   "mem-1",
-		Namespace:  "/actors/{actorId}/facts",
-		StrategyID: "strat-1",
-		TopK:       5,
-		MaxResults: 10,
-	})
+	svc, err := NewWithAPI(api, "mem-1",
+		WithNamespace("/actors/{actorId}/facts"),
+		WithStrategyID("strat-1"),
+		WithTopK(5),
+		WithMaxResults(10),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,10 +318,10 @@ func TestSearchMemory_buildsRequest(t *testing.T) {
 func TestSearchMemory_namespacePath(t *testing.T) {
 	t.Parallel()
 	api := &fakeAPI{}
-	svc, err := NewWithAPI(api, &Config{
-		MemoryID:      "mem-1",
-		NamespacePath: "/apps/{appName}/users/{userId}",
-	})
+	svc, err := NewWithAPI(api, "mem-1",
+		WithNamespacePath("/apps/{appName}/users/{userId}"),
+		WithNamespace("/facts"),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +341,7 @@ func TestSearchMemory_namespacePath(t *testing.T) {
 func TestSearchMemory_requiresNamespace(t *testing.T) {
 	t.Parallel()
 	api := &fakeAPI{}
-	svc, err := NewWithAPI(api, &Config{MemoryID: "mem-1"})
+	svc, err := NewWithAPI(api, "mem-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +367,7 @@ func TestSearchMemory_mapsRecords(t *testing.T) {
 			},
 		},
 	}
-	svc, err := NewWithAPI(api, &Config{MemoryID: "mem-1", Namespace: "/actors/{actorId}/facts"})
+	svc, err := NewWithAPI(api, "mem-1", WithNamespace("/actors/{actorId}/facts"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,42 +399,81 @@ func TestSearchMemory_mapsRecords(t *testing.T) {
 
 func TestNewWithAPI_validation(t *testing.T) {
 	t.Parallel()
-	if _, err := NewWithAPI(nil, &Config{MemoryID: "m"}); err == nil {
+	if _, err := NewWithAPI(nil, "m"); err == nil {
 		t.Error("want error for nil api")
 	}
-	if _, err := NewWithAPI(&fakeAPI{}, nil); err == nil {
-		t.Error("want error for nil config")
-	}
-	if _, err := NewWithAPI(&fakeAPI{}, &Config{}); err == nil {
+	if _, err := NewWithAPI(&fakeAPI{}, ""); err == nil {
 		t.Error("want error for empty MemoryID")
 	}
-	svc, err := NewWithAPI(&fakeAPI{}, &Config{MemoryID: "m"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if svc.cfg.ActorIDTemplate != defaultActorIDTemplate {
-		t.Errorf("ActorIDTemplate default = %q, want %q", svc.cfg.ActorIDTemplate, defaultActorIDTemplate)
+}
+
+func TestNewWithAWSConfig_region(t *testing.T) {
+	t.Parallel()
+	const (
+		configuredRegion = "eu-west-1"
+		overrideRegion   = "eu-west-2"
+	)
+	for _, tc := range []struct {
+		name string
+		opts []Option
+		want string
+	}{
+		{name: "configured region", want: configuredRegion},
+		{name: "region override", opts: []Option{WithRegion(overrideRegion)}, want: overrideRegion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc, err := NewWithAWSConfig(aws.Config{Region: configuredRegion}, "mem-1", tc.opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client, ok := svc.api.(*bedrockagentcore.Client)
+			if !ok {
+				t.Fatalf("API = %T, want *bedrockagentcore.Client", svc.api)
+			}
+			if got := client.Options().Region; got != tc.want {
+				t.Errorf("client region = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
 func TestNewWithAPI_copiesMetadataFilters(t *testing.T) {
 	t.Parallel()
 
+	key := &types.MemoryRecordLeftExpressionMemberMetadataKey{Value: "category"}
+	values := []string{"food"}
+	value := &types.MemoryRecordMetadataValueMemberStringListValue{Value: values}
+	right := &types.MemoryRecordRightExpressionMemberMetadataValue{Value: value}
 	filters := []types.MemoryMetadataFilterExpression{{
-		Left: &types.MemoryRecordLeftExpressionMemberMetadataKey{Value: "category"},
+		Left:  key,
+		Right: right,
 	}}
-	svc, err := NewWithAPI(&fakeAPI{}, &Config{MemoryID: "mem-1", Namespace: "/facts", MetadataFilters: filters})
+	api := &fakeAPI{}
+	svc, err := NewWithAPI(api, "mem-1", WithNamespace("/facts"), WithMetadataFilters(filters))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	filters[0] = types.MemoryMetadataFilterExpression{}
+	key.Value = "region"
+	values[0] = "drink"
+	value.Value = []string{"snack"}
+	right.Value = &types.MemoryRecordMetadataValueMemberStringValue{Value: "other"}
 	if _, err := svc.SearchMemory(context.Background(), &memory.SearchRequest{Query: "q"}); err != nil {
 		t.Fatal(err)
 	}
-	filter := svc.api.(*fakeAPI).retrieveIn.SearchCriteria.MetadataFilters[0]
+	filter := api.retrieveIn.SearchCriteria.MetadataFilters[0]
 	left, ok := filter.Left.(*types.MemoryRecordLeftExpressionMemberMetadataKey)
 	if !ok || left.Value != "category" {
-		t.Fatalf("copied filter left = %#v, want metadata key category", filter.Left)
+		t.Errorf("copied filter left = %#v, want metadata key category", filter.Left)
+	}
+	copiedRight, ok := filter.Right.(*types.MemoryRecordRightExpressionMemberMetadataValue)
+	if !ok {
+		t.Fatalf("copied filter right = %#v, want metadata value", filter.Right)
+	}
+	copiedValue, ok := copiedRight.Value.(*types.MemoryRecordMetadataValueMemberStringListValue)
+	if !ok || len(copiedValue.Value) != 1 || copiedValue.Value[0] != "food" {
+		t.Errorf("copied filter value = %#v, want string list [food]", copiedRight.Value)
 	}
 }

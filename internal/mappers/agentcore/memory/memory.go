@@ -11,15 +11,6 @@ import (
 	"google.golang.org/genai"
 )
 
-// ResolveActor maps ADK identity to an AgentCore actor id using template. It
-// supports the {userId} and {appName} placeholders.
-func ResolveActor(template, appName, userID string) string {
-	return strings.NewReplacer(
-		"{userId}", userID,
-		"{appName}", appName,
-	).Replace(template)
-}
-
 // ResolveNamespace substitutes the {actorId}, {userId} and {appName} placeholders
 // in an AgentCore namespace (or namespace path).
 func ResolveNamespace(template, appName, userID, actorID string) string {
@@ -30,17 +21,15 @@ func ResolveNamespace(template, appName, userID, actorID string) string {
 	).Replace(template)
 }
 
-// TextFromContent concatenates the text of all textual parts of c, separating
-// non-empty parts with a newline. It returns "" when c is nil or carries no text
-// (for example a bare function call/response), signalling the event should be
-// skipped.
+// TextFromContent joins conversation text with newlines and skips thought parts.
+// It returns "" when there is no conversation text to store.
 func TextFromContent(c *genai.Content) string {
 	if c == nil {
 		return ""
 	}
 	var b strings.Builder
 	for _, p := range c.Parts {
-		if p == nil || p.Text == "" {
+		if p == nil || p.Thought || p.Text == "" {
 			continue
 		}
 		if b.Len() > 0 {
@@ -81,16 +70,15 @@ func EventTimestamp(event *session.Event, sess session.Session) time.Time {
 
 // EventMetadata attaches ADK identifiers to an AgentCore event for traceability.
 func EventMetadata(sess session.Session, event *session.Event) map[string]types.MetadataValue {
-	md := map[string]types.MetadataValue{
-		"app_name":   &types.MetadataValueMemberStringValue{Value: sess.AppName()},
-		"user_id":    &types.MetadataValueMemberStringValue{Value: sess.UserID()},
-		"session_id": &types.MetadataValueMemberStringValue{Value: sess.ID()},
-	}
+	md := make(map[string]types.MetadataValue)
+	addMetadata(md, "app_name", sess.AppName())
+	addMetadata(md, "user_id", sess.UserID())
+	addMetadata(md, "session_id", sess.ID())
 	if event.Author != "" {
-		md["author"] = &types.MetadataValueMemberStringValue{Value: event.Author}
+		addMetadata(md, "author", event.Author)
 	}
 	if event.ID != "" {
-		md["event_id"] = &types.MetadataValueMemberStringValue{Value: event.ID}
+		addMetadata(md, "event_id", event.ID)
 	}
 	return md
 }

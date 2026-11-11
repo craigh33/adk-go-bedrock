@@ -34,8 +34,8 @@ var _ memory.Service = (*Service)(nil)
 
 // Service implements [memory.Service] against an AgentCore Memory resource.
 type Service struct {
-	api API
-	cfg Config
+	api MemoryAPI
+	cfg serviceConfig
 }
 
 // AddSessionToMemory writes the session's events to AgentCore Memory. It emits one
@@ -48,7 +48,8 @@ func (s *Service) AddSessionToMemory(ctx context.Context, sess session.Session) 
 	if sess == nil {
 		return errors.New("agentcorememory: session is nil")
 	}
-	actorID := memorymappers.ResolveActor(s.cfg.ActorIDTemplate, sess.AppName(), sess.UserID())
+	actorID := memorymappers.ResolveActor(s.cfg.actorIDTemplate, sess.AppName(), sess.UserID())
+	sessionID := memorymappers.ResolveSessionID(sess.ID())
 
 	for event := range sess.Events().All() {
 		content := event.Content
@@ -60,9 +61,9 @@ func (s *Service) AddSessionToMemory(ctx context.Context, sess session.Session) 
 			continue
 		}
 		in := &bedrockagentcore.CreateEventInput{
-			MemoryId:       aws.String(s.cfg.MemoryID),
+			MemoryId:       aws.String(s.cfg.memoryID),
 			ActorId:        aws.String(actorID),
-			SessionId:      aws.String(sess.ID()),
+			SessionId:      aws.String(sessionID),
 			EventTimestamp: aws.Time(memorymappers.EventTimestamp(event, sess)),
 			Payload: []types.PayloadType{
 				&types.PayloadTypeMemberConversational{
@@ -87,39 +88,39 @@ func (s *Service) AddSessionToMemory(ctx context.Context, sess session.Session) 
 // SearchMemory retrieves memory records relevant to req.Query and maps them to
 // [memory.Entry] values. The configured namespace (with {actorId}, {userId} and
 // {appName} substituted from the request) scopes the search; either
-// Config.Namespace or Config.NamespacePath must be set.
+// [WithNamespace] or [WithNamespacePath] must be provided.
 //
 // SearchMemory implements [memory.Service].
 func (s *Service) SearchMemory(ctx context.Context, req *memory.SearchRequest) (*memory.SearchResponse, error) {
 	if req == nil {
 		return nil, errors.New("agentcorememory: search request is nil")
 	}
-	actorID := memorymappers.ResolveActor(s.cfg.ActorIDTemplate, req.AppName, req.UserID)
+	actorID := memorymappers.ResolveActor(s.cfg.actorIDTemplate, req.AppName, req.UserID)
 
 	in := &bedrockagentcore.RetrieveMemoryRecordsInput{
-		MemoryId: aws.String(s.cfg.MemoryID),
+		MemoryId: aws.String(s.cfg.memoryID),
 		SearchCriteria: &types.SearchCriteria{
 			SearchQuery:     aws.String(req.Query),
-			MetadataFilters: s.cfg.MetadataFilters,
+			MetadataFilters: s.cfg.metadataFilters,
 		},
 	}
-	if s.cfg.StrategyID != "" {
-		in.SearchCriteria.MemoryStrategyId = aws.String(s.cfg.StrategyID)
+	if s.cfg.strategyID != "" {
+		in.SearchCriteria.MemoryStrategyId = aws.String(s.cfg.strategyID)
 	}
-	if s.cfg.TopK > 0 {
-		in.SearchCriteria.TopK = aws.Int32(s.cfg.TopK)
+	if s.cfg.topK > 0 {
+		in.SearchCriteria.TopK = aws.Int32(s.cfg.topK)
 	}
-	if s.cfg.MaxResults > 0 {
-		in.MaxResults = aws.Int32(s.cfg.MaxResults)
+	if s.cfg.maxResults > 0 {
+		in.MaxResults = aws.Int32(s.cfg.maxResults)
 	}
 
 	switch {
-	case s.cfg.NamespacePath != "":
+	case s.cfg.namespacePath != "":
 		in.NamespacePath = aws.String(
-			memorymappers.ResolveNamespace(s.cfg.NamespacePath, req.AppName, req.UserID, actorID),
+			memorymappers.ResolveNamespace(s.cfg.namespacePath, req.AppName, req.UserID, actorID),
 		)
-	case s.cfg.Namespace != "":
-		in.Namespace = aws.String(memorymappers.ResolveNamespace(s.cfg.Namespace, req.AppName, req.UserID, actorID))
+	case s.cfg.namespace != "":
+		in.Namespace = aws.String(memorymappers.ResolveNamespace(s.cfg.namespace, req.AppName, req.UserID, actorID))
 	default:
 		return nil, errors.New("agentcorememory: Namespace or NamespacePath is required to search")
 	}

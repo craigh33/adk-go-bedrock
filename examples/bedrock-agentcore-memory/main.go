@@ -25,6 +25,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
 	"google.golang.org/adk/v2/runner"
@@ -41,8 +43,6 @@ import (
 func main() {
 	ctx := context.Background()
 
-	region := strings.TrimSpace(os.Getenv("AWS_REGION"))
-
 	modelID := os.Getenv("BEDROCK_MODEL_ID")
 	if modelID == "" {
 		log.Println("BEDROCK_MODEL_ID is required (e.g. eu.amazon.nova-2-lite-v1:0) using default model")
@@ -58,18 +58,20 @@ func main() {
 		log.Fatal("AGENTCORE_NAMESPACE is required (e.g. /actors/{actorId}/facts); it must match your memory strategy")
 	}
 
-	llm, err := bedrock.New(ctx, modelID, &bedrock.Options{Region: region})
+	awsCfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		log.Fatalf("load AWS config: %v", err)
+	}
+	llm, err := bedrock.NewWithAPI(modelID, bedrock.NewRuntimeAPI(bedrockruntime.NewFromConfig(awsCfg)))
 	if err != nil {
 		log.Fatalf("bedrock model: %v", err)
 	}
 
-	memSvc, err := agentcorememory.New(ctx, &agentcorememory.Config{
-		MemoryID:   memoryARN,
-		Region:     region,
-		Namespace:  namespace,
-		StrategyID: strings.TrimSpace(os.Getenv("AGENTCORE_STRATEGY_ID")),
-		TopK:       5,
-	})
+	memSvc, err := agentcorememory.NewWithAWSConfig(awsCfg, memoryARN,
+		agentcorememory.WithNamespace(namespace),
+		agentcorememory.WithStrategyID(strings.TrimSpace(os.Getenv("AGENTCORE_STRATEGY_ID"))),
+		agentcorememory.WithTopK(5),
+	)
 	if err != nil {
 		log.Fatalf("agentcore memory service: %v", err)
 	}
@@ -123,8 +125,8 @@ func main() {
 	}
 
 	userMsg := "What do you remember about my trip to Tokyo?"
-	if len(os.Args) > 1 {
-		userMsg = os.Args[1]
+	if prompt := strings.Join(os.Args[1:], " "); prompt != "" {
+		userMsg = prompt
 	}
 	printRecall(ctx, r, a.Name(), userID, current.ID(), userMsg)
 }
@@ -157,17 +159,20 @@ func seedPriorSession(ctx context.Context, svc session.Service, appName, userID 
 	}
 	s := resp.Session
 
-	turns := []struct{ author, content string }{
-		{"user", "I just got back from an amazing trip to Tokyo!"},
-		{"model", "That sounds wonderful! What were the highlights?"},
-		{"user", "I visited Senso-ji temple in Asakusa and had ramen in Shinjuku."},
-		{"model", "Great choices! Did you see any other sights?"},
-		{"user", "I went up Tokyo Skytree and saw Mount Fuji in the distance."},
+	turns := []struct {
+		role    genai.Role
+		content string
+	}{
+		{genai.RoleUser, "I just got back from an amazing trip to Tokyo!"},
+		{genai.RoleModel, "That sounds wonderful! What were the highlights?"},
+		{genai.RoleUser, "I visited Senso-ji temple in Asakusa and had ramen in Shinjuku."},
+		{genai.RoleModel, "Great choices! Did you see any other sights?"},
+		{genai.RoleUser, "I went up Tokyo Skytree and saw Mount Fuji in the distance."},
 	}
 	for _, turn := range turns {
 		ev := session.NewEvent(ctx, "prior-session")
-		ev.Author = turn.author
-		ev.Content = genai.NewContentFromText(turn.content, genai.Role(turn.author))
+		ev.Author = string(turn.role)
+		ev.Content = genai.NewContentFromText(turn.content, turn.role)
 		if err := svc.AppendEvent(ctx, s, ev); err != nil {
 			return nil, err
 		}

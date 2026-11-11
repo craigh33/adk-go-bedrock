@@ -100,12 +100,10 @@ The [`memory/agentcore`](memory/agentcore) package (imported as `agentcorememory
 - `SearchMemory` retrieves relevant records with `RetrieveMemoryRecords` and maps them back to `memory.Entry` values.
 
 ```go
-memSvc, err := agentcorememory.New(ctx, &agentcorememory.Config{
-    MemoryID:  os.Getenv("AGENTCORE_MEMORY_ARN"), // required AgentCore Memory ARN
-    Region:    os.Getenv("AWS_REGION"),
-    Namespace: "/actors/{actorId}/facts",        // required to search; must match your strategy
-    TopK:      5,
-})
+memSvc, err := agentcorememory.New(ctx, os.Getenv("AGENTCORE_MEMORY_ARN"),
+    agentcorememory.WithNamespace("/actors/{actorId}/facts"), // must match your strategy
+    agentcorememory.WithTopK(5),
+)
 if err != nil {
     log.Fatal(err)
 }

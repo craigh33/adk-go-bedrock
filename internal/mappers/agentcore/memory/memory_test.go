@@ -30,8 +30,8 @@ func TestResolveIdentityTemplates(t *testing.T) {
 	if got := ResolveActor("{userId}", "app", "u1"); got != "u1" {
 		t.Errorf("ResolveActor() = %q, want u1", got)
 	}
-	if got := ResolveActor("{appName}#{userId}", "app", "u1"); got != "app#u1" {
-		t.Errorf("ResolveActor() = %q, want app#u1", got)
+	if got := ResolveActor("{appName}:{userId}", "app", "u1"); got != "app:u1" {
+		t.Errorf("ResolveActor() = %q, want app:u1", got)
 	}
 	if got := ResolveNamespace("/{appName}/{actorId}/{userId}", "app", "u1", "actor-1"); got != "/app/actor-1/u1" {
 		t.Errorf("ResolveNamespace() = %q", got)
@@ -44,9 +44,18 @@ func TestTextAndRoleFromContent(t *testing.T) {
 	if got := TextFromContent(nil); got != "" {
 		t.Errorf("TextFromContent(nil) = %q, want empty", got)
 	}
-	content := &genai.Content{Parts: []*genai.Part{{Text: "a"}, {Text: ""}, {Text: "b"}}}
+	content := &genai.Content{Parts: []*genai.Part{
+		{Text: "a"},
+		{Text: "reasoning", Thought: true},
+		{Text: ""},
+		{Text: "b"},
+	}}
 	if got := TextFromContent(content); got != "a\nb" {
-		t.Errorf("TextFromContent() = %q, want a newline-separated value", got)
+		t.Errorf("TextFromContent() = %q, want %q", got, "a\nb")
+	}
+	thoughtOnly := &genai.Content{Parts: []*genai.Part{{Text: "reasoning", Thought: true}}}
+	if got := TextFromContent(thoughtOnly); got != "" {
+		t.Errorf("TextFromContent(thoughtOnly) = %q, want empty", got)
 	}
 
 	for _, tc := range []struct {
