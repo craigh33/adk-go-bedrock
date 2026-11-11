@@ -1,0 +1,22 @@
+overlay: 1.0.0
+info:
+  title: Go representations for Decider payloads
+  version: 1.0.0
+actions:
+  - target: $.components.schemas.*.properties.instructions
+    update:
+      x-go-type: any
+  - target: $.components.schemas.SystemOneRequest.properties.state
+    update:
+      x-go-type: any
+  - target: $.components.schemas.ChoiceQuestion.properties.criteria
+    update:
+      x-go-type: map[string]any
+  - target: $.components.schemas.NoulQuestion.properties.criteria
+    update:
+      x-go-type: map[string]any
+      x-go-type-skip-optional-pointer: true
+  - target: $.components.schemas.*.properties.type
+    update:
+      x-go-type: string
+      x-go-type-skip-optional-pointer: true

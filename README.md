@@ -66,6 +66,7 @@ These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat 
 - [`examples/bedrock-image-gen`](examples/bedrock-image-gen): ADK runner with the [`imagegenerator`](tools/imagegenerator) tool—Nova Canvas image generation via Bedrock `InvokeModel` and artifact storage.
 - [`examples/bedrock-video-gen`](examples/bedrock-video-gen): ADK runner with the [`videogenerator`](tools/videogenerator) tool—Nova Reel text-to-video via Bedrock async invoke, S3 output, and optional MP4 download into artifacts.
 - [`examples/bedrock-agentcore-code-interpreter`](examples/bedrock-agentcore-code-interpreter): ADK runner with the [`agentcorecodeinterpreter`](tools/agentcorecodeinterpreter) tool—AgentCore Code Interpreter execution with artifact inputs and outputs.
+- [`examples/bedrock-agentcore-decider`](examples/bedrock-agentcore-decider): an ADK support agent that classifies requests with Strands Decider through AgentCore Runtime.
 - [`examples/bedrock-nova-grounding`](examples/bedrock-nova-grounding): Nova Web Grounding via [`tools/novagrounding`](tools/novagrounding); prints answers and `bedrock_citations` metadata (see [Nova Web Grounding](#nova-web-grounding)).
 - [`examples/bedrock-stream`](examples/bedrock-stream): direct streaming example using `GenerateContent(..., true)`.
 - [`examples/bedrock-tool-variants`](examples/bedrock-tool-variants): function declaration support plus early detection of non-function ADK tool variants that Bedrock does not currently support.
@@ -77,7 +78,7 @@ These runnable programs show how to wire `adk-go-bedrock` into ADK agents: chat 
 - [`examples/bedrock-system-instruction`](examples/bedrock-system-instruction): system instructions for role definition, output formatting, and behavioral control.
 - [`examples/bedrock-web-ui`](examples/bedrock-web-ui): ADK local web UI launcher.
 
-All examples load AWS configuration with [`config.LoadDefaultConfig`](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/config#LoadDefaultConfig) and require **`BEDROCK_MODEL_ID`** plus region configuration (`AWS_REGION` or profile region).
+Examples load AWS configuration with [`config.LoadDefaultConfig`](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/config#LoadDefaultConfig). Set the region (`AWS_REGION` or profile region) and **`BEDROCK_MODEL_ID`** for Bedrock inference. The Decider example also needs `AGENTCORE_RUNTIME_ARN`.
 
 ```bash
 export BEDROCK_MODEL_ID=us.anthropic.claude-3-5-sonnet-20241022-v2:0
