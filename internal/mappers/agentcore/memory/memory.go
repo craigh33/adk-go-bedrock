@@ -1,6 +1,8 @@
 package memory
 
 import (
+	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -11,14 +13,28 @@ import (
 	"google.golang.org/genai"
 )
 
+var namespaceIdentityPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+(:[A-Za-z0-9_-]+)*$`)
+
 // ResolveNamespace substitutes the {actorId}, {userId} and {appName} placeholders
-// in an AgentCore namespace (or namespace path).
-func ResolveNamespace(template, appName, userID, actorID string) string {
+// in an AgentCore namespace or namespace path. Raw ADK identities must fit in
+// one nonempty namespace segment. Wildcards must be outside identity segments.
+func ResolveNamespace(template, appName, userID, actorID string) (string, error) {
+	for segment := range strings.SplitSeq(template, "/") {
+		if strings.Contains(segment, "*") && strings.Contains(segment, "{") {
+			return "", errors.New("namespace placeholders cannot share a segment with a wildcard")
+		}
+	}
+	if strings.Contains(template, "{userId}") && !namespaceIdentityPattern.MatchString(userID) {
+		return "", errors.New("{userId} must be a single, nonempty namespace segment")
+	}
+	if strings.Contains(template, "{appName}") && !namespaceIdentityPattern.MatchString(appName) {
+		return "", errors.New("{appName} must be a single, nonempty namespace segment")
+	}
 	return strings.NewReplacer(
 		"{actorId}", actorID,
 		"{userId}", userID,
 		"{appName}", appName,
-	).Replace(template)
+	).Replace(template), nil
 }
 
 // TextFromContent joins conversation text with newlines and skips thought parts.

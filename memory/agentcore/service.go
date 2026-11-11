@@ -40,8 +40,9 @@ type Service struct {
 
 // AddSessionToMemory writes the session's events to AgentCore Memory. It emits one
 // CreateEvent per text-bearing event, preserving each event's role and timestamp;
-// events without textual content are skipped. The event id is used as the
-// CreateEvent client token so repeated calls on a growing session are idempotent.
+// events without textual content are skipped. Events with IDs use a stable
+// CreateEvent client token so repeated calls on a growing session are
+// idempotent.
 //
 // AddSessionToMemory implements [memory.Service].
 func (s *Service) AddSessionToMemory(ctx context.Context, sess session.Session) error {
@@ -76,7 +77,7 @@ func (s *Service) AddSessionToMemory(ctx context.Context, sess session.Session) 
 			Metadata: memorymappers.EventMetadata(sess, event),
 		}
 		if event.ID != "" {
-			in.ClientToken = aws.String(event.ID)
+			in.ClientToken = aws.String(memorymappers.EventClientToken(s.cfg.memoryID, actorID, sess, event.ID))
 		}
 		if _, err := s.api.CreateEvent(ctx, in); err != nil {
 			return fmt.Errorf("agentcorememory: CreateEvent: %w", err)
@@ -95,7 +96,19 @@ func (s *Service) SearchMemory(ctx context.Context, req *memory.SearchRequest) (
 	if req == nil {
 		return nil, errors.New("agentcorememory: search request is nil")
 	}
+	template := s.cfg.namespace
+	isNamespacePath := s.cfg.namespacePath != ""
+	if isNamespacePath {
+		template = s.cfg.namespacePath
+	}
+	if template == "" {
+		return nil, errors.New("agentcorememory: Namespace or NamespacePath is required to search")
+	}
 	actorID := memorymappers.ResolveActor(s.cfg.actorIDTemplate, req.AppName, req.UserID)
+	namespace, err := memorymappers.ResolveNamespace(template, req.AppName, req.UserID, actorID)
+	if err != nil {
+		return nil, fmt.Errorf("agentcorememory: resolve search namespace: %w", err)
+	}
 
 	in := &bedrockagentcore.RetrieveMemoryRecordsInput{
 		MemoryId: aws.String(s.cfg.memoryID),
@@ -114,15 +127,10 @@ func (s *Service) SearchMemory(ctx context.Context, req *memory.SearchRequest) (
 		in.MaxResults = aws.Int32(s.cfg.maxResults)
 	}
 
-	switch {
-	case s.cfg.namespacePath != "":
-		in.NamespacePath = aws.String(
-			memorymappers.ResolveNamespace(s.cfg.namespacePath, req.AppName, req.UserID, actorID),
-		)
-	case s.cfg.namespace != "":
-		in.Namespace = aws.String(memorymappers.ResolveNamespace(s.cfg.namespace, req.AppName, req.UserID, actorID))
-	default:
-		return nil, errors.New("agentcorememory: Namespace or NamespacePath is required to search")
+	if isNamespacePath {
+		in.NamespacePath = aws.String(namespace)
+	} else {
+		in.Namespace = aws.String(namespace)
 	}
 
 	out, err := s.api.RetrieveMemoryRecords(ctx, in)

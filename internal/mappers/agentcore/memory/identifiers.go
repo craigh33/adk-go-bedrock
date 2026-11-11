@@ -17,9 +17,10 @@ const (
 	encodedIDPrefix        = "adk-id-"
 )
 
-// Patterns are from the AgentCore CreateEvent and MetadataValue API references.
+// Actor IDs use a subset of the CreateEvent pattern so each actor occupies
+// one segment in strategy namespaces.
 var (
-	actorIDPattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_/-]*(:[A-Za-z0-9_/-]+)*$`)
+	actorIDPattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*(:[A-Za-z0-9_-]+)*$`)
 	sessionIDPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 	metadataValuePattern = regexp.MustCompile(`^[A-Za-z0-9\s\x0B._:/=+@-]*$`)
 )

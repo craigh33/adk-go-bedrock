@@ -14,9 +14,10 @@ resource with `CreateEvent`, then runs an agent (with the `load_memory` /
   uses the data plane.
 - `BEDROCK_MODEL_ID` — a Bedrock model ID or inference profile ARN for the agent's LLM.
 - `AGENTCORE_MEMORY_ARN` — the full ARN of the Memory resource.
-- `AGENTCORE_NAMESPACE` — the namespace prefix to search, e.g. `/actors/{actorId}/facts`.
+- `AGENTCORE_NAMESPACE` — the exact namespace to search, e.g. `/actors/{actorId}/facts`.
   Use `{actorId}` to match the AgentCore actor ID derived from the ADK user ID.
-  The `{userId}` and `{appName}` placeholders use the original ADK values.
+  The `{userId}` and `{appName}` placeholders require original ADK values that
+  fit in one nonempty namespace segment.
 - `AGENTCORE_STRATEGY_ID` — *(optional)* memory strategy ID to filter retrieval.
 - AWS credentials via the default chain, and a region (`AWS_REGION` or your profile).
 - IAM permissions: `bedrock-agentcore:CreateEvent` and

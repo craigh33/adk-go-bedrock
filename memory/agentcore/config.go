@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -49,15 +50,21 @@ func WithRegion(region string) Option {
 }
 
 // WithNamespace sets the namespace searched by [Service.SearchMemory]. It
-// supports the {actorId}, {userId}, and {appName} placeholders. Either a
-// namespace or a namespace path is required to search.
+// supports the {actorId}, {userId}, and {appName} placeholders. Raw {userId} and
+// {appName} values must each fit in one nonempty namespace segment. Wildcards
+// must be in separate segments from placeholders. Either a namespace or a
+// namespace path is required to search.
 func WithNamespace(namespace string) Option {
 	return func(c *serviceConfig) { c.namespace = namespace }
 }
 
 // WithNamespacePath sets the namespace path for hierarchical searches. It takes
-// precedence over [WithNamespace] and supports the same placeholders.
+// precedence over [WithNamespace] and supports the same placeholders. A
+// trailing slash bounds the final segment unless the path ends with a wildcard.
 func WithNamespacePath(path string) Option {
+	if path != "" && !strings.HasSuffix(path, "*") && !strings.HasSuffix(path, "/") {
+		path += "/"
+	}
 	return func(c *serviceConfig) { c.namespacePath = path }
 }
 

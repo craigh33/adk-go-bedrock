@@ -33,8 +33,9 @@ func TestResolveIdentityTemplates(t *testing.T) {
 	if got := ResolveActor("{appName}:{userId}", "app", "u1"); got != "app:u1" {
 		t.Errorf("ResolveActor() = %q, want app:u1", got)
 	}
-	if got := ResolveNamespace("/{appName}/{actorId}/{userId}", "app", "u1", "actor-1"); got != "/app/actor-1/u1" {
-		t.Errorf("ResolveNamespace() = %q", got)
+	got, err := ResolveNamespace("/{appName}/{actorId}/{userId}", "app", "u1", "actor-1")
+	if err != nil || got != "/app/actor-1/u1" {
+		t.Errorf("ResolveNamespace() = %q, %v", got, err)
 	}
 }
 

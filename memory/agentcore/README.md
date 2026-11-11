@@ -29,13 +29,25 @@ r, err := runner.New(runner.Config{
 
 By default, the service derives the AgentCore actor ID from the ADK user ID.
 `WithActorIDTemplate` can combine `{userId}` and `{appName}` before this mapping.
-The service preserves valid AgentCore actor and session IDs except for the
-reserved `adk-id-` prefix. IDs that use that prefix or exceed AgentCore's
-character or length limits become `adk-id-` followed by a SHA-256 hex digest.
+Actor IDs occupy one namespace segment. Actor IDs containing `/`, IDs using
+the reserved `adk-id-` prefix, and IDs outside AgentCore's character or length
+limits become `adk-id-` followed by a SHA-256 hex digest.
 
 Use `{actorId}` in the search namespace to match the actor ID used when storing
-events. The `{userId}` and `{appName}` namespace placeholders insert the original
-ADK values, which must already fit the namespace's character and length limits.
+events. Use a path such as `/actors/{actorId}/` to search across an actor's
+session namespaces. The `{userId}` and `{appName}` namespace placeholders
+require original ADK values that fit in one nonempty namespace segment.
+Place any wildcard in a separate segment from the identity placeholders.
+Applications that share a Memory resource should configure templates that
+give each application and user a distinct scope.
+
+If an earlier build stored events for actor IDs containing `/`, those records
+remain under the old nested namespaces. Migrate those records or use a fresh
+Memory resource before enabling hierarchical recall.
+
+The service preserves UUID event IDs as CreateEvent client tokens. It derives a
+stable, session-scoped UUID token for other event IDs. Retrying events written
+by an earlier build with custom IDs may replay those events once.
 
 Event metadata keeps the original ADK values when they fit AgentCore's metadata
 constraints. Otherwise, the service stores them in Base64 when they fit in 256

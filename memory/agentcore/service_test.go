@@ -259,7 +259,7 @@ func TestMemoryMapsADKIdentifiers(t *testing.T) {
 	if _, err := svc.SearchMemory(t.Context(), &memory.SearchRequest{AppName: "app", UserID: userID}); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := aws.ToString(api.retrieveIn.NamespacePath), "/actors/"+agentActor; got != want {
+	if got, want := aws.ToString(api.retrieveIn.NamespacePath), "/actors/"+agentActor+"/"; got != want {
 		t.Errorf("NamespacePath = %q, want %q", got, want)
 	}
 }
@@ -330,8 +330,8 @@ func TestSearchMemory_namespacePath(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := aws.ToString(api.retrieveIn.NamespacePath); got != "/apps/app/users/u1" {
-		t.Errorf("NamespacePath = %q, want /apps/app/users/u1", got)
+	if got := aws.ToString(api.retrieveIn.NamespacePath); got != "/apps/app/users/u1/" {
+		t.Errorf("NamespacePath = %q, want /apps/app/users/u1/", got)
 	}
 	if api.retrieveIn.Namespace != nil {
 		t.Errorf("Namespace = %v, want nil", aws.ToString(api.retrieveIn.Namespace))
