@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
+	"github.com/aws/smithy-go"
 
 	models "github.com/craigh33/adk-go-bedrock/internal/models/agentcore/decider"
 )
@@ -188,6 +189,15 @@ func questionKind(fields map[string]json.RawMessage) (string, error) {
 func DecodeResponse(body []byte, req *models.SystemOneRequest) (*models.SystemOneResponse, error) {
 	fields, err := requiredFields(body, "model", "answers", "usage")
 	if err != nil {
+		var envelope struct {
+			Error struct {
+				Code    string  `json:"code"`
+				Message *string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(body, &envelope) == nil && envelope.Error.Code != "" && envelope.Error.Message != nil {
+			return nil, &smithy.GenericAPIError{Code: envelope.Error.Code, Message: *envelope.Error.Message}
+		}
 		return nil, err
 	}
 	var response models.SystemOneResponse

@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
+	"github.com/aws/smithy-go"
 )
 
 type brokenReader struct{ cause error }
@@ -86,6 +87,43 @@ func TestIncompleteSDKResponses(t *testing.T) {
 				t.Fatal("incomplete SDK response accepted")
 			}
 			if out != nil && out.Response != nil && !body.closed {
+				t.Fatal("response body leaked")
+			}
+		})
+	}
+}
+
+func TestEvaluatePreservesRuntimeErrorEnvelope(t *testing.T) {
+	var req Request
+	if err := json.Unmarshal([]byte(requestFixture), &req); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		code, message, body string
+	}{
+		{"loading", "the model is still loading", `{"error":{"code":"loading","message":"the model is still loading","state":"loading"}}`},
+		{"invalid_request", "score requires at least two levels", `{"error":{"code":"invalid_request","message":"score requires at least two levels"}}`},
+		{"inference_error", "model failed", `{"error":{"code":"inference_error","message":"model failed"}}`},
+	} {
+		t.Run(test.code, func(t *testing.T) {
+			body := &trackedBody{Reader: strings.NewReader(test.body)}
+			api := invokeFunc(func(context.Context, *bedrockagentcore.InvokeAgentRuntimeInput) (
+				*bedrockagentcore.InvokeAgentRuntimeOutput, error,
+			) {
+				return &bedrockagentcore.InvokeAgentRuntimeOutput{Response: body,
+					StatusCode: aws.Int32(http.StatusOK), ContentType: aws.String("application/json")}, nil
+			})
+			client, err := New(Config{API: api, AgentRuntimeARN: "runtime"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := client.Evaluate(t.Context(), &req)
+			var runtimeErr smithy.APIError
+			if response != nil || !errors.As(err, &runtimeErr) || runtimeErr.ErrorCode() != test.code ||
+				runtimeErr.ErrorMessage() != test.message {
+				t.Fatalf("expected runtime error %q with message %q, got %v", test.code, test.message, err)
+			}
+			if !body.closed {
 				t.Fatal("response body leaked")
 			}
 		})

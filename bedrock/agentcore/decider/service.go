@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/aws/smithy-go"
 	"github.com/google/uuid"
 
 	mappers "github.com/craigh33/adk-go-bedrock/internal/mappers/agentcore/decider"
@@ -62,6 +63,10 @@ func (c *Client) Evaluate(ctx context.Context, req *Request) (*Response, error) 
 	}
 	response, err := mappers.DecodeResponse(body, req)
 	if err != nil {
+		var runtimeErr smithy.APIError
+		if errors.As(err, &runtimeErr) {
+			return nil, fmt.Errorf("decider: runtime error: %w", err)
+		}
 		return nil, fmt.Errorf("decider: invalid response: %w", err)
 	}
 	return response, nil
