@@ -143,6 +143,7 @@ func (c *cdpConn) navigate(
 	}
 	var result struct {
 		FrameID    string `json:"frameId"`
+		LoaderID   string `json:"loaderId"`
 		ErrorText  string `json:"errorText"`
 		IsDownload bool   `json:"isDownload"`
 	}
@@ -155,49 +156,43 @@ func (c *cdpConn) navigate(
 	if result.IsDownload {
 		return errors.New("navigate: URL started a download")
 	}
-	if waitUntil == WaitUntilNone {
+	switch waitUntil {
+	case WaitUntilNone:
 		if result.FrameID == "" {
 			return errors.New("navigate: response has no frame ID")
 		}
-		return c.waitForNavigationCommit(ctx, sessionID, result.FrameID)
-	}
-	return c.waitEvent(ctx, sessionID, navigationEvent(waitUntil))
-}
-
-func navigationEvent(waitUntil WaitUntil) string {
-	switch waitUntil {
+		return c.waitForNavigationCommit(ctx, sessionID, result.FrameID, result.LoaderID)
 	case WaitUntilDOMContentLoaded:
-		return "Page.domContentEventFired"
+		return c.waitEvent(ctx, sessionID, "Page.domContentEventFired")
 	case WaitUntilLoad:
-		return "Page.loadEventFired"
+		return c.waitEvent(ctx, sessionID, "Page.loadEventFired")
 	default:
-		return ""
+		return fmt.Errorf("navigate: invalid wait mode %q", waitUntil)
 	}
 }
 
-func (c *cdpConn) waitForNavigationCommit(ctx context.Context, sessionID, frameID string) error {
+func (c *cdpConn) waitForNavigationCommit(ctx context.Context, sessionID, frameID, loaderID string) error {
 	return c.waitForEvent(ctx, "main-frame navigation commit", func(msg cdpMessage) bool {
 		if msg.SessionID != sessionID {
 			return false
 		}
-		switch msg.Method {
-		case "Page.frameNavigated":
-			var params struct {
-				Frame struct {
-					ID       string `json:"id"`
-					ParentID string `json:"parentId"`
-				} `json:"frame"`
-			}
-			return json.Unmarshal(msg.Params, &params) == nil &&
-				params.Frame.ID == frameID && params.Frame.ParentID == ""
-		case "Page.navigatedWithinDocument":
+		// Page.navigate omits the loader ID for same-document navigations.
+		if loaderID == "" {
 			var params struct {
 				FrameID string `json:"frameId"`
 			}
-			return json.Unmarshal(msg.Params, &params) == nil && params.FrameID == frameID
-		default:
-			return false
+			return msg.Method == "Page.navigatedWithinDocument" &&
+				json.Unmarshal(msg.Params, &params) == nil && params.FrameID == frameID
 		}
+		var params struct {
+			Frame struct {
+				ID       string `json:"id"`
+				LoaderID string `json:"loaderId"`
+				ParentID string `json:"parentId"`
+			} `json:"frame"`
+		}
+		return msg.Method == "Page.frameNavigated" && json.Unmarshal(msg.Params, &params) == nil &&
+			params.Frame.ID == frameID && params.Frame.LoaderID == loaderID && params.Frame.ParentID == ""
 	})
 }
 

@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -105,7 +106,6 @@ func New(cfg Config) (tool.Tool, error) {
 		deniedHosts:           deniedHosts,
 		allowUnrestrictedDNS:  cfg.AllowUnrestrictedDNS,
 		dialer:                cfg.Dialer,
-		authHandler:           cfg.AuthHandler,
 		navigationTimeout:     navTimeout,
 		cleanupTimeout:        cleanupTimeout,
 		maxTextBytes:          maxText,
@@ -127,6 +127,14 @@ func New(cfg Config) (tool.Tool, error) {
 		return nil, err
 	}
 	bt.urlHandler = urlHandler
+	if cfg.AuthHandler != nil {
+		bt.authHandler = func(ctx context.Context, challenge AuthChallenge) (AuthResponse, error) {
+			if err := bt.checkURL(ctx, challenge.Request.URL, URLStageRequest); err != nil {
+				return AuthResponse{}, fmt.Errorf("authentication request URL: %w", err)
+			}
+			return cfg.AuthHandler(ctx, challenge)
+		}
+	}
 	return bt, nil
 }
 

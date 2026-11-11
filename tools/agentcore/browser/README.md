@@ -99,7 +99,7 @@ Calling `next` applies the remaining middleware and the built-in host policy. Om
 
 ### Authentication And Transport
 
-Set `AuthHandler` to enable Fetch authentication events. An empty action selects default browser handling; use `AuthActionCancel` or `AuthActionProvideCredentials` for explicit responses.
+Set `AuthHandler` to enable Fetch authentication events. The tool checks the challenge's request URL with the request-stage URL policy before calling the handler and cancels the challenge if the policy rejects it. An empty action selects default browser handling. Use `AuthActionCancel` or `AuthActionProvideCredentials` for explicit responses.
 
 ```go
 AuthHandler: func(ctx context.Context, challenge browser.AuthChallenge) (browser.AuthResponse, error) {

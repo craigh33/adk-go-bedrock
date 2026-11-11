@@ -419,11 +419,18 @@ func TestNavigateWaitModesAndOverride(t *testing.T) {
 		serverMode string
 		configured WaitUntil
 		override   string
+		url        string
 	}{
 		{name: "load default", serverMode: "Page.navigate.loadOnly"},
 		{name: "DOMContentLoaded", serverMode: "Page.navigate.domOnly", configured: WaitUntilDOMContentLoaded},
-		{name: "none", serverMode: "Page.navigate.delayedCommit", configured: WaitUntilNone},
-		{name: "per action override", serverMode: "Page.navigate.noEvents", override: string(WaitUntilNone)},
+		{name: "none waits for the commit", serverMode: "Page.navigate.delayedCommit", configured: WaitUntilNone},
+		{name: "per action override", serverMode: "Page.navigate.noLifecycleEvents", override: string(WaitUntilNone)},
+		{
+			name:       "same-document navigation",
+			serverMode: "Page.navigate.sameDocument",
+			configured: WaitUntilNone,
+			url:        "https://example.com/after#section",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -443,7 +450,11 @@ func TestNavigateWaitModesAndOverride(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			args := map[string]any{paramAction: actionNavigate, paramURL: "https://example.com"}
+			rawURL := tc.url
+			if rawURL == "" {
+				rawURL = "https://example.com/after"
+			}
+			args := map[string]any{paramAction: actionNavigate, paramURL: rawURL}
 			if tc.override != "" {
 				args[paramWaitUntil] = tc.override
 			}
@@ -451,8 +462,8 @@ func TestNavigateWaitModesAndOverride(t *testing.T) {
 			if err != nil {
 				t.Fatalf("navigate: %v", err)
 			}
-			if tc.serverMode == "Page.navigate.delayedCommit" && out[paramURL] != "https://example.com/after" {
-				t.Fatalf("navigation returned stale metadata: %#v", out)
+			if out[paramURL] != rawURL {
+				t.Fatalf("navigation URL = %q, want %q", out[paramURL], rawURL)
 			}
 		})
 	}
@@ -623,6 +634,50 @@ func TestAuthenticationFlows(t *testing.T) {
 			if tc.wantProtocol == "ProvideCredentials" &&
 				(response["username"] != "user" || response["password"] != "pass") {
 				t.Errorf("auth credentials = %v", response)
+			}
+		})
+	}
+}
+
+func TestAuthHandlerChecksRequestURL(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		url     string
+		wantErr string
+	}{
+		{name: "allowed", url: "https://example.com"},
+		{name: "unlisted", url: "https://other.test", wantErr: "is not allowed"},
+		{name: "denied", url: "https://denied.example.com", wantErr: "is denied"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			called := false
+			tl, err := New(Config{
+				API:          &fakeAgentCoreAPI{},
+				Region:       "us-east-1",
+				Credentials:  testCreds(),
+				AllowedHosts: []string{"example.com"},
+				DeniedHosts:  []string{"denied.example.com"},
+				AuthHandler: func(_ context.Context, _ AuthChallenge) (AuthResponse, error) {
+					called = true
+					return AuthResponse{}, nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = tl.(*browserTool).authHandler(t.Context(), AuthChallenge{
+				Request: Request{URL: tc.url},
+			})
+			if tc.wantErr == "" {
+				if err != nil || !called {
+					t.Fatalf("allowed request: handler called = %v, error = %v", called, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) || called {
+				t.Fatalf("rejected request: handler called = %v, error = %v, want %q", called, err, tc.wantErr)
 			}
 		})
 	}

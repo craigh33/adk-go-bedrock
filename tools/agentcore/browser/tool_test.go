@@ -216,7 +216,19 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 			return
 		}
 		defer conn.Close()
+		const frameID, loaderID = "frame-1", "loader-1"
+		sendFrameNavigated := func(url, loader string) {
+			_ = conn.WriteJSON(map[string]any{
+				"method":    "Page.frameNavigated",
+				"sessionId": "session-1",
+				"params": map[string]any{
+					"frame": map[string]any{"id": frameID, "loaderId": loader, "url": url},
+				},
+			})
+		}
 		captured := false
+		delayedCommit := failMethod == "Page.navigate.delayedCommit"
+		var navigationURL string
 		committed := false
 		for {
 			var req struct {
@@ -251,8 +263,13 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 					"id":     req.ID,
 					"result": map[string]any{"sessionId": "session-1"},
 				})
+			case "Fetch.continueRequest":
+				_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{}})
+				if delayedCommit && !committed {
+					sendFrameNavigated(navigationURL, loaderID)
+					committed = true
+				}
 			case "Fetch.enable",
-				"Fetch.continueRequest",
 				"Fetch.failRequest",
 				"Fetch.fulfillRequest",
 				"Fetch.continueWithAuth",
@@ -260,24 +277,31 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 				_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{}})
 			case "Page.navigate":
 				requestURL, _ := req.Params[paramURL].(string)
+				if failMethod == "Page.navigate.sameDocument" {
+					navigationURL = requestURL
+					_ = conn.WriteJSON(map[string]any{
+						"method":    "Page.navigatedWithinDocument",
+						"sessionId": "session-1",
+						"params":    map[string]any{"frameId": frameID, "url": requestURL},
+					})
+					_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{"frameId": frameID}})
+					continue
+				}
 				if failMethod == "Page.navigate.redirect" {
 					requestURL = "https://blocked.example.net/redirect"
 				}
-				if failMethod == "Page.navigate.delayedCommit" {
+				navResult := map[string]any{"frameId": frameID, "loaderId": loaderID}
+				if delayedCommit {
+					// Buffer an earlier commit and defer this commit until the request is continued.
+					navigationURL = requestURL
+					sendFrameNavigated("https://example.com/before", "previous-loader")
 					_ = conn.WriteJSON(map[string]any{
 						"id":     req.ID,
-						"result": map[string]any{"frameId": "frame-1"},
+						"result": navResult,
 					})
-					time.Sleep(50 * time.Millisecond)
+				} else {
+					sendFrameNavigated(requestURL, loaderID)
 				}
-				_ = conn.WriteJSON(map[string]any{
-					"method":    "Page.frameNavigated",
-					"sessionId": "session-1",
-					"params": map[string]any{
-						"frame": map[string]any{"id": "frame-1", "url": requestURL},
-					},
-				})
-				committed = true
 				_ = conn.WriteJSON(map[string]any{
 					"method":    "Fetch.requestPaused",
 					"sessionId": "session-1",
@@ -347,7 +371,7 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 						},
 					})
 				}
-				if failMethod != "Page.navigate.noEvents" {
+				if failMethod != "Page.navigate.noLifecycleEvents" && !delayedCommit {
 					if failMethod != "Page.navigate.loadOnly" {
 						_ = conn.WriteJSON(map[string]any{
 							"method":    "Page.domContentEventFired",
@@ -358,8 +382,8 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 						_ = conn.WriteJSON(map[string]any{"method": "Page.loadEventFired", "sessionId": "session-1"})
 					}
 				}
-				if failMethod != "Page.navigate.delayedCommit" {
-					_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{"frameId": "frame-1"}})
+				if !delayedCommit {
+					_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": navResult})
 				}
 			case "Runtime.evaluate":
 				expr, _ := req.Params["expression"].(string)
@@ -379,8 +403,11 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 					continue
 				}
 				var value any = map[string]any{"url": "https://example.com/after", "title": "Example"}
-				if failMethod == "Page.navigate.delayedCommit" && !committed {
-					value.(map[string]any)["url"] = "https://old.example"
+				if delayedCommit && !committed {
+					value.(map[string]any)["url"] = "https://example.com/before"
+				}
+				if failMethod == "Page.navigate.sameDocument" {
+					value.(map[string]any)["url"] = navigationURL
 				}
 				if failMethod == "Runtime.evaluate.redirect" ||
 					(failMethod == "Runtime.evaluate.redirectAfterCapture" && captured) {
