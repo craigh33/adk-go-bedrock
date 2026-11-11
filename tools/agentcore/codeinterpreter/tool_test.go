@@ -1,4 +1,4 @@
-package agentcorecodeinterpreter
+package codeinterpreter
 
 import (
 	"context"

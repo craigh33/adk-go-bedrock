@@ -22,7 +22,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/craigh33/adk-go-bedrock/bedrock/converse"
-	"github.com/craigh33/adk-go-bedrock/tools/agentcorecodeinterpreter"
+	"github.com/craigh33/adk-go-bedrock/tools/agentcore/codeinterpreter"
 )
 
 const (
@@ -64,7 +64,7 @@ func run(ctx context.Context) error {
 	if r := strings.TrimSpace(os.Getenv("AGENTCORE_REGION")); r != "" {
 		agentCoreCfg.Region = r
 	}
-	codeTool, err := agentcorecodeinterpreter.New(agentcorecodeinterpreter.Config{
+	codeTool, err := codeinterpreter.New(codeinterpreter.Config{
 		API:                       bedrockagentcore.NewFromConfig(agentCoreCfg),
 		CodeInterpreterIdentifier: codeInterpreterID,
 	})

@@ -1,6 +1,8 @@
-# agentcorecodeinterpreter
+# codeinterpreter
 
-`agentcorecodeinterpreter` provides an ADK tool for Amazon Bedrock AgentCore Code Interpreter.
+`codeinterpreter` provides an ADK tool for Amazon Bedrock AgentCore Code Interpreter.
+Import it from `github.com/craigh33/adk-go-bedrock/tools/agentcore/codeinterpreter`.
+The former `tools/agentcorecodeinterpreter` import path remains available as a deprecated compatibility wrapper.
 
 The tool is named `execute_code`. It starts one AgentCore Code Interpreter session per
 tool call, writes requested ADK artifacts into the sandbox, executes code, reads requested
@@ -14,7 +16,7 @@ if err != nil {
     log.Fatal(err)
 }
 
-codeTool, err := agentcorecodeinterpreter.New(agentcorecodeinterpreter.Config{
+codeTool, err := codeinterpreter.New(codeinterpreter.Config{
     API:                       bedrockagentcore.NewFromConfig(awsCfg),
     CodeInterpreterIdentifier: "aws.codeinterpreter.v1",
 })
@@ -59,5 +61,5 @@ The configured client needs:
 - `bedrock-agentcore:InvokeCodeInterpreter`
 - `bedrock-agentcore:StopCodeInterpreterSession`
 
-See [`../../examples/bedrock-agentcore-code-interpreter`](../../examples/bedrock-agentcore-code-interpreter)
+See [`../../../examples/bedrock-agentcore-code-interpreter`](../../../examples/bedrock-agentcore-code-interpreter)
 for a runnable setup.

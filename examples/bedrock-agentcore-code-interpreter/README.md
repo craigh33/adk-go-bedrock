@@ -1,6 +1,6 @@
 # bedrock-agentcore-code-interpreter
 
-This example runs an ADK agent with the `agentcorecodeinterpreter` tool backed by Amazon
+This example runs an ADK agent with the `codeinterpreter` tool backed by Amazon
 Bedrock AgentCore Code Interpreter. It seeds a small `sales.csv` artifact into an
 in-memory artifact service, asks the agent to analyze it with Python, and saves
 `summary.txt` back as an ADK artifact.

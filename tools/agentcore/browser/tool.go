@@ -1,0 +1,325 @@
+package browser
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/tool"
+	"google.golang.org/genai"
+
+	browsermappers "github.com/craigh33/adk-go-bedrock/internal/agentcore/mappers/browser"
+)
+
+// New creates an ADK-compatible AgentCore Browser tool for interactive browsing.
+func New(cfg Config) (tool.Tool, error) {
+	t, err := newBrowserTool(cfg)
+	if err != nil {
+		return nil, err
+	}
+	t.decl = newFunctionDeclaration()
+	t.sessions = make(map[conversationKey]*browserSession)
+	return t, nil
+}
+
+//nolint:funlen,gocognit // Keeping configuration validation in one constructor makes defaults auditable.
+func newBrowserTool(cfg Config) (*browserTool, error) {
+	if cfg.API == nil {
+		return nil, errors.New("API is required")
+	}
+	region := strings.TrimSpace(cfg.Region)
+	if region == "" {
+		return nil, errors.New("region is required")
+	}
+	if cfg.Credentials == nil {
+		return nil, errors.New("credentials provider is required")
+	}
+	browserID := strings.TrimSpace(cfg.BrowserIdentifier)
+	if browserID == "" {
+		browserID = defaultBrowserIdentifier
+	}
+	sessionTimeout := cfg.SessionTimeoutSeconds
+	if sessionTimeout == 0 {
+		sessionTimeout = defaultSessionTimeout
+	}
+	if sessionTimeout < minSessionTimeout {
+		return nil, fmt.Errorf("SessionTimeoutSeconds cannot be less than %d", minSessionTimeout)
+	}
+	if sessionTimeout > maxSessionTimeout {
+		return nil, fmt.Errorf("SessionTimeoutSeconds cannot exceed %d", maxSessionTimeout)
+	}
+	if (cfg.ViewportWidth == 0) != (cfg.ViewportHeight == 0) {
+		return nil, errors.New("ViewportWidth and ViewportHeight must be set together")
+	}
+	if cfg.ViewportWidth < 0 || cfg.ViewportHeight < 0 {
+		return nil, errors.New("viewport dimensions cannot be negative")
+	}
+	navTimeout := cfg.NavigationTimeout
+	if navTimeout == 0 {
+		navTimeout = defaultNavigationTimeout
+	}
+	if navTimeout < 0 {
+		return nil, errors.New("NavigationTimeout cannot be negative")
+	}
+	cleanupTimeout := cfg.CleanupTimeout
+	if cleanupTimeout == 0 {
+		cleanupTimeout = defaultCleanupTimeout
+	}
+	if cleanupTimeout < 0 {
+		return nil, errors.New("CleanupTimeout cannot be negative")
+	}
+	maxText := cfg.MaxTextBytes
+	if maxText == 0 {
+		maxText = defaultMaxTextBytes
+	}
+	if maxText < 0 {
+		return nil, errors.New("MaxTextBytes cannot be negative")
+	}
+	maxScreenshot := cfg.MaxScreenshotBytes
+	if maxScreenshot == 0 {
+		maxScreenshot = defaultMaxScreenshotBytes
+	}
+	if maxScreenshot < 0 {
+		return nil, errors.New("MaxScreenshotBytes cannot be negative")
+	}
+	readLimit, err := browsermappers.AgentCoreBrowserAutomationReadLimit(maxScreenshot, maxText)
+	if err != nil {
+		return nil, err
+	}
+	waitUntil, err := normalizeWaitUntil(cfg.WaitUntil)
+	if err != nil {
+		return nil, err
+	}
+	allowedHosts, err := browsermappers.AgentCoreBrowserNormalizeHosts("AllowedHosts", cfg.AllowedHosts)
+	if err != nil {
+		return nil, err
+	}
+	deniedHosts, err := browsermappers.AgentCoreBrowserNormalizeHosts("DeniedHosts", cfg.DeniedHosts)
+	if err != nil {
+		return nil, err
+	}
+
+	bt := &browserTool{
+		api:                   cfg.API,
+		region:                region,
+		credentials:           cfg.Credentials,
+		browserIdentifier:     browserID,
+		sessionTimeoutSeconds: sessionTimeout,
+		viewportWidth:         cfg.ViewportWidth,
+		viewportHeight:        cfg.ViewportHeight,
+		allowedHosts:          allowedHosts,
+		deniedHosts:           deniedHosts,
+		allowUnrestrictedDNS:  cfg.AllowUnrestrictedDNS,
+		dialer:                cfg.Dialer,
+		navigationTimeout:     navTimeout,
+		cleanupTimeout:        cleanupTimeout,
+		maxTextBytes:          maxText,
+		maxScreenshotBytes:    maxScreenshot,
+		automationReadLimit:   readLimit,
+		waitUntil:             waitUntil,
+	}
+	if bt.dialer == nil {
+		bt.dialer = defaultWebSocketDialer{}
+	}
+	handler, err := applyRequestMiddleware(bt.handleBrowserRequest, cfg.RequestMiddlewares)
+	if err != nil {
+		return nil, err
+	}
+	bt.requestHandler = handler
+	urlHandler, err := applyURLMiddleware(bt.handleURLCheck, cfg.URLMiddlewares)
+	if err != nil {
+		return nil, err
+	}
+	bt.urlHandler = urlHandler
+	if cfg.AuthHandler != nil {
+		bt.authHandler = func(ctx context.Context, challenge AuthChallenge) (AuthResponse, error) {
+			if err := bt.checkURL(ctx, challenge.Request.URL, URLStageRequest); err != nil {
+				return AuthResponse{}, fmt.Errorf("authentication request URL: %w", err)
+			}
+			return cfg.AuthHandler(ctx, challenge)
+		}
+	}
+	return bt, nil
+}
+
+func applyRequestMiddleware(base RequestHandler, middleware []RequestMiddleware) (RequestHandler, error) {
+	handler := base
+	for i, wrap := range slices.Backward(middleware) {
+		if wrap == nil {
+			return nil, fmt.Errorf("RequestMiddlewares[%d] is nil", i)
+		}
+		handler = wrap(handler)
+		if handler == nil {
+			return nil, fmt.Errorf("RequestMiddlewares[%d] returned a nil handler", i)
+		}
+	}
+	return handler, nil
+}
+
+func applyURLMiddleware(base URLHandler, middleware []URLMiddleware) (URLHandler, error) {
+	handler := base
+	for i, wrap := range slices.Backward(middleware) {
+		if wrap == nil {
+			return nil, fmt.Errorf("URLMiddlewares[%d] is nil", i)
+		}
+		handler = wrap(handler)
+		if handler == nil {
+			return nil, fmt.Errorf("URLMiddlewares[%d] returned a nil handler", i)
+		}
+	}
+	return handler, nil
+}
+
+func (t *browserTool) Name() string { return ToolName }
+
+func (t *browserTool) Description() string {
+	return t.decl.Description
+}
+
+func (t *browserTool) IsLongRunning() bool { return false }
+
+func (t *browserTool) Declaration() *genai.FunctionDeclaration { return t.decl }
+
+func newFunctionDeclaration() *genai.FunctionDeclaration {
+	return &genai.FunctionDeclaration{
+		Name: ToolName,
+		Description: "Use the Browser session managed for this conversation. " +
+			"Call navigate with a URL to open a page. It starts a session if needed, so start is optional. " +
+			"Use extract_text or screenshot after navigation and status to check the session. " +
+			"Run Browser actions one at a time and call stop when you have finished all requested Browser work.",
+		Parameters: &genai.Schema{
+			Type: "OBJECT",
+			Properties: map[string]*genai.Schema{
+				paramAction: {
+					Type:   schemaTypeString,
+					Format: schemaFormatEnum,
+					Enum: []string{
+						actionStart,
+						actionNavigate,
+						actionExtractText,
+						actionScreenshot,
+						actionStatus,
+						actionStop,
+					},
+					Description: "Browser action to perform.",
+				},
+				paramURL: {
+					Type:        schemaTypeString,
+					Description: "HTTP or HTTPS URL to navigate to. Required for navigate.",
+				},
+				paramSelector: {
+					Type:        schemaTypeString,
+					Description: "Optional CSS selector for extract_text. Defaults to the document body.",
+				},
+				paramFileName: {
+					Type:        schemaTypeString,
+					Description: "Artifact filename for screenshots. Defaults to browser_screenshot.png or browser_screenshot.jpeg.",
+				},
+				paramFormat: {
+					Type:        schemaTypeString,
+					Format:      schemaFormatEnum,
+					Enum:        []string{screenshotFormatPNG, screenshotFormatJPEG, screenshotFormatJPG},
+					Description: "Screenshot format. Defaults to png.",
+				},
+				paramWaitUntil: {
+					Type:   schemaTypeString,
+					Format: schemaFormatEnum,
+					Enum: []string{
+						string(WaitUntilLoad),
+						string(WaitUntilDOMContentLoaded),
+						string(WaitUntilNone),
+					},
+					Description: "Optional navigation completion event. Overrides the configured default for navigate.",
+				},
+				paramWaitForSelector: {
+					Type:        schemaTypeString,
+					Description: "Optional CSS selector to wait for during navigate or extract_text.",
+				},
+				paramFullPage: {
+					Type:        schemaTypeBoolean,
+					Description: "Capture beyond the viewport for screenshots. Defaults to true.",
+				},
+				paramQuality: {
+					Type:        schemaTypeInteger,
+					Description: "Optional JPEG quality from 0 through 100.",
+				},
+			},
+			Required: []string{paramAction},
+		},
+	}
+}
+
+// ProcessRequest registers the browser tool and its declaration with an LLM request.
+func (t *browserTool) ProcessRequest(_ agent.Context, req *model.LLMRequest) error {
+	if req.Tools == nil {
+		req.Tools = make(map[string]any)
+	}
+	name := t.Name()
+	if _, ok := req.Tools[name]; ok {
+		return fmt.Errorf("duplicate tool: %q", name)
+	}
+	req.Tools[name] = t
+
+	if req.Config == nil {
+		req.Config = &genai.GenerateContentConfig{}
+	}
+	decl := t.Declaration()
+	if decl == nil {
+		return nil
+	}
+
+	var funcTool *genai.Tool
+	for _, gt := range req.Config.Tools {
+		if gt != nil && gt.FunctionDeclarations != nil {
+			funcTool = gt
+			break
+		}
+	}
+	if funcTool == nil {
+		req.Config.Tools = append(req.Config.Tools, &genai.Tool{
+			FunctionDeclarations: []*genai.FunctionDeclaration{decl},
+		})
+	} else {
+		funcTool.FunctionDeclarations = append(funcTool.FunctionDeclarations, decl)
+	}
+	return nil
+}
+
+func (t *browserTool) Run(ctx agent.Context, args any) (map[string]any, error) {
+	m, ok := args.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected args type: %T", args)
+	}
+	action, err := requiredString(m, paramAction)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := m[paramSessionID]; ok {
+		return nil, errors.New("session_id is managed by the Browser tool")
+	}
+	session, release, err := t.acquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	switch action {
+	case actionStart:
+		return t.runStart(ctx, session)
+	case actionNavigate:
+		return t.runNavigate(ctx, m, session)
+	case actionExtractText:
+		return t.runExtractText(ctx, m, session)
+	case actionScreenshot:
+		return t.runScreenshot(ctx, m, session)
+	case actionStatus:
+		return t.runStatus(ctx, session)
+	case actionStop:
+		return t.runStop(ctx, session)
+	default:
+		return nil, fmt.Errorf("unsupported action %q", action)
+	}
+}
