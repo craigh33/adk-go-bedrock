@@ -145,7 +145,9 @@ func TestNavigateStartsSessionAndUsesCDP(t *testing.T) {
 func TestNavigateRejectsInvalidWaitOverrideBeforeStartingSession(t *testing.T) {
 	t.Parallel()
 	api := &fakeAgentCoreAPI{}
-	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
+	tl, err := New(
+		Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +177,9 @@ func TestNavigateOptionalStringArgumentsRejectInvalidTypes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			api := &fakeAgentCoreAPI{}
-			tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
+			tl, err := New(
+				Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}},
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -208,7 +212,9 @@ func TestRequiredStringArgumentsRejectInvalidTypes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			api := &fakeAgentCoreAPI{}
-			tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
+			tl, err := New(
+				Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}},
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -298,7 +304,9 @@ func TestExtractTextUsesWaitSelectorAsExtractionSelector(t *testing.T) {
 		SessionId:         aws.String("session-1"),
 		Streams:           browserStreams(wsURL),
 	}}
-	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
+	tl, err := New(
+		Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +338,15 @@ func TestExtractTextGetsSessionAndTruncates(t *testing.T) {
 			Streams:           browserStreams(wsURL),
 		},
 	}
-	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), MaxTextBytes: 5, AllowedHosts: []string{"example.com"}})
+	tl, _ := New(
+		Config{
+			API:          api,
+			Region:       "us-east-1",
+			Credentials:  testCreds(),
+			MaxTextBytes: 5,
+			AllowedHosts: []string{"example.com"},
+		},
+	)
 	bt := tl.(*browserTool)
 
 	out, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
@@ -704,7 +720,9 @@ func TestScreenshotOptions(t *testing.T) {
 				SessionId:         aws.String("session-1"),
 				Streams:           browserStreams(wsURL),
 			}}
-			tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
+			tl, err := New(
+				Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}},
+			)
 			if err != nil {
 				t.Fatal(err)
 			}

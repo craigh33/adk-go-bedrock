@@ -482,7 +482,9 @@ func TestNavigateWaitsForSelector(t *testing.T) {
 		SessionId:         aws.String("session-1"),
 		Streams:           browserStreams(wsURL),
 	}}
-	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
+	tl, err := New(
+		Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -696,7 +698,9 @@ func TestNilAuthHandlerDoesNotEnableAuthInterception(t *testing.T) {
 		SessionId:         aws.String("session-1"),
 		Streams:           browserStreams(wsURL),
 	}}
-	tl, err := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
+	tl, err := New(
+		Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -823,7 +823,11 @@ func TestHostPolicyRejectsLocalTargetsByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tl.(*browserTool).checkURL(context.Background(), "https://metadata.corp.example", URLStageNavigate); err != nil {
+	if err := tl.(*browserTool).checkURL(
+		context.Background(),
+		"https://metadata.corp.example",
+		URLStageNavigate,
+	); err != nil {
 		t.Fatalf("unrestricted DNS opt-in rejected hostname: %v", err)
 	}
 	if err := tl.(*browserTool).checkURL(context.Background(), "https://10.0.0.1", URLStageNavigate); err == nil {
