@@ -3,6 +3,8 @@ package browser
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
 	"github.com/coder/websocket"
 )
@@ -26,6 +29,46 @@ func TestSignedWebSocketHeadersRejectsUnsupportedScheme(t *testing.T) {
 	bt := tl.(*browserTool)
 	if _, err := bt.signedWebSocketHeaders(context.Background(), "https://example.com/stream"); err == nil {
 		t.Fatal("expected unsupported scheme error")
+	}
+}
+
+func TestSignedWebSocketHeadersSignsEmptyBody(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	const region = "eu-west-2"
+	credentials := testCreds()
+	tl, err := New(Config{API: &fakeAgentCoreAPI{}, Region: region, Credentials: credentials})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := tl.(*browserTool).signedWebSocketHeaders(ctx, "wss://example.com/browser-streams/session/automation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedAt, err := time.Parse("20060102T150405Z", got.Get("X-Amz-Date"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		"https://example.com/browser-streams/session/automation",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	creds, err := credentials.Retrieve(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := sha256.Sum256(nil)
+	err = v4.NewSigner().SignHTTP(ctx, creds, req, hex.EncodeToString(empty[:]), "bedrock-agentcore", region, signedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Get("Authorization") != req.Header.Get("Authorization") {
+		t.Fatal("WebSocket handshake signature does not match an empty GET body")
 	}
 }
 

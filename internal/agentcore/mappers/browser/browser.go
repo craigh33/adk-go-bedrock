@@ -71,10 +71,16 @@ func AgentCoreBrowserStopInput(
 	sessionID string,
 	functionCallID string,
 ) *bedrockagentcore.StopBrowserSessionInput {
+	if strings.TrimSpace(functionCallID) == "" {
+		functionCallID = uuid.NewString()
+	}
+	sum := sha256.Sum256(fmt.Appendf(nil, "%q %q %q", browserIdentifier, sessionID, functionCallID))
+	// The double hyphen reserves a namespace the start token generator cannot produce.
+	token := "stop--" + hex.EncodeToString(sum[:])
 	return &bedrockagentcore.StopBrowserSessionInput{
 		BrowserIdentifier: aws.String(browserIdentifier),
 		SessionId:         aws.String(sessionID),
-		ClientToken:       aws.String(AgentCoreBrowserClientToken(functionCallID)),
+		ClientToken:       aws.String(token),
 	}
 }
 

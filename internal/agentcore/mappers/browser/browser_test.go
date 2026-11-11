@@ -2,6 +2,7 @@ package browser
 
 import (
 	"math"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -35,9 +36,38 @@ func TestAgentCoreBrowserSessionInputs(t *testing.T) {
 		t.Fatalf("get input = %#v", get)
 	}
 	stop := AgentCoreBrowserStopInput("browser-id", "session-id", "tooluse_abc")
-	if aws.ToString(stop.BrowserIdentifier) != "browser-id" || aws.ToString(stop.SessionId) != "session-id" ||
-		aws.ToString(stop.ClientToken) != aws.ToString(start.ClientToken) {
+	if aws.ToString(stop.BrowserIdentifier) != "browser-id" || aws.ToString(stop.SessionId) != "session-id" {
 		t.Fatalf("stop input = %#v", stop)
+	}
+}
+
+func TestAgentCoreBrowserStopClientTokenScope(t *testing.T) {
+	t.Parallel()
+	stopToken := func(browserID, sessionID, callID string) string {
+		return aws.ToString(AgentCoreBrowserStopInput(browserID, sessionID, callID).ClientToken)
+	}
+	const callID = "tooluse_abc"
+	token := stopToken("browser-id", "session-id", callID)
+	pattern := regexp.MustCompile(`^[a-zA-Z0-9](-*[a-zA-Z0-9])*$`)
+	if len(token) < agentCoreBrowserMinClientTokenLen || len(token) > agentCoreBrowserMaxClientTokenLen ||
+		!pattern.MatchString(token) {
+		t.Fatalf("invalid stop client token %q", token)
+	}
+	if retry := stopToken("browser-id", "session-id", callID); retry != token {
+		t.Errorf("retry token = %q, want %q", retry, token)
+	}
+	for _, tc := range []struct {
+		name  string
+		token string
+	}{
+		{name: "start operation", token: AgentCoreBrowserClientToken(callID)},
+		{name: "other browser", token: stopToken("other-browser", "session-id", callID)},
+		{name: "other session", token: stopToken("browser-id", "other-session", callID)},
+		{name: "other function call", token: stopToken("browser-id", "session-id", "tooluse_def")},
+	} {
+		if tc.token == token {
+			t.Errorf("%s reused the stop client token", tc.name)
+		}
 	}
 }
 

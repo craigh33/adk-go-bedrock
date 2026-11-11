@@ -445,8 +445,10 @@ func TestNavigateStopsAutoStartedSessionOnMetadataError(t *testing.T) {
 	}
 	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 	bt := tl.(*browserTool)
+	ctx := newFakeToolCtx(&fakeArtifacts{})
+	ctx.functionCallID = "tooluse_cleanup"
 
-	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+	_, err := bt.Run(ctx, map[string]any{
 		paramAction: actionNavigate,
 		paramURL:    "https://example.com",
 	})
@@ -455,6 +457,9 @@ func TestNavigateStopsAutoStartedSessionOnMetadataError(t *testing.T) {
 	}
 	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
 		t.Fatalf("auto-started session was not stopped: %#v", api.lastStop)
+	}
+	if aws.ToString(api.lastStop.ClientToken) == aws.ToString(api.lastStart.ClientToken) {
+		t.Fatal("cleanup reused the start client token")
 	}
 }
 

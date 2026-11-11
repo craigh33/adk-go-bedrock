@@ -441,7 +441,7 @@ func (t *browserTool) signedWebSocketHeaders(ctx context.Context, endpoint strin
 		return nil, fmt.Errorf("retrieve AWS credentials: %w", err)
 	}
 	if err := v4.NewSigner().
-		SignHTTP(ctx, creds, req, "UNSIGNED-PAYLOAD", serviceID, t.region, time.Now()); err != nil {
+		SignHTTP(ctx, creds, req, emptyPayloadSHA256, serviceID, t.region, time.Now()); err != nil {
 		return nil, fmt.Errorf("sign automation stream request: %w", err)
 	}
 	return req.Header, nil
