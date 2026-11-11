@@ -2,6 +2,25 @@
 
 Typed evaluation of Choice, Noul, and Score questions through an existing Strands Decider Runtime. Uses AWS SDK authentication and invocation; no TypeSafe dependency.
 
+## Requirements
+
+- An IAM-authenticated AgentCore Runtime serving Strands Decider over HTTP at
+  `/invocations`. Supply the runtime ARN and configure the AWS SDK for the
+  region where it is deployed.
+- AWS credentials with `bedrock-agentcore:InvokeAgentRuntime` permission for
+  that runtime.
+- The ADK console example also needs a Bedrock Converse model with tool support,
+  `bedrock:InvokeModel` permission, and available inference quota. Set
+  `BEDROCK_MODEL_ID` to a model or inference profile available in the configured
+  AWS region, and `AGENTCORE_RUNTIME_ARN` to the deployed Decider runtime ARN.
+
+The [Strands Decider deployment sample](https://github.com/Vivek0712/strands-decider-agentcore)
+shows how to package the model in an ARM64 container for an AgentCore CPU microVM.
+Allow time for model initialization on the first invocation of a new session
+when setting the request deadline.
+
+## Usage
+
 ```go
 client, err := decider.New(decider.Config{
     API: bedrockagentcore.NewFromConfig(awsCfg),
