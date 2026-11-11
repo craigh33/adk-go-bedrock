@@ -27,6 +27,8 @@ import (
 	"github.com/craigh33/adk-go-bedrock/tools/agentcore/browser"
 )
 
+const defaultBrowserHost = "example.com"
+
 func main() {
 	if err := run(context.Background()); err != nil {
 		log.Fatal(err)
@@ -91,7 +93,8 @@ Navigate first, keep the returned session_id for follow-up extract_text or scree
 		return fmt.Errorf("runner: %w", err)
 	}
 
-	userMsg := "Open https://example.com, extract the visible text, save a screenshot as example.png, then stop the browser session."
+	userMsg := "Open https://" + defaultBrowserHost +
+		", extract the visible text, save a screenshot as example.png, then stop the browser session."
 	if len(os.Args) > 1 {
 		userMsg = strings.Join(os.Args[1:], " ")
 	}
@@ -129,6 +132,10 @@ func browserConfigFromEnv(awsCfg aws.Config) (browser.Config, error) {
 	if err != nil {
 		return browser.Config{}, err
 	}
+	allowedHosts := csvEnv("AGENTCORE_BROWSER_ALLOWED_HOSTS")
+	if len(allowedHosts) == 0 {
+		allowedHosts = []string{defaultBrowserHost}
+	}
 	return browser.Config{
 		API:                   bedrockagentcore.NewFromConfig(awsCfg),
 		Region:                awsCfg.Region,
@@ -137,7 +144,7 @@ func browserConfigFromEnv(awsCfg aws.Config) (browser.Config, error) {
 		SessionTimeoutSeconds: sessionTimeout,
 		ViewportWidth:         viewportWidth,
 		ViewportHeight:        viewportHeight,
-		AllowedHosts:          csvEnv("AGENTCORE_BROWSER_ALLOWED_HOSTS"),
+		AllowedHosts:          allowedHosts,
 		DeniedHosts:           csvEnv("AGENTCORE_BROWSER_DENIED_HOSTS"),
 		NavigationTimeout:     navigationTimeout,
 		CleanupTimeout:        cleanupTimeout,

@@ -24,7 +24,7 @@ export AGENTCORE_BROWSER_WAIT_UNTIL=load
 go run ./examples/bedrock-agentcore-browser
 ```
 
-Pass a prompt as CLI arguments to browse a different site.
+The example allows `example.com` when `AGENTCORE_BROWSER_ALLOWED_HOSTS` is unset or empty. Pass a prompt as CLI arguments to customize the request. To browse another site, set `AGENTCORE_BROWSER_ALLOWED_HOSTS` to a comma-separated list of hosts the request needs. This list replaces the example default.
 
 ```bash
 go run ./examples/bedrock-agentcore-browser "Open https://example.com and save a screenshot as page.png"
@@ -39,4 +39,4 @@ The Bedrock model client needs normal Bedrock inference permissions. The AgentCo
 - `bedrock-agentcore:StopBrowserSession`
 - `bedrock-agentcore:ConnectBrowserAutomationStream`
 
-Browser sessions have runtime cost and remain active until stopped or timed out. The example asks the agent to stop each session when finished; keep the host allowlist set for constrained or private-network workflows. Empty optional environment variables select the library defaults documented in [`../../tools/agentcore/browser`](../../tools/agentcore/browser).
+Browser sessions have runtime cost and remain active until stopped or timed out. The example asks the agent to stop each session when finished. Other empty optional environment variables select the library defaults documented in [`../../tools/agentcore/browser`](../../tools/agentcore/browser).
