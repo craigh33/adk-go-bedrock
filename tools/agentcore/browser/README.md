@@ -1,8 +1,12 @@
 # browser
 
-`browser` provides an ADK tool for constrained Amazon Bedrock AgentCore Browser sessions.
+`browser` provides ADK tools for constrained Amazon Bedrock AgentCore Browser sessions.
 
-## Usage
+## Single page visits
+
+Use `browser.NewPage(cfg)` to register `browse_page`. Pass a `url` and optionally a CSS `selector` to wait for and read, or a `screenshot` artifact filename to capture the full page. The tool returns the final URL, title, visible text, truncation flag, and any screenshot artifact metadata. Each call opens a fresh session, performs the work, and attempts to stop the session with a separate cleanup deadline.
+
+## Interactive browsing
 
 ```go
 awsCfg, err := config.LoadDefaultConfig(ctx)
@@ -34,16 +38,18 @@ if err != nil {
 }
 ```
 
-The tool is named `agentcore_browser`. Calls use an `action` value:
+The tool is named `agentcore_browser`. Each call selects an `action`.
 
-- `start`: create a browser session.
-- `navigate`: navigate to a URL. If `session_id` is omitted, the tool starts a session. `wait_until` overrides the configured lifecycle wait and `wait_for_selector` waits for a CSS selector before returning.
-- `extract_text`: return visible text for the page or an optional CSS `selector`. `wait_for_selector` waits before extraction and becomes the extraction selector when `selector` is omitted.
-- `screenshot`: save a browser screenshot as an ADK artifact and return its URL/title metadata. `full_page` defaults to `true`; JPEG `quality` accepts integral values from 0 through 100. If `format` is omitted, `.jpg`, `.jpeg`, or `.png` in `file_name` selects the format. Extensionless names are allowed; other extensions are rejected.
-- `status`: return AgentCore Browser session status.
-- `stop`: stop a browser session.
+- `start` optionally opens a browser session ahead of navigation and reuses the current session if one exists.
+- `navigate` opens a URL and starts a session when needed. `wait_until` overrides the configured lifecycle wait and `wait_for_selector` waits for a CSS selector before returning.
+- `extract_text` returns visible text from the current page or an optional CSS `selector`. `wait_for_selector` waits before extraction and becomes the extraction selector when `selector` is omitted.
+- `screenshot` saves a screenshot of the current page as an ADK artifact and returns its URL and title. `full_page` defaults to `true`. JPEG `quality` accepts integral values from 0 through 100. Use an extensionless `file_name` or one ending in `.jpg`, `.jpeg`, or `.png`. The extension selects the format when `format` is omitted.
+- `status` reports the current session's status or that the conversation has no active session.
+- `stop` ends the current session if one exists and succeeds when the conversation has no active session.
 
 ## Behavior
+
+The tool manages one Browser session per ADK conversation and keeps the AgentCore session identifier internally. This state lives in memory for the lifetime of the tool instance. Run dependent actions in sequence. Wait for `navigate` to finish before extracting text or taking a screenshot, and call `stop` after the requested work is complete.
 
 The tool uses AgentCore session APIs plus the automation stream. It only exposes the actions above; it does not expose raw CDP, mouse, keyboard, or arbitrary browser protocol access.
 
@@ -62,8 +68,8 @@ Zero values select the defaults below unless noted otherwise. Negative timeouts 
 | `URLMiddlewares` | none | Compose or replace URL host policy for navigate, request, current, and final stages. |
 | `Dialer` | `websocket.Dial` | Open the signed automation WebSocket through a custom proxy or transport. |
 | `AuthHandler` | disabled | Answer HTTP authentication challenges with default handling, cancellation, or credentials. |
-| `NavigationTimeout` | `30s` | Overall deadline for browser actions, selector waits, and artifact saving. |
-| `CleanupTimeout` | `10s` | Separate best-effort stop deadline after a failed auto-started navigation. |
+| `NavigationTimeout` | `30s` | Overall deadline for a page visit or interactive browser action, including selector waits and artifact saving. |
+| `CleanupTimeout` | `10s` | Separate stop deadline after a page visit or a failed auto-started interactive navigation. |
 | `MaxTextBytes` | `64 KiB` | Maximum extracted visible text size. |
 | `MaxScreenshotBytes` | `16 MiB` | Maximum decoded screenshot artifact size. |
 | `WaitUntil` | `load` | Navigation wait mode: `load`, `dom_content_loaded`, or `none`. |

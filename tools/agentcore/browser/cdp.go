@@ -562,6 +562,11 @@ func (c *cdpConn) handlePausedRequest(ctx context.Context, msg cdpMessage) (bool
 	original := cloneBrowserRequest(request)
 	response, err := c.requestHandler(ctx, request)
 	if err != nil {
+		// Managed Chrome can request extension assets while a page is loading.
+		// Block the asset and let the page load continue.
+		if errors.Is(err, errChromeExtensionRequest) && paused.ResourceType != "" && paused.ResourceType != "Document" {
+			return true, c.blockPausedRequest(ctx, sessionID, paused.RequestID)
+		}
 		return true, c.failPausedRequest(ctx, sessionID, paused.RequestID, err)
 	}
 	if response != nil {
@@ -778,15 +783,19 @@ func (c *cdpConn) failPausedRequest(
 	requestID string,
 	cause error,
 ) error {
-	_, failErr := c.call(ctx, "Fetch.failRequest", map[string]any{
-		cdpKeyRequestID: requestID,
-		"errorReason":   "BlockedByClient",
-	}, sessionID)
 	requestErr := fmt.Errorf("browser request: %w", cause)
-	if failErr != nil {
+	if failErr := c.blockPausedRequest(ctx, sessionID, requestID); failErr != nil {
 		return errors.Join(requestErr, failErr)
 	}
 	return requestErr
+}
+
+func (c *cdpConn) blockPausedRequest(ctx context.Context, sessionID, requestID string) error {
+	_, err := c.call(ctx, "Fetch.failRequest", map[string]any{
+		cdpKeyRequestID: requestID,
+		"errorReason":   "BlockedByClient",
+	}, sessionID)
+	return err
 }
 
 func headersEqual(a, b http.Header) bool {

@@ -162,9 +162,33 @@ type fakeToolContext struct {
 
 	artifacts      *fakeArtifacts
 	functionCallID string
+	appName        string
+	userID         string
+	sessionID      string
 }
 
 func (f *fakeToolContext) Artifacts() agent.Artifacts { return f.artifacts }
+
+func (f *fakeToolContext) AppName() string {
+	if f.appName == "" {
+		return "test-app"
+	}
+	return f.appName
+}
+
+func (f *fakeToolContext) UserID() string {
+	if f.userID == "" {
+		return "test-user"
+	}
+	return f.userID
+}
+
+func (f *fakeToolContext) SessionID() string {
+	if f.sessionID == "" {
+		return "test-conversation"
+	}
+	return f.sessionID
+}
 
 func (f *fakeToolContext) FunctionCallID() string {
 	if f.functionCallID == "" {
@@ -180,6 +204,19 @@ func newFakeToolCtx(arts *fakeArtifacts) *fakeToolContext {
 		StrictContextMock: agent.StrictContextMock{Ctx: context.Background()},
 		artifacts:         arts,
 	}
+}
+
+func fakeToolCtxWithBrowserSession(t *testing.T, bt *browserTool, arts *fakeArtifacts) *fakeToolContext {
+	t.Helper()
+	ctx := newFakeToolCtx(arts)
+	active, release, err := bt.acquireSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	active.id = "session-1"
+	active.expiresAt = time.Now().Add(time.Minute)
+	return ctx
 }
 
 func testCreds() aws.CredentialsProvider {
@@ -276,6 +313,7 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 				"Page.enable":
 				_ = conn.WriteJSON(map[string]any{"id": req.ID, "result": map[string]any{}})
 			case "Page.navigate":
+				const extensionURL = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/resource"
 				requestURL, _ := req.Params[paramURL].(string)
 				if failMethod == "Page.navigate.sameDocument" {
 					navigationURL = requestURL
@@ -289,6 +327,8 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 				}
 				if failMethod == "Page.navigate.redirect" {
 					requestURL = "https://blocked.example.net/redirect"
+				} else if failMethod == "Page.navigate.extensionDocument" {
+					requestURL = extensionURL
 				}
 				navResult := map[string]any{"frameId": frameID, "loaderId": loaderID}
 				if delayedCommit {
@@ -320,20 +360,25 @@ func fakeCDPServerWithHook(t *testing.T, failMethod string, hook func(string, ma
 				})
 				if failMethod == "Page.navigate.subresource" ||
 					failMethod == "Page.navigate.dataSubresource" ||
-					failMethod == "Page.navigate.fileSubresource" {
+					failMethod == "Page.navigate.fileSubresource" ||
+					failMethod == "Page.navigate.extensionSubresource" {
 					subresourceURL := "http://169.254.169.254/latest/meta-data"
-					if failMethod == "Page.navigate.dataSubresource" {
+					resourceType := "Image"
+					switch failMethod {
+					case "Page.navigate.dataSubresource":
 						subresourceURL = "data:text/plain,hello"
-					}
-					if failMethod == "Page.navigate.fileSubresource" {
+					case "Page.navigate.fileSubresource":
 						subresourceURL = "file:///etc/passwd"
+					case "Page.navigate.extensionSubresource":
+						subresourceURL = extensionURL
+						resourceType = "Script"
 					}
 					_ = conn.WriteJSON(map[string]any{
 						"method":    "Fetch.requestPaused",
 						"sessionId": "session-1",
 						"params": map[string]any{
 							"requestId":    "request-2",
-							"resourceType": "Image",
+							"resourceType": resourceType,
 							"request": map[string]any{
 								"url":     subresourceURL,
 								"method":  "GET",
@@ -595,6 +640,9 @@ func TestDeclarationAndProcessRequest(t *testing.T) {
 	decl := bt.Declaration()
 	if decl.Name != ToolName {
 		t.Errorf("declaration name = %q", decl.Name)
+	}
+	if _, exists := decl.Parameters.Properties["session_id"]; exists {
+		t.Error("the model should not supply an AWS Browser session ID")
 	}
 	if got := decl.Parameters.Properties[paramAction].Enum; len(got) != 6 {
 		t.Errorf("action enum = %v", got)

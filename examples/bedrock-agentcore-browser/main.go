@@ -62,7 +62,7 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	browserTool, err := browser.New(browserCfg)
+	browserTool, err := browser.NewPage(browserCfg)
 	if err != nil {
 		return fmt.Errorf("browser tool: %w", err)
 	}
@@ -71,8 +71,10 @@ func run(ctx context.Context) error {
 		Name:        "agentcore-browser-assistant",
 		Description: "An assistant that can browse constrained websites with Bedrock AgentCore Browser",
 		Model:       llm,
-		Instruction: `Use agentcore_browser when the user asks to browse a website, get visible page text, or capture a screenshot.
-Navigate first, keep the returned session_id for follow-up extract_text or screenshot calls, and stop the session when finished.`,
+		Instruction: `Use browse_page with the requested URL to read visible text or capture a screenshot.
+Set selector when the user specifies a CSS selector for text extraction.
+When a screenshot is requested, set screenshot to the requested artifact filename or use page.png.
+The tool opens and stops the Browser session for each call.`,
 		Tools: []tool.Tool{browserTool},
 		GenerateContentConfig: &genai.GenerateContentConfig{
 			MaxOutputTokens: 1024,
@@ -93,8 +95,7 @@ Navigate first, keep the returned session_id for follow-up extract_text or scree
 		return fmt.Errorf("runner: %w", err)
 	}
 
-	userMsg := "Open https://" + defaultBrowserHost +
-		", extract the visible text, save a screenshot as example.png, then stop the browser session."
+	userMsg := "Read the visible text at https://" + defaultBrowserHost + " and save a screenshot as example.png."
 	if len(os.Args) > 1 {
 		userMsg = strings.Join(os.Args[1:], " ")
 	}

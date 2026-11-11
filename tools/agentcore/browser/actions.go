@@ -12,9 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
-	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore/types"
 	"github.com/coder/websocket"
 	"google.golang.org/adk/v2/agent"
@@ -23,72 +21,14 @@ import (
 	browsermappers "github.com/craigh33/adk-go-bedrock/internal/agentcore/mappers/browser"
 )
 
-func (t *browserTool) runStart(ctx agent.Context) (map[string]any, error) {
-	out, err := t.startSession(ctx, ctx.FunctionCallID())
-	if err != nil {
-		return nil, err
-	}
-	return t.startResult(out), nil
-}
+var errChromeExtensionRequest = errors.New(`url: scheme "chrome-extension" is not allowed`)
 
-func (t *browserTool) runStatus(ctx agent.Context, m map[string]any) (map[string]any, error) {
-	sessionID, err := requiredString(m, paramSessionID)
-	if err != nil {
-		return nil, err
-	}
-	out, err := t.api.GetBrowserSession(ctx, browsermappers.AgentCoreBrowserGetInput(t.browserIdentifier, sessionID))
-	if err != nil {
-		return nil, fmt.Errorf("get browser session %q: %w", sessionID, err)
-	}
-	return t.sessionResult(out), nil
-}
-
-func (t *browserTool) runStop(ctx agent.Context, m map[string]any) (map[string]any, error) {
-	sessionID, err := requiredString(m, paramSessionID)
-	if err != nil {
-		return nil, err
-	}
-	out, err := t.stopSession(ctx, sessionID, ctx.FunctionCallID())
-	if err != nil {
-		return nil, fmt.Errorf("stop browser session %q: %w", sessionID, err)
-	}
-	return map[string]any{
-		resultKeyStatus:    statusSuccess,
-		paramAction:        actionStop,
-		resultKeyBrowserID: aws.ToString(out.BrowserIdentifier),
-		paramSessionID:     aws.ToString(out.SessionId),
-		"last_updated_at":  browsermappers.AgentCoreBrowserTimeValue(out.LastUpdatedAt),
-	}, nil
-}
-
-func (t *browserTool) stopSession(
-	ctx context.Context,
-	sessionID string,
-	functionCallID string,
-) (*bedrockagentcore.StopBrowserSessionOutput, error) {
-	return t.api.StopBrowserSession(ctx, browsermappers.AgentCoreBrowserStopInput(
-		t.browserIdentifier,
-		sessionID,
-		functionCallID,
-	))
-}
-
-func (t *browserTool) cleanupStartedSession(ctx agent.Context, sessionID string, cause error) error {
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), t.cleanupTimeout)
-	defer cancel()
-	if _, err := t.stopSession(cleanupCtx, sessionID, ctx.FunctionCallID()); err != nil {
-		return errors.Join(cause, fmt.Errorf("cleanup stop browser session %q: %w", sessionID, err))
-	}
-	return cause
-}
-
-//nolint:funlen,gocognit // Navigation keeps ownership-aware cleanup beside each failure point.
-func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[string]any, error) {
+func (t *browserTool) runNavigate(
+	ctx agent.Context,
+	m map[string]any,
+	session *browserSession,
+) (map[string]any, error) {
 	rawURL, err := requiredString(m, paramURL)
-	if err != nil {
-		return nil, err
-	}
-	sessionID, err := optionalStringArg(m, paramSessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -113,80 +53,82 @@ func (t *browserTool) runNavigate(ctx agent.Context, m map[string]any) (map[stri
 	navCtx, cancel := context.WithTimeout(ctx, t.navigationTimeout)
 	defer cancel()
 
-	autoStarted := false
+	current, err := t.currentSession(navCtx, session)
+	if err != nil {
+		return nil, err
+	}
 	var streams *types.BrowserSessionStream
-	if sessionID == "" {
-		started, err := t.startSession(navCtx, ctx.FunctionCallID())
+	if current == nil {
+		started, err := t.startSession(navCtx, ctx, session)
 		if err != nil {
 			return nil, err
 		}
-		autoStarted = true
-		sessionID = aws.ToString(started.SessionId)
 		streams = started.Streams
 	} else {
-		current, err := t.api.GetBrowserSession(
-			navCtx,
-			browsermappers.AgentCoreBrowserGetInput(t.browserIdentifier, sessionID),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("get browser session %q: %w", sessionID, err)
-		}
 		streams = current.Streams
 	}
 
-	cdp, err := t.openCDP(navCtx, browsermappers.AgentCoreBrowserAutomationEndpoint(streams))
+	meta, err := t.navigateSessionPage(navCtx, streams, rawURL, waitUntil, waitForSelector)
 	if err != nil {
-		if autoStarted {
-			return nil, t.cleanupStartedSession(ctx, sessionID, err)
+		if current == nil {
+			err = t.cleanupStartedSession(ctx, session, err)
 		}
 		return nil, err
 	}
-	defer cdp.close()
-
-	if err := cdp.navigate(navCtx, rawURL, waitUntil, t.requestHandler, t.authHandler); err != nil {
-		if autoStarted {
-			return nil, t.cleanupStartedSession(ctx, sessionID, err)
-		}
-		return nil, err
-	}
-	if waitForSelector != "" {
-		if err := cdp.waitForSelector(navCtx, waitForSelector); err != nil {
-			if autoStarted {
-				return nil, t.cleanupStartedSession(ctx, sessionID, err)
-			}
-			return nil, err
-		}
-	}
-	meta, err := cdp.pageMetadata(navCtx)
-	if err != nil {
-		if autoStarted {
-			return nil, t.cleanupStartedSession(ctx, sessionID, err)
-		}
-		return nil, err
-	}
-	if err := t.checkURL(navCtx, meta.URL, URLStageFinal); err != nil {
-		err = fmt.Errorf("final url: %w", err)
-		if autoStarted {
-			return nil, t.cleanupStartedSession(ctx, sessionID, err)
-		}
-		return nil, err
-	}
-
 	return map[string]any{
 		resultKeyStatus:    statusSuccess,
 		paramAction:        actionNavigate,
 		resultKeyBrowserID: t.browserIdentifier,
-		paramSessionID:     sessionID,
 		paramURL:           meta.URL,
 		resultKeyTitle:     meta.Title,
 	}, nil
 }
 
-func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[string]any, error) {
-	sessionID, err := requiredString(m, paramSessionID)
+func (t *browserTool) navigateSessionPage(
+	ctx context.Context,
+	streams *types.BrowserSessionStream,
+	rawURL string,
+	waitUntil WaitUntil,
+	waitForSelector string,
+) (*pageMetadata, error) {
+	cdp, err := t.openCDP(ctx, browsermappers.AgentCoreBrowserAutomationEndpoint(streams))
 	if err != nil {
 		return nil, err
 	}
+	defer cdp.close()
+	return t.navigatePage(ctx, cdp, rawURL, waitUntil, waitForSelector)
+}
+
+func (t *browserTool) navigatePage(
+	ctx context.Context,
+	cdp *cdpConn,
+	rawURL string,
+	waitUntil WaitUntil,
+	waitForSelector string,
+) (*pageMetadata, error) {
+	if err := cdp.navigate(ctx, rawURL, waitUntil, t.requestHandler, t.authHandler); err != nil {
+		return nil, err
+	}
+	if waitForSelector != "" {
+		if err := cdp.waitForSelector(ctx, waitForSelector); err != nil {
+			return nil, err
+		}
+	}
+	meta, err := cdp.pageMetadata(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := t.checkURL(ctx, meta.URL, URLStageFinal); err != nil {
+		return nil, fmt.Errorf("final url: %w", err)
+	}
+	return meta, nil
+}
+
+func (t *browserTool) runExtractText(
+	ctx agent.Context,
+	m map[string]any,
+	session *browserSession,
+) (map[string]any, error) {
 	selector, err := optionalStringArg(m, paramSelector)
 	if err != nil {
 		return nil, err
@@ -200,7 +142,7 @@ func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[s
 	}
 	actionCtx, cancel := context.WithTimeout(ctx, t.navigationTimeout)
 	defer cancel()
-	streams, err := t.sessionStreams(actionCtx, sessionID)
+	streams, err := t.sessionStreams(actionCtx, session)
 	if err != nil {
 		return nil, err
 	}
@@ -218,21 +160,14 @@ func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[s
 		}
 	}
 
-	result, err := cdp.extractText(actionCtx, selector, t.maxTextBytes)
+	result, err := t.extractPageText(actionCtx, cdp, selector)
 	if err != nil {
 		return nil, err
 	}
-	if err := t.checkURL(actionCtx, result.URL, URLStageCurrent); err != nil {
-		return nil, fmt.Errorf("current url: %w", err)
-	}
-	text, truncated := browsermappers.AgentCoreBrowserTruncateUTF8(result.Text, t.maxTextBytes)
-	result.Text = text
-	result.Truncated = result.Truncated || truncated
 	return map[string]any{
 		resultKeyStatus:    statusSuccess,
 		paramAction:        actionExtractText,
 		resultKeyBrowserID: t.browserIdentifier,
-		paramSessionID:     sessionID,
 		"text":             result.Text,
 		paramURL:           result.URL,
 		resultKeyTitle:     result.Title,
@@ -240,31 +175,35 @@ func (t *browserTool) runExtractText(ctx agent.Context, m map[string]any) (map[s
 	}, nil
 }
 
-//nolint:funlen,gocognit // Validate every model-facing option before touching the session or artifact service.
-func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[string]any, error) {
-	sessionID, err := requiredString(m, paramSessionID)
+func (t *browserTool) extractPageText(ctx context.Context, cdp *cdpConn, selector string) (*textResult, error) {
+	result, err := cdp.extractText(ctx, selector, t.maxTextBytes)
 	if err != nil {
 		return nil, err
 	}
+	if err := t.checkURL(ctx, result.URL, URLStageCurrent); err != nil {
+		return nil, fmt.Errorf("current url: %w", err)
+	}
+	text, truncated := browsermappers.AgentCoreBrowserTruncateUTF8(result.Text, t.maxTextBytes)
+	result.Text = text
+	result.Truncated = result.Truncated || truncated
+	return result, nil
+}
+
+func (t *browserTool) runScreenshot(
+	ctx agent.Context,
+	m map[string]any,
+	session *browserSession,
+) (map[string]any, error) {
 	fileName, err := optionalStringArg(m, paramFileName)
 	if err != nil {
 		return nil, err
-	}
-	if strings.ContainsAny(fileName, `/\`) {
-		return nil, errors.New("file_name cannot contain path separators")
 	}
 	requestedFormat, err := optionalStringArg(m, paramFormat)
 	if err != nil {
 		return nil, err
 	}
-	format, mimeType, err := browsermappers.AgentCoreBrowserScreenshotFormat(requestedFormat, fileName)
+	file, err := resolveScreenshotFile(fileName, requestedFormat)
 	if err != nil {
-		return nil, err
-	}
-	if fileName == "" {
-		fileName = "browser_screenshot." + format
-	}
-	if err := browsermappers.AgentCoreBrowserValidateScreenshotFileName(fileName, format); err != nil {
 		return nil, err
 	}
 	fullPage, err := optionalBool(m, paramFullPage, true)
@@ -279,7 +218,7 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 		if *quality < 0 || *quality > 100 {
 			return nil, errors.New("quality must be between 0 and 100")
 		}
-		if format == screenshotFormatPNG {
+		if file.format == screenshotFormatPNG {
 			return nil, errors.New("quality is only supported for JPEG screenshots")
 		}
 	}
@@ -289,7 +228,7 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 	}
 	actionCtx, cancel := context.WithTimeout(ctx, t.navigationTimeout)
 	defer cancel()
-	streams, err := t.sessionStreams(actionCtx, sessionID)
+	streams, err := t.sessionStreams(actionCtx, session)
 	if err != nil {
 		return nil, err
 	}
@@ -302,98 +241,81 @@ func (t *browserTool) runScreenshot(ctx agent.Context, m map[string]any) (map[st
 		return nil, err
 	}
 
-	meta, err := cdp.pageMetadata(actionCtx)
+	meta, version, err := t.savePageScreenshot(actionCtx, cdp, artifacts, file, fullPage, quality)
 	if err != nil {
 		return nil, err
-	}
-	if err := t.checkURL(actionCtx, meta.URL, URLStageCurrent); err != nil {
-		return nil, fmt.Errorf("current url: %w", err)
-	}
-	data, err := cdp.screenshot(actionCtx, format, fullPage, quality, t.maxScreenshotBytes)
-	if err != nil {
-		return nil, err
-	}
-	meta, err = cdp.pageMetadata(actionCtx)
-	if err != nil {
-		return nil, err
-	}
-	if err := t.checkURL(actionCtx, meta.URL, URLStageCurrent); err != nil {
-		return nil, fmt.Errorf("current url after capture: %w", err)
-	}
-	if int64(len(data)) > t.maxScreenshotBytes {
-		return nil, fmt.Errorf("screenshot exceeds MaxScreenshotBytes (%d)", t.maxScreenshotBytes)
-	}
-	saveResp, err := artifacts.Save(actionCtx, fileName, genai.NewPartFromBytes(data, mimeType))
-	if err != nil {
-		return nil, fmt.Errorf("save artifact %q: %w", fileName, err)
 	}
 	return map[string]any{
 		resultKeyStatus:    statusSuccess,
 		paramAction:        actionScreenshot,
 		resultKeyBrowserID: t.browserIdentifier,
-		paramSessionID:     sessionID,
-		paramFileName:      fileName,
-		"version":          saveResp.Version,
-		"mime_type":        mimeType,
+		paramFileName:      file.name,
+		"version":          version,
+		"mime_type":        file.mimeType,
 		paramURL:           meta.URL,
 		resultKeyTitle:     meta.Title,
 	}, nil
 }
 
-func (t *browserTool) startSession(
+type screenshotFile struct {
+	name     string
+	format   string
+	mimeType string
+}
+
+func resolveScreenshotFile(fileName, requestedFormat string) (screenshotFile, error) {
+	fileName = strings.TrimSpace(fileName)
+	requestedFormat = strings.TrimSpace(requestedFormat)
+	if strings.ContainsAny(fileName, `/\`) {
+		return screenshotFile{}, errors.New("file_name cannot contain path separators")
+	}
+	format, mimeType, err := browsermappers.AgentCoreBrowserScreenshotFormat(requestedFormat, fileName)
+	if err != nil {
+		return screenshotFile{}, err
+	}
+	if fileName == "" {
+		fileName = "browser_screenshot." + format
+	}
+	if err := browsermappers.AgentCoreBrowserValidateScreenshotFileName(fileName, format); err != nil {
+		return screenshotFile{}, err
+	}
+	return screenshotFile{name: fileName, format: format, mimeType: mimeType}, nil
+}
+
+func (t *browserTool) savePageScreenshot(
 	ctx context.Context,
-	functionCallID string,
-) (*bedrockagentcore.StartBrowserSessionOutput, error) {
-	in := browsermappers.AgentCoreBrowserStartInput(browsermappers.AgentCoreBrowserStartParams{
-		BrowserIdentifier:     t.browserIdentifier,
-		FunctionCallID:        functionCallID,
-		SessionTimeoutSeconds: t.sessionTimeoutSeconds,
-		ViewportWidth:         t.viewportWidth,
-		ViewportHeight:        t.viewportHeight,
-	})
-	out, err := t.api.StartBrowserSession(ctx, in)
+	cdp *cdpConn,
+	artifacts agent.Artifacts,
+	file screenshotFile,
+	fullPage bool,
+	quality *int,
+) (*pageMetadata, int64, error) {
+	meta, err := cdp.pageMetadata(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("start browser session: %w", err)
+		return nil, 0, err
 	}
-	return out, nil
-}
-
-func (t *browserTool) startResult(out *bedrockagentcore.StartBrowserSessionOutput) map[string]any {
-	return map[string]any{
-		resultKeyStatus:    statusSuccess,
-		paramAction:        actionStart,
-		resultKeyBrowserID: aws.ToString(out.BrowserIdentifier),
-		paramSessionID:     aws.ToString(out.SessionId),
-		"created_at":       browsermappers.AgentCoreBrowserTimeValue(out.CreatedAt),
-		"live_view_url":    browsermappers.AgentCoreBrowserLiveViewEndpoint(out.Streams),
+	if err := t.checkURL(ctx, meta.URL, URLStageCurrent); err != nil {
+		return nil, 0, fmt.Errorf("current url: %w", err)
 	}
-}
-
-func (t *browserTool) sessionResult(out *bedrockagentcore.GetBrowserSessionOutput) map[string]any {
-	return map[string]any{
-		resultKeyStatus:           statusSuccess,
-		resultKeySessionStatus:    string(out.Status),
-		paramAction:               actionStatus,
-		resultKeyBrowserID:        aws.ToString(out.BrowserIdentifier),
-		paramSessionID:            aws.ToString(out.SessionId),
-		"name":                    aws.ToString(out.Name),
-		"created_at":              browsermappers.AgentCoreBrowserTimeValue(out.CreatedAt),
-		"last_updated_at":         browsermappers.AgentCoreBrowserTimeValue(out.LastUpdatedAt),
-		"session_timeout_seconds": browsermappers.AgentCoreBrowserInt32Value(out.SessionTimeoutSeconds),
-		"session_replay_artifact": aws.ToString(out.SessionReplayArtifact),
-		"live_view_url":           browsermappers.AgentCoreBrowserLiveViewEndpoint(out.Streams),
-	}
-}
-
-func (t *browserTool) sessionStreams(ctx context.Context, sessionID string) (*types.BrowserSessionStream, error) {
-	current, err := t.api.GetBrowserSession(
-		ctx,
-		browsermappers.AgentCoreBrowserGetInput(t.browserIdentifier, sessionID),
-	)
+	data, err := cdp.screenshot(ctx, file.format, fullPage, quality, t.maxScreenshotBytes)
 	if err != nil {
-		return nil, fmt.Errorf("get browser session %q: %w", sessionID, err)
+		return nil, 0, err
 	}
-	return current.Streams, nil
+	meta, err = cdp.pageMetadata(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := t.checkURL(ctx, meta.URL, URLStageCurrent); err != nil {
+		return nil, 0, fmt.Errorf("current url after capture: %w", err)
+	}
+	if int64(len(data)) > t.maxScreenshotBytes {
+		return nil, 0, fmt.Errorf("screenshot exceeds MaxScreenshotBytes (%d)", t.maxScreenshotBytes)
+	}
+	saveResp, err := artifacts.Save(ctx, file.name, genai.NewPartFromBytes(data, file.mimeType))
+	if err != nil {
+		return nil, 0, fmt.Errorf("save artifact %q: %w", file.name, err)
+	}
+	return meta, saveResp.Version, nil
 }
 
 func (t *browserTool) openCDP(ctx context.Context, endpoint string) (*cdpConn, error) {
@@ -485,6 +407,8 @@ func validateURLStructure(check URLCheck) error {
 		case schemeHTTP, schemeHTTPS:
 		case schemeData, schemeBlob:
 			return nil
+		case "chrome-extension":
+			return errChromeExtensionRequest
 		default:
 			return fmt.Errorf("url: scheme %q is not allowed", u.Scheme)
 		}

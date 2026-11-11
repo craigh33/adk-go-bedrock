@@ -15,10 +15,19 @@ import (
 	browsermappers "github.com/craigh33/adk-go-bedrock/internal/agentcore/mappers/browser"
 )
 
-// New creates an ADK-compatible AgentCore Browser tool.
-//
-//nolint:funlen,gocognit // Keeping public configuration validation in one constructor makes defaults auditable.
+// New creates an ADK-compatible AgentCore Browser tool for interactive browsing.
 func New(cfg Config) (tool.Tool, error) {
+	t, err := newBrowserTool(cfg)
+	if err != nil {
+		return nil, err
+	}
+	t.decl = newFunctionDeclaration()
+	t.sessions = make(map[conversationKey]*browserSession)
+	return t, nil
+}
+
+//nolint:funlen,gocognit // Keeping configuration validation in one constructor makes defaults auditable.
+func newBrowserTool(cfg Config) (*browserTool, error) {
 	if cfg.API == nil {
 		return nil, errors.New("API is required")
 	}
@@ -112,7 +121,6 @@ func New(cfg Config) (tool.Tool, error) {
 		maxScreenshotBytes:    maxScreenshot,
 		automationReadLimit:   readLimit,
 		waitUntil:             waitUntil,
-		decl:                  newFunctionDeclaration(),
 	}
 	if bt.dialer == nil {
 		bt.dialer = defaultWebSocketDialer{}
@@ -169,7 +177,7 @@ func applyURLMiddleware(base URLHandler, middleware []URLMiddleware) (URLHandler
 func (t *browserTool) Name() string { return ToolName }
 
 func (t *browserTool) Description() string {
-	return "Controls a constrained Amazon Bedrock AgentCore Browser session: start, navigate, extract visible text, capture screenshots, check status, and stop."
+	return t.decl.Description
 }
 
 func (t *browserTool) IsLongRunning() bool { return false }
@@ -178,8 +186,11 @@ func (t *browserTool) Declaration() *genai.FunctionDeclaration { return t.decl }
 
 func newFunctionDeclaration() *genai.FunctionDeclaration {
 	return &genai.FunctionDeclaration{
-		Name:        ToolName,
-		Description: "Use Amazon Bedrock AgentCore Browser through constrained actions.",
+		Name: ToolName,
+		Description: "Use the Browser session managed for this conversation. " +
+			"Call navigate with a URL to open a page. It starts a session if needed, so start is optional. " +
+			"Use extract_text or screenshot after navigation and status to check the session. " +
+			"Run Browser actions one at a time and call stop when you have finished all requested Browser work.",
 		Parameters: &genai.Schema{
 			Type: "OBJECT",
 			Properties: map[string]*genai.Schema{
@@ -195,10 +206,6 @@ func newFunctionDeclaration() *genai.FunctionDeclaration {
 						actionStop,
 					},
 					Description: "Browser action to perform.",
-				},
-				paramSessionID: {
-					Type:        schemaTypeString,
-					Description: "AgentCore Browser session ID. Required for extract_text, screenshot, status, and stop. Optional for navigate.",
 				},
 				paramURL: {
 					Type:        schemaTypeString,
@@ -291,19 +298,27 @@ func (t *browserTool) Run(ctx agent.Context, args any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, ok := m[paramSessionID]; ok {
+		return nil, errors.New("session_id is managed by the Browser tool")
+	}
+	session, release, err := t.acquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	switch action {
 	case actionStart:
-		return t.runStart(ctx)
+		return t.runStart(ctx, session)
 	case actionNavigate:
-		return t.runNavigate(ctx, m)
+		return t.runNavigate(ctx, m, session)
 	case actionExtractText:
-		return t.runExtractText(ctx, m)
+		return t.runExtractText(ctx, m, session)
 	case actionScreenshot:
-		return t.runScreenshot(ctx, m)
+		return t.runScreenshot(ctx, m, session)
 	case actionStatus:
-		return t.runStatus(ctx, m)
+		return t.runStatus(ctx, session)
 	case actionStop:
-		return t.runStop(ctx, m)
+		return t.runStop(ctx, session)
 	default:
 		return nil, fmt.Errorf("unsupported action %q", action)
 	}

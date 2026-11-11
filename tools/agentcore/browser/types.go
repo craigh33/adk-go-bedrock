@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -176,4 +177,7 @@ type browserTool struct {
 	automationReadLimit   int64
 	waitUntil             WaitUntil
 	decl                  *genai.FunctionDeclaration
+	sessionsMu            sync.Mutex
+	sessions              map[conversationKey]*browserSession
+	nextSessionSweep      time.Time
 }

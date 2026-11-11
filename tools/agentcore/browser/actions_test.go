@@ -57,6 +57,9 @@ func TestStartStatusStopUseAgentCoreAPI(t *testing.T) {
 	if _, ok := startOut["automation_stream_url"]; ok {
 		t.Fatal("start result leaked automation stream URL")
 	}
+	if _, exists := startOut["session_id"]; exists {
+		t.Error("start result leaked the AWS Browser session ID")
+	}
 	if got := aws.ToString(
 		api.lastStart.ClientToken,
 	); !strings.HasPrefix(got, "tooluse-abc-") ||
@@ -70,7 +73,7 @@ func TestStartStatusStopUseAgentCoreAPI(t *testing.T) {
 		t.Fatalf("viewport not set: %#v", api.lastStart.ViewPort)
 	}
 
-	statusOut, err := bt.Run(ctx, map[string]any{paramAction: actionStatus, paramSessionID: "session-1"})
+	statusOut, err := bt.Run(ctx, map[string]any{paramAction: actionStatus})
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -87,15 +90,91 @@ func TestStartStatusStopUseAgentCoreAPI(t *testing.T) {
 	if _, ok := statusOut["automation_stream_status"]; ok {
 		t.Fatal("status result leaked automation stream status")
 	}
+	if _, exists := statusOut["session_id"]; exists {
+		t.Error("status result leaked the AWS Browser session ID")
+	}
 	if aws.ToString(api.lastGet.SessionId) != "session-1" {
 		t.Errorf("get session id = %q", aws.ToString(api.lastGet.SessionId))
 	}
 
-	if _, err := bt.Run(ctx, map[string]any{paramAction: actionStop, paramSessionID: "session-1"}); err != nil {
+	stopOut, err := bt.Run(ctx, map[string]any{paramAction: actionStop})
+	if err != nil {
 		t.Fatalf("stop: %v", err)
+	}
+	if _, exists := stopOut["session_id"]; exists {
+		t.Error("stop result leaked the AWS Browser session ID")
 	}
 	if aws.ToString(api.lastStop.SessionId) != "session-1" {
 		t.Errorf("stop session id = %q", aws.ToString(api.lastStop.SessionId))
+	}
+}
+
+func TestBrowserSessionIsScopedToADKConversationAndTool(t *testing.T) {
+	t.Parallel()
+	api := &fakeAgentCoreAPI{
+		startOut: &bedrockagentcore.StartBrowserSessionOutput{SessionId: aws.String("session-1")},
+		getOut:   &bedrockagentcore.GetBrowserSessionOutput{Status: types.BrowserSessionStatusReady},
+	}
+	cfg := Config{API: api, Region: "us-east-1", Credentials: testCreds()}
+	tl, _ := New(cfg)
+	bt := tl.(*browserTool)
+	otherTool, _ := New(cfg)
+	owner := newFakeToolCtx(&fakeArtifacts{})
+	if _, err := bt.Run(owner, map[string]any{paramAction: actionStart}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	otherApp, otherUser, otherConversation := *owner, *owner, *owner
+	otherApp.appName = "other-app"
+	otherUser.userID = "other-user"
+	otherConversation.sessionID = "other-conversation"
+	for _, other := range []*fakeToolContext{&otherApp, &otherUser, &otherConversation} {
+		out, err := bt.Run(other, map[string]any{paramAction: actionStatus})
+		if err != nil || out[resultKeySessionStatus] != "NO_SESSION" {
+			t.Errorf("status for another ADK conversation = %v, %v", out, err)
+		}
+	}
+	out, err := otherTool.(*browserTool).Run(owner, map[string]any{paramAction: actionStop})
+	if err != nil || out[resultKeySessionStatus] != "NO_SESSION" {
+		t.Errorf("stop on another tool instance = %v, %v", out, err)
+	}
+	if api.lastGet != nil || api.lastStop != nil {
+		t.Fatal("an unrelated context used the AWS Browser session")
+	}
+}
+
+func TestRunRejectsSuppliedBrowserSessionID(t *testing.T) {
+	t.Parallel()
+	api := &fakeAgentCoreAPI{}
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	bt := tl.(*browserTool)
+	for _, id := range []any{"session-1", "", true, nil} {
+		_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+			paramAction:  actionStop,
+			"session_id": id,
+		})
+		if err == nil || err.Error() != "session_id is managed by the Browser tool" {
+			t.Errorf("supplied session ID %v: %v", id, err)
+		}
+	}
+	if api.lastStart != nil || api.lastGet != nil || api.lastStop != nil {
+		t.Fatal("a supplied session ID caused an AgentCore API call")
+	}
+}
+
+func TestFollowUpRequiresManagedBrowserSession(t *testing.T) {
+	t.Parallel()
+	api := &fakeAgentCoreAPI{}
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	bt := tl.(*browserTool)
+	ctx := newFakeToolCtx(&fakeArtifacts{})
+	for _, action := range []string{actionExtractText, actionScreenshot} {
+		_, err := bt.Run(ctx, map[string]any{paramAction: action})
+		if err == nil || !strings.Contains(err.Error(), "navigate") {
+			t.Errorf("%s without an active session = %v", action, err)
+		}
+	}
+	if api.lastStart != nil || api.lastGet != nil {
+		t.Fatal("a follow-up action made an AgentCore API call without an active session")
 	}
 }
 
@@ -117,6 +196,12 @@ func TestNavigateStartsSessionAndUsesCDP(t *testing.T) {
 			SessionId:         aws.String("session-1"),
 			Streams:           browserStreams(wsURL),
 		},
+		getOut: &bedrockagentcore.GetBrowserSessionOutput{
+			SessionId: aws.String("session-1"),
+			Status:    types.BrowserSessionStatusReady,
+			Streams:   browserStreams(wsURL),
+		},
+		stopOut: &bedrockagentcore.StopBrowserSessionOutput{},
 	}
 	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 	bt := tl.(*browserTool)
@@ -128,8 +213,8 @@ func TestNavigateStartsSessionAndUsesCDP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("navigate: %v", err)
 	}
-	if out[paramSessionID] != "session-1" {
-		t.Errorf("session_id = %v", out[paramSessionID])
+	if _, exists := out["session_id"]; exists {
+		t.Error("navigate result leaked the AWS Browser session ID")
 	}
 	if out["url"] != "https://example.com/after" || out["title"] != "Example" {
 		t.Errorf("metadata = url %v title %v", out["url"], out["title"])
@@ -139,6 +224,30 @@ func TestNavigateStartsSessionAndUsesCDP(t *testing.T) {
 	}
 	if continueCount.Load() != 1 {
 		t.Errorf("continued document requests = %d", continueCount.Load())
+	}
+	api.lastStart = nil
+	arts := &fakeArtifacts{}
+	for _, action := range []string{actionExtractText, actionScreenshot, actionStop} {
+		ctx := newFakeToolCtx(arts)
+		out, err := bt.Run(ctx, map[string]any{paramAction: action})
+		if err != nil {
+			t.Fatalf("%s with a new ADK tool context: %v", action, err)
+		}
+		if _, exists := out["session_id"]; exists {
+			t.Errorf("%s result leaked the AWS Browser session ID", action)
+		}
+	}
+	if api.lastStart != nil || api.lastGet == nil || api.lastStop == nil ||
+		aws.ToString(api.lastGet.SessionId) != "session-1" ||
+		aws.ToString(api.lastStop.SessionId) != "session-1" {
+		t.Fatal("follow-up actions did not reuse the navigation session")
+	}
+	if arts.savedName == "" {
+		t.Fatal("the screenshot follow-up did not save an artifact")
+	}
+	out, err = bt.Run(newFakeToolCtx(arts), map[string]any{paramAction: actionStatus})
+	if err != nil || out[resultKeySessionStatus] != "NO_SESSION" {
+		t.Errorf("status after stop = %v, %v", out, err)
 	}
 }
 
@@ -172,7 +281,6 @@ func TestNavigateOptionalStringArgumentsRejectInvalidTypes(t *testing.T) {
 	}{
 		{name: "wait_until", key: paramWaitUntil},
 		{name: "wait_for_selector", key: paramWaitForSelector},
-		{name: "session_id", key: paramSessionID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -199,39 +307,6 @@ func TestNavigateOptionalStringArgumentsRejectInvalidTypes(t *testing.T) {
 	}
 }
 
-func TestRequiredStringArgumentsRejectInvalidTypes(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name   string
-		action string
-		key    string
-	}{
-		{name: "navigate URL", action: actionNavigate, key: paramURL},
-		{name: "status session ID", action: actionStatus, key: paramSessionID},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			api := &fakeAgentCoreAPI{}
-			tl, err := New(
-				Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}},
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
-				paramAction: tc.action,
-				tc.key:      true,
-			})
-			if err == nil || !strings.Contains(err.Error(), tc.key+" must be a string") {
-				t.Fatalf("expected argument type error, got %v", err)
-			}
-			if api.lastStart != nil || api.lastGet != nil {
-				t.Fatal("AgentCore API called before argument validation")
-			}
-		})
-	}
-}
-
 func TestModelFacingStringArgumentsRejectInvalidTypes(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -245,30 +320,32 @@ func TestModelFacingStringArgumentsRejectInvalidTypes(t *testing.T) {
 			args: map[string]any{paramAction: true},
 		},
 		{
+			name: "navigate URL",
+			key:  paramURL,
+			args: map[string]any{paramAction: actionNavigate, paramURL: true},
+		},
+		{
 			name: "extract selector",
 			key:  paramSelector,
 			args: map[string]any{
-				paramAction:    actionExtractText,
-				paramSessionID: "session-1",
-				paramSelector:  true,
+				paramAction:   actionExtractText,
+				paramSelector: true,
 			},
 		},
 		{
 			name: "screenshot file name",
 			key:  paramFileName,
 			args: map[string]any{
-				paramAction:    actionScreenshot,
-				paramSessionID: "session-1",
-				paramFileName:  true,
+				paramAction:   actionScreenshot,
+				paramFileName: true,
 			},
 		},
 		{
 			name: "screenshot format",
 			key:  paramFormat,
 			args: map[string]any{
-				paramAction:    actionScreenshot,
-				paramSessionID: "session-1",
-				paramFormat:    true,
+				paramAction: actionScreenshot,
+				paramFormat: true,
 			},
 		},
 	} {
@@ -302,6 +379,7 @@ func TestExtractTextUsesWaitSelectorAsExtractionSelector(t *testing.T) {
 	api := &fakeAgentCoreAPI{getOut: &bedrockagentcore.GetBrowserSessionOutput{
 		BrowserIdentifier: aws.String("aws.browser.v1"),
 		SessionId:         aws.String("session-1"),
+		Status:            types.BrowserSessionStatusReady,
 		Streams:           browserStreams(wsURL),
 	}}
 	tl, err := New(
@@ -310,9 +388,9 @@ func TestExtractTextUsesWaitSelectorAsExtractionSelector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+	bt := tl.(*browserTool)
+	_, err = bt.Run(fakeToolCtxWithBrowserSession(t, bt, &fakeArtifacts{}), map[string]any{
 		paramAction:          actionExtractText,
-		paramSessionID:       "session-1",
 		paramWaitForSelector: "article.ready",
 	})
 	if err != nil {
@@ -335,6 +413,7 @@ func TestExtractTextGetsSessionAndTruncates(t *testing.T) {
 		getOut: &bedrockagentcore.GetBrowserSessionOutput{
 			BrowserIdentifier: aws.String("aws.browser.v1"),
 			SessionId:         aws.String("session-1"),
+			Status:            types.BrowserSessionStatusReady,
 			Streams:           browserStreams(wsURL),
 		},
 	}
@@ -349,10 +428,9 @@ func TestExtractTextGetsSessionAndTruncates(t *testing.T) {
 	)
 	bt := tl.(*browserTool)
 
-	out, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
-		paramAction:    actionExtractText,
-		paramSessionID: "session-1",
-		paramSelector:  "main",
+	out, err := bt.Run(fakeToolCtxWithBrowserSession(t, bt, &fakeArtifacts{}), map[string]any{
+		paramAction:   actionExtractText,
+		paramSelector: "main",
 	})
 	if err != nil {
 		t.Fatalf("extract_text: %v", err)
@@ -372,6 +450,7 @@ func TestExtractTextRejectsDisallowedCurrentURL(t *testing.T) {
 		getOut: &bedrockagentcore.GetBrowserSessionOutput{
 			BrowserIdentifier: aws.String("aws.browser.v1"),
 			SessionId:         aws.String("session-1"),
+			Status:            types.BrowserSessionStatusReady,
 			Streams:           browserStreams(wsURL),
 		},
 	}
@@ -383,10 +462,9 @@ func TestExtractTextRejectsDisallowedCurrentURL(t *testing.T) {
 	})
 	bt := tl.(*browserTool)
 
-	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
-		paramAction:    actionExtractText,
-		paramSessionID: "session-1",
-		paramSelector:  "main",
+	_, err := bt.Run(fakeToolCtxWithBrowserSession(t, bt, &fakeArtifacts{}), map[string]any{
+		paramAction:   actionExtractText,
+		paramSelector: "main",
 	})
 	if err == nil || !strings.Contains(err.Error(), "current url") {
 		t.Fatalf("expected current URL policy error, got %v", err)
@@ -409,6 +487,7 @@ func TestExtractTextAppliesTimeout(t *testing.T) {
 		getOut: &bedrockagentcore.GetBrowserSessionOutput{
 			BrowserIdentifier: aws.String("aws.browser.v1"),
 			SessionId:         aws.String("session-1"),
+			Status:            types.BrowserSessionStatusReady,
 			Streams:           browserStreams(wsURL),
 		},
 	}
@@ -421,9 +500,8 @@ func TestExtractTextAppliesTimeout(t *testing.T) {
 	})
 	bt := tl.(*browserTool)
 
-	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
-		paramAction:    actionExtractText,
-		paramSessionID: "session-1",
+	_, err := bt.Run(fakeToolCtxWithBrowserSession(t, bt, &fakeArtifacts{}), map[string]any{
+		paramAction: actionExtractText,
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected extract_text timeout, got %v", err)
@@ -461,6 +539,95 @@ func TestNavigateStopsAutoStartedSessionOnMetadataError(t *testing.T) {
 	if aws.ToString(api.lastStop.ClientToken) == aws.ToString(api.lastStart.ClientToken) {
 		t.Fatal("cleanup reused the start client token")
 	}
+	out, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{paramAction: actionStatus})
+	if err != nil || out[resultKeySessionStatus] != "NO_SESSION" || api.lastGet != nil {
+		t.Errorf("status after cleanup = %v, %v", out, err)
+	}
+}
+
+func TestStopRetriesFailedNavigationCleanup(t *testing.T) {
+	t.Parallel()
+	cleanupErr := errors.New("temporary stop failure")
+	wsURL := fakeCDPServer(t, "Runtime.evaluate.exception")
+	api := &fakeAgentCoreAPI{
+		startOut: &bedrockagentcore.StartBrowserSessionOutput{
+			SessionId: aws.String("session-1"),
+			Streams:   browserStreams(wsURL),
+		},
+		stopOut: &bedrockagentcore.StopBrowserSessionOutput{},
+		stopErr: cleanupErr,
+	}
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
+	bt := tl.(*browserTool)
+	ctx := newFakeToolCtx(&fakeArtifacts{})
+	_, err := bt.Run(ctx, map[string]any{paramAction: actionNavigate, paramURL: "https://example.com"})
+	if !errors.Is(err, cleanupErr) {
+		t.Fatalf("navigate error = %v", err)
+	}
+	api.stopErr = nil
+	api.lastStop = nil
+	if _, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{paramAction: actionStop}); err != nil {
+		t.Fatalf("retry stop: %v", err)
+	}
+	if api.lastStop == nil || aws.ToString(api.lastStop.SessionId) != "session-1" {
+		t.Fatalf("retry did not stop the tracked session: %v", api.lastStop)
+	}
+}
+
+func TestNavigateReplacesStaleBrowserSession(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		getErr error
+	}{
+		{name: "terminated"},
+		{name: "resource not found", getErr: &types.ResourceNotFoundException{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			wsURL := fakeCDPServer(t, "")
+			api := &fakeAgentCoreAPI{
+				getOut: &bedrockagentcore.GetBrowserSessionOutput{Status: types.BrowserSessionStatusTerminated},
+				getErr: tc.getErr,
+				startOut: &bedrockagentcore.StartBrowserSessionOutput{
+					SessionId: aws.String("session-2"),
+					Streams:   browserStreams(wsURL),
+				},
+			}
+			tl, _ := New(Config{
+				API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"},
+			})
+			bt := tl.(*browserTool)
+			ctx := fakeToolCtxWithBrowserSession(t, bt, &fakeArtifacts{})
+			out, err := bt.Run(ctx, map[string]any{paramAction: actionNavigate, paramURL: "https://example.com"})
+			if err != nil || out[resultKeyStatus] != statusSuccess {
+				t.Fatalf("navigate with stale session = %v, %v", out, err)
+			}
+			if api.lastStart == nil || api.lastGet == nil || aws.ToString(api.lastGet.SessionId) != "session-1" {
+				t.Fatal("navigation did not replace the stale session")
+			}
+		})
+	}
+}
+
+func TestRunRejectsOverlappingActionsForConversation(t *testing.T) {
+	t.Parallel()
+	api := &fakeAgentCoreAPI{}
+	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
+	bt := tl.(*browserTool)
+	_, release, err := bt.acquireSession(newFakeToolCtx(&fakeArtifacts{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	_, err = bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{paramAction: actionStart})
+	if err == nil || !strings.Contains(err.Error(), "Browser action is already in progress") {
+		t.Fatalf("overlapping start = %v", err)
+	}
+	if api.lastStart != nil {
+		t.Fatal("overlapping action created another Browser session")
+	}
 }
 
 func TestCleanupStartedSessionIgnoresCallerCancellation(t *testing.T) {
@@ -482,7 +649,7 @@ func TestCleanupStartedSessionIgnoresCallerCancellation(t *testing.T) {
 	}
 	cause := errors.New("navigation failed")
 
-	err := bt.cleanupStartedSession(ctx, "session-1", cause)
+	err := bt.cleanupStartedSession(ctx, &browserSession{id: "session-1"}, cause)
 	if !errors.Is(err, cause) {
 		t.Fatalf("cleanup error = %v", err)
 	}
@@ -582,6 +749,7 @@ func TestScreenshotRejectsDisallowedCurrentURLBeforeSaving(t *testing.T) {
 		getOut: &bedrockagentcore.GetBrowserSessionOutput{
 			BrowserIdentifier: aws.String("aws.browser.v1"),
 			SessionId:         aws.String("session-1"),
+			Status:            types.BrowserSessionStatusReady,
 			Streams:           browserStreams(wsURL),
 		},
 	}
@@ -594,9 +762,8 @@ func TestScreenshotRejectsDisallowedCurrentURLBeforeSaving(t *testing.T) {
 	})
 	bt := tl.(*browserTool)
 
-	_, err := bt.Run(newFakeToolCtx(arts), map[string]any{
-		paramAction:    actionScreenshot,
-		paramSessionID: "session-1",
+	_, err := bt.Run(fakeToolCtxWithBrowserSession(t, bt, arts), map[string]any{
+		paramAction: actionScreenshot,
 	})
 	if err == nil || !strings.Contains(err.Error(), "current url") {
 		t.Fatalf("expected current URL policy error, got %v", err)
@@ -622,6 +789,7 @@ func TestScreenshotAppliesTimeout(t *testing.T) {
 		getOut: &bedrockagentcore.GetBrowserSessionOutput{
 			BrowserIdentifier: aws.String("aws.browser.v1"),
 			SessionId:         aws.String("session-1"),
+			Status:            types.BrowserSessionStatusReady,
 			Streams:           browserStreams(wsURL),
 		},
 	}
@@ -633,9 +801,8 @@ func TestScreenshotAppliesTimeout(t *testing.T) {
 	})
 	bt := tl.(*browserTool)
 
-	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
-		paramAction:    actionScreenshot,
-		paramSessionID: "session-1",
+	_, err := bt.Run(fakeToolCtxWithBrowserSession(t, bt, &fakeArtifacts{}), map[string]any{
+		paramAction: actionScreenshot,
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected screenshot timeout, got %v", err)
@@ -652,6 +819,7 @@ func TestScreenshotSavesArtifact(t *testing.T) {
 		getOut: &bedrockagentcore.GetBrowserSessionOutput{
 			BrowserIdentifier: aws.String("aws.browser.v1"),
 			SessionId:         aws.String("session-1"),
+			Status:            types.BrowserSessionStatusReady,
 			Streams:           browserStreams(wsURL),
 		},
 	}
@@ -659,11 +827,10 @@ func TestScreenshotSavesArtifact(t *testing.T) {
 	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 	bt := tl.(*browserTool)
 
-	out, err := bt.Run(newFakeToolCtx(arts), map[string]any{
-		paramAction:    actionScreenshot,
-		paramSessionID: "session-1",
-		paramFileName:  "page.jpg",
-		paramFormat:    "jpg",
+	out, err := bt.Run(fakeToolCtxWithBrowserSession(t, bt, arts), map[string]any{
+		paramAction:   actionScreenshot,
+		paramFileName: "page.jpg",
+		paramFormat:   "jpg",
 	})
 	if err != nil {
 		t.Fatalf("screenshot: %v", err)
@@ -723,6 +890,7 @@ func TestScreenshotOptions(t *testing.T) {
 			api := &fakeAgentCoreAPI{getOut: &bedrockagentcore.GetBrowserSessionOutput{
 				BrowserIdentifier: aws.String("aws.browser.v1"),
 				SessionId:         aws.String("session-1"),
+				Status:            types.BrowserSessionStatusReady,
 				Streams:           browserStreams(wsURL),
 			}}
 			tl, err := New(
@@ -731,9 +899,10 @@ func TestScreenshotOptions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			args := map[string]any{paramAction: actionScreenshot, paramSessionID: "session-1"}
+			args := map[string]any{paramAction: actionScreenshot}
 			maps.Copy(args, tc.args)
-			if _, err := tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), args); err != nil {
+			bt := tl.(*browserTool)
+			if _, err := bt.Run(fakeToolCtxWithBrowserSession(t, bt, &fakeArtifacts{}), args); err != nil {
 				t.Fatalf("screenshot: %v", err)
 			}
 			params := <-captured
@@ -772,7 +941,7 @@ func TestScreenshotOptionValidation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			args := map[string]any{paramAction: actionScreenshot, paramSessionID: "session-1"}
+			args := map[string]any{paramAction: actionScreenshot}
 			maps.Copy(args, tc.args)
 			_, err = tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), args)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -803,6 +972,7 @@ func TestScreenshotSizeLimit(t *testing.T) {
 			api := &fakeAgentCoreAPI{getOut: &bedrockagentcore.GetBrowserSessionOutput{
 				BrowserIdentifier: aws.String("aws.browser.v1"),
 				SessionId:         aws.String("session-1"),
+				Status:            types.BrowserSessionStatusReady,
 				Streams:           browserStreams(wsURL),
 			}}
 			arts := &fakeArtifacts{}
@@ -816,9 +986,9 @@ func TestScreenshotSizeLimit(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = tl.(*browserTool).Run(newFakeToolCtx(arts), map[string]any{
-				paramAction:    actionScreenshot,
-				paramSessionID: "session-1",
+			bt := tl.(*browserTool)
+			_, err = bt.Run(fakeToolCtxWithBrowserSession(t, bt, arts), map[string]any{
+				paramAction: actionScreenshot,
 			})
 			if tc.wantError {
 				if err == nil || !strings.Contains(err.Error(), "MaxScreenshotBytes") {
@@ -845,9 +1015,8 @@ func TestScreenshotInfersFormatAndRejectsArtifactPaths(t *testing.T) {
 	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds()})
 	bt := tl.(*browserTool)
 	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
-		paramAction:    actionScreenshot,
-		paramSessionID: "session-1",
-		paramFileName:  "screenshots/page.png",
+		paramAction:   actionScreenshot,
+		paramFileName: "screenshots/page.png",
 	})
 	if err == nil || !strings.Contains(err.Error(), "path separators") {
 		t.Fatalf("expected artifact path error, got %v", err)
@@ -856,18 +1025,16 @@ func TestScreenshotInfersFormatAndRejectsArtifactPaths(t *testing.T) {
 		t.Fatal("browser session fetched before file_name validation")
 	}
 	_, err = bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
-		paramAction:    actionScreenshot,
-		paramSessionID: "session-1",
-		paramFileName:  "page.png",
-		paramFormat:    screenshotFormatJPEG,
+		paramAction:   actionScreenshot,
+		paramFileName: "page.png",
+		paramFormat:   screenshotFormatJPEG,
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("expected artifact extension error, got %v", err)
 	}
 	_, err = bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
-		paramAction:    actionScreenshot,
-		paramSessionID: "session-1",
-		paramFileName:  "page.gif",
+		paramAction:   actionScreenshot,
+		paramFileName: "page.gif",
 	})
 	if err == nil || !strings.Contains(err.Error(), "unsupported extension") {
 		t.Fatalf("expected unsupported artifact extension error, got %v", err)

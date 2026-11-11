@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore/types"
 	"github.com/coder/websocket"
 )
 
@@ -301,6 +303,55 @@ func TestNavigateAppliesHostPolicyToSubresources(t *testing.T) {
 			}
 			if !tc.wantError && err != nil {
 				t.Fatalf("navigate: %v", err)
+			}
+		})
+	}
+}
+
+func TestNavigateBlocksExtensionRequests(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		serverMode string
+		requestID  string
+		wantError  bool
+	}{
+		{name: "subresource", serverMode: "Page.navigate.extensionSubresource", requestID: "request-2"},
+		{name: "document", serverMode: "Page.navigate.extensionDocument", requestID: "request-1", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			type requestCommand struct{ method, requestID string }
+			var commands sync.Map
+			wsURL := fakeCDPServerWithHook(t, tc.serverMode, func(method string, params map[string]any) {
+				requestID, _ := params[cdpKeyRequestID].(string)
+				reason, _ := params["errorReason"].(string)
+				commands.Store(requestCommand{method, requestID}, reason)
+			})
+			api := &fakeAgentCoreAPI{startOut: &bedrockagentcore.StartBrowserSessionOutput{
+				SessionId: aws.String("session-1"),
+				Streams:   browserStreams(wsURL),
+			}}
+			tl, _ := New(Config{
+				API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"},
+			})
+
+			out, err := tl.(*browserTool).Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
+				paramAction: actionNavigate,
+				paramURL:    "https://example.com",
+			})
+			if (err != nil) != tc.wantError {
+				t.Fatalf("navigate error = %v, want error = %v", err, tc.wantError)
+			}
+			if !tc.wantError && out[paramURL] != "https://example.com/after" {
+				t.Errorf("navigation returned URL %v", out[paramURL])
+			}
+			reason, _ := commands.Load(requestCommand{"Fetch.failRequest", tc.requestID})
+			if reason != "BlockedByClient" {
+				t.Errorf("blocked request %s reason = %v", tc.requestID, reason)
+			}
+			if _, continued := commands.Load(requestCommand{"Fetch.continueRequest", tc.requestID}); continued {
+				t.Errorf("continued denied request %s", tc.requestID)
 			}
 		})
 	}
@@ -765,16 +816,16 @@ func TestExtractTextReturnsRuntimeEvaluateException(t *testing.T) {
 		getOut: &bedrockagentcore.GetBrowserSessionOutput{
 			BrowserIdentifier: aws.String("aws.browser.v1"),
 			SessionId:         aws.String("session-1"),
+			Status:            types.BrowserSessionStatusReady,
 			Streams:           browserStreams(wsURL),
 		},
 	}
 	tl, _ := New(Config{API: api, Region: "us-east-1", Credentials: testCreds(), AllowedHosts: []string{"example.com"}})
 	bt := tl.(*browserTool)
 
-	_, err := bt.Run(newFakeToolCtx(&fakeArtifacts{}), map[string]any{
-		paramAction:    actionExtractText,
-		paramSessionID: "session-1",
-		paramSelector:  "[",
+	_, err := bt.Run(fakeToolCtxWithBrowserSession(t, bt, &fakeArtifacts{}), map[string]any{
+		paramAction:   actionExtractText,
+		paramSelector: "[",
 	})
 	if err == nil || !strings.Contains(err.Error(), "SyntaxError: invalid selector") {
 		t.Fatalf("expected runtime exception, got %v", err)
@@ -791,6 +842,7 @@ func TestScreenshotRejectsRedirectAfterCapture(t *testing.T) {
 		getOut: &bedrockagentcore.GetBrowserSessionOutput{
 			BrowserIdentifier: aws.String("aws.browser.v1"),
 			SessionId:         aws.String("session-1"),
+			Status:            types.BrowserSessionStatusReady,
 			Streams:           browserStreams(wsURL),
 		},
 	}
@@ -803,9 +855,8 @@ func TestScreenshotRejectsRedirectAfterCapture(t *testing.T) {
 	})
 	bt := tl.(*browserTool)
 
-	_, err := bt.Run(newFakeToolCtx(arts), map[string]any{
-		paramAction:    actionScreenshot,
-		paramSessionID: "session-1",
+	_, err := bt.Run(fakeToolCtxWithBrowserSession(t, bt, arts), map[string]any{
+		paramAction: actionScreenshot,
 	})
 	if err == nil || !strings.Contains(err.Error(), "current url after capture") {
 		t.Fatalf("expected post-capture URL policy error, got %v", err)
