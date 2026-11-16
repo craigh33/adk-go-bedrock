@@ -10,7 +10,7 @@ import (
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/adk/v2/tool/functiontool"
 
-	browsermappers "github.com/craigh33/adk-go-bedrock/internal/agentcore/mappers/browser"
+	browsermappers "github.com/craigh33/adk-go-bedrock/internal/mappers/agentcore/browser"
 )
 
 type browsePageArgs struct {

@@ -12,7 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcore/types"
 	"google.golang.org/adk/v2/agent"
 
-	browsermappers "github.com/craigh33/adk-go-bedrock/internal/agentcore/mappers/browser"
+	browsermappers "github.com/craigh33/adk-go-bedrock/internal/mappers/agentcore/browser"
 )
 
 type conversationKey struct {
